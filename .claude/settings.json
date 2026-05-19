@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -m evaluator.grade plan:*)",
+      "Bash(.venv/Scripts/python.exe -m evaluator.grade report:*)",
+      "Bash(.venv/Scripts/python.exe -m evaluator.prep survey:*)",
+      "Bash(.venv/Scripts/python.exe -m evaluator.prep sync:*)",
+      "Bash(ls:*)",
+      "Bash(test:*)",
+      "Bash([ -e:*)",
+      "Bash([ -f:*)",
+      "Bash([ -d:*)",
+      "Read(.tmp/grades/**)",
+      "Write(.tmp/grades/**)",
+      "Edit(.tmp/grades/**)",
+      "Read(grades/**)",
+      "Write(grades/**)",
+      "Edit(grades/**)",
+      "Read(exercises/**)",
+      "Write(exercises/**)",
+      "Edit(exercises/**)"
+    ]
+  }
+}

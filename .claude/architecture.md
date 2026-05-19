@@ -1,0 +1,133 @@
+# Architecture
+
+## Goal
+
+Automate evaluation of SnapLogic training exercises. The system must
+scale to exercises that admit many correct solutions, which means the
+final judgment has to come from a model rather than a hand-coded rubric.
+
+## Two-layer evaluation
+
+1. **Hard gates (deterministic)** — cheap, fast, fail-closed. Implemented
+   in `evaluator/`, invoked via `python -m evaluator <slug> --student ...`.
+   - Pipeline name must exactly match the solution's.
+   - The output file (CSV today, other types later) must exactly match
+     the solution's output (header + row multiset).
+   If either fails, the run aborts and writes a `verdict: "fail"`
+   `evaluation.json` with the failing gate and detail. No AI step.
+
+2. **AI judgment** — a **Claude Code skill** (`.claude/skills/grade/SKILL.md`),
+   not an API call. When the user invokes `/grade <student>`, Claude (the
+   model running in their Pro session) reads
+   `.tmp/grades/<student>/<slug>/ai_context.json` for each exercise whose
+   hard gates passed and produces the verdict directly. No Anthropic API
+   key, no per-evaluation cost.
+
+This split keeps the system simple AND auditable: the deterministic
+layer catches the unambiguous failures (cheap and explainable), the AI
+layer handles judgment calls (where rule-based code would have been
+brittle).
+
+## Why a skill, not an API call
+
+The original design called Anthropic's API from Python. That requires
+an API key billed per-token, separate from the user's Claude Code Pro
+subscription. Pivoting the judgment step into a skill means:
+
+- The user's existing Pro subscription covers all evaluations.
+- Prompt iteration is editing markdown, not redeploying code.
+- The Python orchestrator becomes strictly deterministic — easier to
+  reason about, easier to test.
+
+The trade-off: the system can't run headless (e.g., a nightly CI job
+evaluating 50 students). When/if that becomes necessary, the AI step
+can be re-implemented in Python alongside the skill. The data interface
+(`.tmp/grades/<student>/<slug>/ai_context.json` in,
+`.tmp/grades/<student>/<slug>/evaluation.json` out) is already designed
+to accept either implementation.
+
+## Canonical pipeline form
+
+We do **not** maintain an internal `PipelineIR` Pydantic model. The
+canonical form is the raw JSON returned by the SnapLogic REST API. The
+solution copy is cached in the repo at `exercises/<slug>/solution.json`
+(committed) with a `solution.cache.json` sidecar storing the asset's
+modified-at signature; we only refetch the body when the signature
+changes. The student copy is fetched fresh per run to
+`.tmp/grades/<student>/<slug>/student/<name>.pipeline.json`.
+
+Note: **never reason about snap execution order from `snap_map`**.
+`snap_map` is a UUID-keyed dict; its iteration order is insertion order,
+not flow order. Real execution flow lives in `link_map`. Use
+`pipeline_fetch.flow_order()` / `flow_order_summary()` which Kahn-topo-sort
+the link graph. (Bug fixed 2026-05-18 after the AI inferred order from
+`snap_map` and got it wrong.)
+
+## SnapLogic API usage
+
+The client is **GET-only** by construction. Endpoints validated against
+`elastic.snaplogic.com`:
+
+- `GET /api/1/rest/asset/list/{org}/{ps}/{project}` → asset entries.
+- `GET /api/1/rest/asset/{org}/{ps}/{project}/{name}` → asset metadata.
+- `GET /api/1/rest/pipeline/{snode_id}` → full pipeline definition.
+- `GET /api/1/rest/slfs/{org}/{ps}/{project}/{file}` (with `Accept: */*`,
+  the default `application/json` triggers a 406) → file content from SLDB.
+
+The Public-API `/catalog/...` endpoint is a paid feature; we don't use it.
+
+## Why no pipeline execution
+
+Exercises like Task 01 have no Triggered Task and we don't assume one
+is set up for every student submission. Instead we fetch the already-
+produced CSV from SLDB for both solution and student. Execution-based
+comparison is reserved for future exercises that have triggers — the
+client can be extended, but it's not implemented today.
+
+## Per-exercise registration
+
+Each exercise lives at `exercises/<slug>/` with:
+- `task.json` (required) — `{ solution_pipeline_path, output_csv_filename }`
+- `description.md` (required) — student-facing prompt
+- `notes.md` (optional) — instructor hints fed to the AI judge
+
+The Python loader (`evaluator/tasks.py`) globs `exercises/*/task.json`.
+Adding a new exercise = drop a folder. No code changes.
+
+## CLI surface
+
+Python orchestrator (deterministic only):
+```
+python -m evaluator <task_slug> --student "Org/PS/Project/Name" [--refresh-solution] [--student-name <name>]
+```
+
+Claude Code skill (full flow, one student, all exercises):
+```
+/grade <student name>
+/grade --space <project space> <student name>
+```
+
+Outputs:
+- `exercises/<slug>/solution.json` + `solution.cache.json` — repo-cached
+  solution pipeline JSON and its signature sidecar. Committed to git.
+- `exercises/<slug>/expected/<csv>` — golden output for the current writer
+  filename. `/prep` deletes any other files in `expected/` during reconcile,
+  so stale CSVs from renamed writers don't accumulate.
+- `grades/<student>/report.md` — **persistent** aggregated human-readable
+  report. Only file that survives a `/grade` run.
+- `.tmp/grades/<student>/...` — **scratch only**, deleted at the end of
+  `evaluator.grade report`. Holds (during a run):
+  - `manifest.json` — per-run task index consumed by the skill.
+  - `<slug>/ai_context.json` — bundle the skill consumes when hard gates pass.
+  - `<slug>/evaluation.json` — per-exercise verdict produced by the skill.
+  - `<slug>/student/` — fetched student pipeline JSON + student CSV.
+
+## Future expansion points
+
+- Pipeline execution + output capture for triggered exercises.
+- Bulk mode (grade an entire project space at once) — already partly
+  feasible by globbing student projects.
+- Pull SnapLogic's "Check pipeline quality" Public API output into the
+  AI context bundle.
+- Re-add an API-based AI path for headless/CI use without breaking the
+  skill flow (both can read the same `ai_context.json`).
