@@ -41,8 +41,8 @@ def load_settings() -> Settings:
         username=req("SNAPLOGIC_ADMIN_USERNAME"),
         password=req("SNAPLOGIC_ADMIN_PASSWORD"),
         org_name=req("SNAPLOGIC_ORG_NAME"),
-        project_space_name=req("SNAPLOGIC_PROJECT_SPACE_NAME"),
-        project_name=req("SNAPLOGIC_PROJECT_NAME"),
+        project_space_name=req("SNAPLOGIC_SOLUTION_PROJECT_SPACE"),
+        project_name=req("SNAPLOGIC_SOLUTION_PROJECT"),
         student_project_space_name=os.environ.get(
             "SNAPLOGIC_STUDENT_PROJECT_SPACE", "IWC_Support"
         ).strip()
