@@ -21,13 +21,28 @@ Every failure is a chance to make the system stronger:
 
 This loop is how the framework improves over time.
 
+## Where to record new findings and rules
+
+When something new is worth remembering across sessions, default to writing it into `.claude/` rather than auto-memory. Auto-memory loads conditionally; `.claude/*.md` and `CLAUDE.md` load every session and are visible to teammates.
+
+- **Project-wide rule or convention** ("from now on, do X"; "never do Y") → create `.claude/conventions/<slug>.md` (frontmatter `name`, `description`, `scope: project-wide`).
+- **Skill-specific behavior rule** ("/grade should not X") → create `.claude/conventions/<skill>-<slug>.md` (frontmatter `scope: skill:<name>`).
+- **Architectural decision or design rationale** → add to [.claude/architecture.md](architecture.md).
+- **Project framing / philosophy / environment** → add to [.claude/project.md](project.md).
+- **SnapLogic REST API discovery** (endpoint works / doesn't work, response shape, gotcha) → add to [.claude/snaplogic_api_findings.md](snaplogic_api_findings.md).
+- **A new category of finding** that doesn't fit any existing file → create a new `.claude/<topic>.md`.
+
+Reserve auto-memory for: the user's personal preferences and role, ephemeral project state (deadlines, in-flight work), and breadcrumbs that preserve the user's quotes / incident context behind a `.claude/` rule.
+
+When in doubt: write it to `.claude/`. Duplication into memory is unnecessary — auto-memory entries should be short pointers to the canonical `.claude/` location, not copies.
+
 ---
 
-# Skill conventions
+# Conventions
 
-## /grade
+All project-wide and skill-scoped rules live in their own files under [.claude/conventions/](conventions/). Read the relevant file when a rule applies. Skill workflows themselves live in the SKILL.md under [.claude/skills/](skills/); background architecture / project framing lives in [.claude/architecture.md](architecture.md) and [.claude/project.md](project.md).
 
-When running the `/grade` skill, do not write per-task summaries, recommendations, or overview paragraphs in chat. The user reads everything from the rendered `grades/<student>/report.md`. End the run with a single short sentence (e.g. `Grading completed.`). Do not ask for confirmation before running the `plan` or `report` subcommands — the skill invocation is the authorization.
+When you add a new convention, create `.claude/conventions/<slug>.md` with frontmatter `name`, `description`, and `scope` (`project-wide`, or `skill:<name>` for skill-scoped rules — prefix the slug with the skill name in that case, e.g. `grade-no-recommendations.md`).
 
 ---
 

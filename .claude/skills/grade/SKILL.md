@@ -69,12 +69,11 @@ Run:
 .venv/Scripts/python.exe -m evaluator.grade report "<student>" [--space "<project_space>"]
 ```
 
-This writes `grades/<student>/report.md` (the persistent location, outside `.tmp/`) with all per-task sections rendered from the per-task `evaluation.json` files, then deletes `.tmp/grades/<student>/` — only the report.md survives. Two sections in the report contain placeholder TODO comments — `## Overall` and `## Recommendations`. Use the `Edit` tool to replace each TODO comment in `grades/<student>/report.md`:
+This writes `grades/<student>/report.md` (the persistent location, outside `.tmp/`) with all per-task sections rendered from the per-task `evaluation.json` files, then deletes `.tmp/grades/<student>/` — only the report.md survives. The report contains one placeholder TODO comment — `## Overall`. Use the `Edit` tool to replace it in `grades/<student>/report.md`:
 
 - `## Overall`: one paragraph summarizing the submission. Flag patterns across tasks (e.g. "consistently swaps filter/sort order").
-- `## Recommendations`: actionable bullets for the student.
 
-After step 3 runs, the per-task `ai_context.json` and `evaluation.json` files are gone. You don't need them — fill in the two prose sections from the conversation context you already have.
+After step 3 runs, the per-task `ai_context.json` and `evaluation.json` files are gone. You don't need them — fill in the Overall paragraph from the conversation context you already have.
 
 ### 4. Tell the user
 
