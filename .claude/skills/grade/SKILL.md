@@ -1,21 +1,28 @@
 ---
 name: grade
-description: Grade a SnapLogic student's exercises by comparing each of their pipelines against the official solution. Usage — /grade <student name>  OR  /grade --space <project space> <student name>. Iterates every exercise registered in exercises/<slug>/task.json, runs deterministic hard gates via the Python evaluator (supports both csv_writer and triggered_task exercises), performs AI judgment on each one whose hard gates passed, and produces an aggregated Markdown report at grades/<student>/report.md.
+description: Grade a SnapLogic student's exercises by comparing each of their pipelines against the official solution. Usage — /grade <student name>  OR  /grade --space <project space> <student name>  OR  /grade <student name> --task <slug> (grade only one exercise, updating that task's section in the existing report in place). Iterates every exercise registered in exercises/<slug>/task.json, runs deterministic hard gates via the Python evaluator (supports both csv_writer and triggered_task exercises), performs AI judgment on each one whose hard gates passed, and produces an aggregated Markdown report at grades/<student>/report.md.
 ---
 
 # /grade — Skill workflow
 
 You (Claude) are the AI judge. A Python orchestrator handles every deterministic step (project lookup, pipeline name match, hard gates, report rendering). Your job is to judge the tasks whose hard gates passed and to fill in two short prose sections at the end.
 
+This skill supports two modes:
+
+- **Full grading** (default): evaluate every registered exercise, write a fresh `grades/<student>/report.md`, and ask you to fill in the `## Overall` paragraph.
+- **Single-task grading** (`--task <slug>`): evaluate only one exercise. The Python `report` step updates just that task's section in the existing report.md in place — the header, counts, date, and `## Overall` are left untouched. If no report exists yet, a minimal single-task one is created (no `## Overall` placeholder). You do NOT write an Overall paragraph in single-task mode.
+
 ## Steps
 
 ### 1. Plan
 
-Parse `<student>` and optional `--space <project_space>` from the invocation. Then run:
+Parse `<student>`, optional `--space <project_space>`, and optional `--task <slug>` from the invocation. Then run:
 
 ```
-.venv/Scripts/python.exe -m evaluator.grade plan "<student>" [--space "<project_space>"]
+.venv/Scripts/python.exe -m evaluator.grade plan "<student>" [--space "<project_space>"] [--task "<slug>"]
 ```
+
+When `--task` is supplied, the manifest will contain exactly one entry (the target slug). Validate that the slug matches a folder under `exercises/` before invoking — `plan` will return exit 2 with a "No exercise folder named …" error if not.
 
 This writes `.tmp/grades/<student>/manifest.json` listing each task with one of:
 - `status: "ready_for_ai"` → hard gates passed; you must judge it (step 2).
@@ -67,24 +74,26 @@ When `task_type == "triggered_task"`, the bundle also contains:
 
 ### 3. Render report
 
-Run:
+Run (pass the same `--task` you passed to `plan`, if any):
 
 ```
-.venv/Scripts/python.exe -m evaluator.grade report "<student>" [--space "<project_space>"]
+.venv/Scripts/python.exe -m evaluator.grade report "<student>" [--space "<project_space>"] [--task "<slug>"]
 ```
 
-This writes `grades/<student>/report.md` (the persistent location, outside `.tmp/`) with all per-task sections rendered from the per-task `evaluation.json` files, then deletes `.tmp/grades/<student>/` — only the report.md survives. The report contains one placeholder TODO comment — `## Overall`. Use the `Edit` tool to replace it in `grades/<student>/report.md`:
+**Full mode** (no `--task`): writes `grades/<student>/report.md` (the persistent location, outside `.tmp/`) with all per-task sections rendered from the per-task `evaluation.json` files, then deletes `.tmp/grades/<student>/` — only the report.md survives. The report contains one placeholder TODO comment — `## Overall`. Use the `Edit` tool to replace it in `grades/<student>/report.md`:
 
 - `## Overall`: one paragraph summarizing the submission. Flag patterns across tasks (e.g. "consistently swaps filter/sort order").
 
-After step 3 runs, the per-task `ai_context.json` and `evaluation.json` files are gone. You don't need them — fill in the Overall paragraph from the conversation context you already have.
+After step 3 runs in full mode, the per-task `ai_context.json` and `evaluation.json` files are gone. You don't need them — fill in the Overall paragraph from the conversation context you already have.
+
+**Single-task mode** (`--task <slug>`): replaces only that task's `## <slug> — …` section in the existing `grades/<student>/report.md`, leaving the header, counts, date, and `## Overall` untouched. If no report exists yet, a minimal single-task report is written instead (no `## Overall` placeholder). Do NOT write or edit an `## Overall` paragraph in this mode — the existing one (if any) is intentionally preserved, and a single-task re-grade should not claim to have re-evaluated the whole submission. The `.tmp/grades/<student>/` scratch dir is still cleaned up after.
 
 ### 4. Tell the user
 
 Print to chat:
-- One line per task: `<slug> → <verdict>` (the `report` subcommand already prints this — relay it).
+- One line per task: `<slug> → <verdict>` (the `report` subcommand already prints this — relay it). In single-task mode this is one line.
 - The report path: `grades/<student>/report.md`.
-- One sentence of overall guidance.
+- One sentence of overall guidance. In single-task mode, mention that only that one section was updated and the rest of the report (including `## Overall`) is unchanged.
 
 ## Notes
 

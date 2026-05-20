@@ -5,6 +5,7 @@
       "Bash(.venv/Scripts/python.exe -m evaluator.grade report:*)",
       "Bash(.venv/Scripts/python.exe -m evaluator.prep survey:*)",
       "Bash(.venv/Scripts/python.exe -m evaluator.prep sync:*)",
+      "Bash(.venv/Scripts/python.exe -c:*)",
       "Bash(ls:*)",
       "Bash(test:*)",
       "Bash([ -e:*)",

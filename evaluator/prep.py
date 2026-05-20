@@ -464,7 +464,7 @@ def _classify_triggered_task(
     )
 
 
-def cmd_survey() -> int:
+def cmd_survey(slug_filter: str | None = None) -> int:
     try:
         settings = load_settings()
     except RuntimeError as e:
@@ -473,6 +473,15 @@ def cmd_survey() -> int:
         return 2
 
     folders = list_exercise_folders()
+    if slug_filter is not None:
+        if slug_filter not in folders:
+            print(
+                f"ERROR: No exercise folder named {slug_filter!r}. Known: {folders}",
+                file=sys.stderr,
+            )
+            return 2
+        folders = [slug_filter]
+
     print(
         f"Solution project: {settings.org_name}/{settings.project_space_name}/{settings.project_name}"
     )
@@ -711,9 +720,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
-    subparsers.add_parser(
+    p_survey = subparsers.add_parser(
         "survey",
         help="Classify every exercise folder. Read-only.",
+    )
+    p_survey.add_argument(
+        "--slug",
+        default=None,
+        help="Limit survey to a single folder (folder name under exercises/).",
     )
     p_sync = subparsers.add_parser(
         "sync",
@@ -736,7 +750,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.cmd == "survey":
-        return cmd_survey()
+        return cmd_survey(args.slug)
     if args.cmd == "sync":
         return cmd_sync(args.slug, args.output_csv)
     parser.error(f"Unknown subcommand: {args.cmd}")

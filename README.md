@@ -7,11 +7,33 @@ rather than a rubric.
 
 ## What it does
 
-You invoke a single slash command in Claude Code:
+Two slash commands in Claude Code:
 
 ```
-/grade Gabriela Shurbeska
+/prep                          # reconcile every exercise folder against SnapLogic
+/grade Gabriela Shurbeska      # grade one student against the registered exercises
 ```
+
+### `/prep` — keep exercise folders in sync with SnapLogic
+
+The `prep` skill walks `exercises/`, reads the canonical pipeline name from each
+folder's `description.md` H1 heading, looks the pipeline up in the solution
+project space, and reconciles local files against the live SnapLogic state:
+
+- Auto-creates `task.json` for **csv_writer** exercises (writer filename is
+  derived from the binary-write snap).
+- Asks the operator to hand-write `task.json` for **triggered_task** exercises
+  (the script can't derive the Triggered Task name or scenarios).
+- Detects pipeline renames, writer-filename renames, and stale solution caches;
+  rewrites `solution.json`, `solution.cache.json`, and `expected/` to match.
+- Prunes obsolete files in `expected/`, keeping only the current outputs.
+
+Run `/prep` whenever you add a new exercise folder or edit a solution pipeline.
+`/grade` refuses to grade folders that are not fully prepped.
+
+`/prep --task <slug>` surveys and reconciles just one folder.
+
+### `/grade` — grade a student
 
 The `grade` skill then:
 
@@ -20,11 +42,14 @@ The `grade` skill then:
 2. Discovers every registered exercise from `exercises/*/task.json`.
 3. For each exercise, runs the deterministic Python evaluator which:
    - Fetches both the solution pipeline and the student's pipeline (GET-only).
-   - Applies hard gates: pipeline name match, output CSV match.
+   - Applies hard gates: pipeline name match (dash-tolerant) and **either**
+     output CSV match (csv_writer) **or** Triggered Task name match plus
+     per-scenario JSON response match (triggered_task).
    - On hard-gate fail → writes a complete `evaluation.json` and stops.
    - On hard-gate pass → writes an `ai_context.json` bundle (description,
      instructor notes, topologically-sorted snap flows, both raw pipeline
-     JSONs) and emits `READY_FOR_AI_REVIEW`.
+     JSONs, plus per-scenario request/response pairs for triggered_task) and
+     emits `READY_FOR_AI_REVIEW`.
 4. The skill picks up from there: reads the context bundle, judges
    structural differences in-conversation, and writes the final
    `evaluation.json`. **The AI step runs inside your Claude Code session
@@ -32,6 +57,21 @@ The `grade` skill then:
 5. Composes `grades/<student>/report.md` aggregating every exercise. Scratch
    artifacts under `.tmp/grades/<student>/` are deleted at the end of the run —
    only `report.md` persists.
+
+`/grade <student> --task <slug>` re-grades a single exercise and updates only
+that task's section in the existing `report.md` in place — the header, counts,
+date, and `## Overall` paragraph are left untouched.
+
+### Pipeline-name matching: dash-tolerant for pipelines, strict for Triggered Tasks
+
+The SnapLogic Designer freely substitutes hyphen-minus (`-`), en dash (`–`),
+and em dash (`—`) in pipeline names. The pipeline-name hard gate treats all
+three glyphs as equal, so `Task 03 – Join Employee Records` (en dash) matches
+`Task 03 - Join Employee Records` (hyphen).
+
+Triggered Task names, by contrast, are matched **strictly** (byte-for-byte) —
+the URL is computed from the exact string and any normalization there would
+silently route to the wrong task.
 
 ## Project layout
 
@@ -43,28 +83,45 @@ The `grade` skill then:
 ├── requirements.txt
 ├── .env.example                # template; copy to .env and fill in
 ├── .claude/
-│   ├── context/                # CLAUDE.md (operating rules) + architecture/project notes
-│   └── skills/grade/SKILL.md   # the /grade slash command
+│   ├── CLAUDE.md               # operating rules (auto-loaded by Claude Code)
+│   ├── architecture.md         # design notes
+│   ├── project.md              # project framing
+│   ├── snaplogic_api_findings.md  # REST API discoveries / gotchas
+│   ├── settings.json           # Claude Code project settings
+│   ├── conventions/            # one file per project-wide or skill-scoped rule
+│   └── skills/
+│       ├── grade/SKILL.md      # the /grade slash command
+│       └── prep/SKILL.md       # the /prep slash command
 ├── exercises/
 │   ├── general_evaluation_rules.md
-│   └── task_01_generate_csv_report/
-│       ├── task.json           # solution_pipeline_path + output_csv_filename
-│       ├── description.md      # the student-facing prompt
-│       ├── notes.md            # instructor hints fed to the AI judge
-│       ├── Task1.zip           # student-facing input data
-│       ├── solution.json       # cached solution pipeline JSON (committed)
-│       ├── solution.cache.json # sidecar: signature + snode_id for cache invalidation
-│       └── expected/           # golden output CSV (auto-fetched alongside solution.json; only the current writer's filename is kept)
+│   ├── task_01_generate_csv_report/   # csv_writer example
+│   │   ├── task.json           # solution_pipeline_path + output_csv_filename
+│   │   ├── description.md      # the student-facing prompt (H1 = canonical pipeline name)
+│   │   ├── notes.md            # instructor hints fed to the AI judge
+│   │   ├── Task1.zip           # student-facing input data
+│   │   ├── solution.json       # cached solution pipeline JSON (committed)
+│   │   ├── solution.cache.json # sidecar: signature + snode_id for cache invalidation
+│   │   └── expected/           # golden output CSV (auto-fetched; only the current writer's filename is kept)
+│   └── task_02_calculator/     # triggered_task example
+│       ├── task.json           # solution_pipeline_path + triggered_task_name + requests[]
+│       ├── description.md
+│       ├── notes.md
+│       ├── solution.json
+│       ├── solution.cache.json
+│       └── expected/           # one <scenario>.json per request in task.json
 ├── grades/                     # persistent per-student report.md files (written by `/grade`)
 ├── evaluator/
 │   ├── __init__.py
 │   ├── __main__.py             # `python -m evaluator ...`
 │   ├── config.py               # env loading
 │   ├── snaplogic_client.py     # GET-only SnapLogic REST client
-│   ├── pipeline_fetch.py       # pipeline + SLDB file retrieval, topo sort
-│   ├── hard_gates.py           # name + output equality checks
-│   ├── tasks.py                # task.json discovery + TaskConfig
-│   └── evaluate.py             # orchestrator + CLI (no LLM call)
+│   ├── pipeline_fetch.py       # pipeline + SLDB file retrieval, topo sort, triggered-task probes
+│   ├── name_match.py           # dash-tolerant pipeline-name comparison
+│   ├── hard_gates.py           # name + output equality checks (CSV or per-scenario JSON)
+│   ├── tasks.py                # task.json discovery + TaskConfig (csv_writer | triggered_task)
+│   ├── evaluate.py             # per-task evaluator (no LLM call)
+│   ├── prep.py                 # /prep skill orchestrator + CLI
+│   └── grade.py                # /grade skill orchestrator + CLI
 └── .tmp/                       # scratch space during a grading run; cleaned out per student at the end of `/grade report`
 ```
 
@@ -81,20 +138,32 @@ Copy-Item .env.example .env
 notepad .env   # set SNAPLOGIC_* values
 ```
 
-`SNAPLOGIC_STUDENT_PROJECT_SPACE` defaults to `IWC_Support` if not set.
+Required env vars (see `.env.example`):
+
+| Variable                            | Purpose                                                              |
+|-------------------------------------|----------------------------------------------------------------------|
+| `SNAPLOGIC_BASE_URL`                | e.g. `https://elastic.snaplogic.com`                                 |
+| `SNAPLOGIC_ADMIN_USERNAME`          | Admin user with read access to both project spaces                   |
+| `SNAPLOGIC_ADMIN_PASSWORD`          | Admin password                                                       |
+| `SNAPLOGIC_ORG_NAME`                | Top-level org (used as the first path segment in every lookup)       |
+| `SNAPLOGIC_SOLUTION_PROJECT_SPACE`  | Project space holding the **solution** pipelines                     |
+| `SNAPLOGIC_SOLUTION_PROJECT`        | Project (within the solution space) holding the solution pipelines   |
+| `SNAPLOGIC_STUDENT_PROJECT_SPACE`   | Project space to search when grading a student by name (default `IWC_Support`) |
+
+> Migration note: `SNAPLOGIC_PROJECT_SPACE_NAME` / `SNAPLOGIC_PROJECT_NAME` were
+> renamed to `SNAPLOGIC_SOLUTION_PROJECT_SPACE` / `SNAPLOGIC_SOLUTION_PROJECT`
+> to make it explicit that they point at the solution, not the student.
 
 ## Running
 
-**Primary entry point — the slash command in Claude Code:**
+**Primary entry point — slash commands in Claude Code:**
 
 ```
-/grade Gabriela Shurbeska
-```
-
-or with an explicit project space:
-
-```
-/grade --space Test_Antonio SnapLogic_Training_Program
+/prep                                          # reconcile all exercise folders
+/prep --task task_02_calculator                # reconcile one folder
+/grade Gabriela Shurbeska                      # grade one student
+/grade --space Test_Antonio "Some Student"     # override the student project space
+/grade "Gabriela Shurbeska" --task task_01_generate_csv_report   # re-grade one task
 ```
 
 **Lower-level — running the Python evaluator directly for one exercise:**
@@ -117,13 +186,18 @@ The solution pipeline JSON is cached at `exercises/<task>/solution.json`
 (committed to the repo) with a sidecar `solution.cache.json` recording
 the SnapLogic asset's modified-at timestamp. A run only refetches the
 body when the timestamp changes — so back-to-back grading of multiple
-students hits the cache.
+students hits the cache. To force a refresh of a solution and its
+expected outputs, run `/prep --task <slug>` (or call
+`python -m evaluator.prep sync --slug <slug>`).
 
 Flags:
 - `--student-name <name>` — override the auto-derived student name
   (used in the output path).
-- `--refresh-solution` — force a refetch of both `solution.json` and the
-  expected CSV, ignoring the cached signature.
+
+The `/prep` and `/grade` orchestrators are exposed as their own subcommands:
+`python -m evaluator.prep {survey,sync}` and
+`python -m evaluator.grade {plan,report}`. The skills under
+`.claude/skills/` document the exact invocations.
 
 Exit codes:
 - `0` — hard gates passed (AI step pending, or all gates passed)
@@ -132,25 +206,44 @@ Exit codes:
 
 ## Adding a new exercise
 
-1. Create `exercises/<slug>/description.md` (student-facing prompt).
+1. Create `exercises/<slug>/description.md` — the student-facing prompt. The
+   **first H1 heading** is the canonical pipeline name (e.g.
+   `# Task 03 – Join Employee Records`); both the solution and the student's
+   pipeline must use that name in SnapLogic.
 2. Optionally create `exercises/<slug>/notes.md` (instructor hints — fed
    to the AI judge).
-3. Create `exercises/<slug>/task.json`:
+3. Run `/prep`.
 
-   ```json
-   {
-     "solution_pipeline_path": "Org/ProjectSpace/Project/Pipeline Name",
-     "output_csv_filename": "result.csv"
-   }
-   ```
+   - For **csv_writer** exercises, `/prep` auto-creates `task.json` and fetches
+     `solution.json` + `expected/<output>.csv`.
+   - For **triggered_task** exercises, `/prep` asks you to hand-write
+     `task.json` because the script can't derive the Triggered Task name or
+     scenarios. The schema is:
 
-No Python edits needed. The skill auto-discovers any folder with a
+     ```json
+     {
+       "task_type": "triggered_task",
+       "solution_pipeline_path": "Org/ProjectSpace/Project/Pipeline Name",
+       "triggered_task_name": "Pipeline Name Task",
+       "requests": [
+         { "name": "addition",    "params": { "mathOperation": "3+5"  } },
+         { "name": "subtraction", "params": { "mathOperation": "10-4" } }
+       ]
+     }
+     ```
+
+     `name` becomes the filename in `expected/` (`addition.json`, …) and the
+     scenario label in `ai_context.json`.
+
+No Python edits needed — both skills auto-discover any folder with a
 `task.json`.
 
 ## Architecture & design notes
 
-See [.claude/context/architecture.md](.claude/context/architecture.md) and
-[.claude/context/project.md](.claude/context/project.md) for the design rationale.
+See [.claude/architecture.md](.claude/architecture.md) and
+[.claude/project.md](.claude/project.md) for the design rationale, plus
+[.claude/conventions/](.claude/conventions/) for the running list of
+project-wide and skill-scoped rules.
 
 ## Safety
 

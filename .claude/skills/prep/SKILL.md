@@ -1,11 +1,16 @@
 ---
 name: prep
-description: Prepare SnapLogic exercise folders for grading. Walks exercises/, creates task.json for folders missing one (by reading the canonical pipeline name from each folder's description.md H1 heading and looking up that pipeline in the solution project space), and refreshes solution.json + expected/ outputs when the SnapLogic pipeline has changed. Supports two exercise types: CSV-writer pipelines (one expected CSV) and triggered-task pipelines (one expected JSON response per scenario). Usage — /prep (no args). Run /prep whenever you add a new exercise folder or edit a solution pipeline; /grade refuses to grade folders that are not fully prepped.
+description: Prepare SnapLogic exercise folders for grading. Walks exercises/, creates task.json for folders missing one (by reading the canonical pipeline name from each folder's description.md H1 heading and looking up that pipeline in the solution project space), and refreshes solution.json + expected/ outputs when the SnapLogic pipeline has changed. Supports two exercise types: CSV-writer pipelines (one expected CSV) and triggered-task pipelines (one expected JSON response per scenario). Usage — /prep (no args, prep every folder)  OR  /prep --task <slug> (prep only one folder). Run /prep whenever you add a new exercise folder or edit a solution pipeline; /grade refuses to grade folders that are not fully prepped.
 ---
 
 # /prep — Skill workflow
 
 You (Claude) orchestrate this skill. The Python script `evaluator.prep` does all deterministic work: discovering folders, reading description.md, looking up pipelines, fetching definitions, detecting drift, and writing files. Your job is to read the survey, ask the user when the script needs disambiguation, write task.json by hand for triggered-task exercises (the only case Python can't fully derive), and re-invoke sync.
+
+This skill supports two modes:
+
+- **Full prep** (default): survey and reconcile every folder under `exercises/`.
+- **Single-folder prep** (`--task <slug>`): survey and reconcile only the named folder. Useful after you add one new exercise or edit one solution pipeline. The invocation is `/prep --task <slug>`; in this mode, pass `--slug <slug>` to both the `survey` and `sync` subcommands of the Python script so only that one folder is touched.
 
 **Pipeline name convention:** the canonical pipeline name lives in the FIRST H1 heading of `exercises/<slug>/description.md` (e.g. `# Task 01 – Generate CSV Report`). Folder slugs stay snake_case; the heading is what the solution pipeline and student pipeline must both be named in SnapLogic.
 
@@ -22,13 +27,13 @@ The Python script can auto-create `task.json` for `csv_writer` exercises (the wr
 
 ### 1. Survey
 
-Run:
+Run (add `--slug "<slug>"` only when the user invoked `/prep --task <slug>`):
 
 ```
-.venv/Scripts/python.exe -m evaluator.prep survey
+.venv/Scripts/python.exe -m evaluator.prep survey [--slug "<slug>"]
 ```
 
-The script prints a plain summary followed by a JSON block delimited by `---SURVEY_JSON_BEGIN---` and `---SURVEY_JSON_END---`. Parse the JSON to get a list of per-folder reports.
+The script prints a plain summary followed by a JSON block delimited by `---SURVEY_JSON_BEGIN---` and `---SURVEY_JSON_END---`. Parse the JSON to get a list of per-folder reports. With `--slug`, the list contains exactly one report; without it, one per folder under `exercises/`.
 
 Each report has:
 - `slug`: folder name
@@ -97,12 +102,12 @@ Apply the matching rule per entry:
 
 ### 3. Verify
 
-After acting on all reports, run `survey` once more and confirm every folder reads `ready`. If anything still isn't ready, list those folders and the reason in chat.
+After acting on all reports, run `survey` once more (with the same `--slug` if you were in single-folder mode) and confirm every surveyed folder reads `ready`. If anything still isn't ready, list those folders and the reason in chat.
 
 ### 4. Tell the user
 
 Print:
-- One line per folder: `<slug> → <status>` (use the final survey output).
+- One line per folder: `<slug> → <status>` (use the final survey output). In single-folder mode this is one line.
 - One overall sentence (e.g., "All folders ready. Run `/grade <student>`." or "Folder X still needs your attention: <reason>.").
 
 ## Notes
