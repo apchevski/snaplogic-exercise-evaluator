@@ -7,8 +7,9 @@ student and solution pipelines is meaningful.
 This exercise builds directly on **Task 01**. The student copies their
 Task 01 pipeline into a new pipeline and adds a **birth-year filter**:
 the output should contain only California residents born in **1963,
-1964, or 1965**. All Task 01 rules still apply — only the points
-below are specific to this bonus.
+1964, or 1965**. The universal best-practice rules in
+`general_evaluation_rules.md` and all Task 01 task-specific rules
+still apply — only the points below are specific to this bonus.
 
 ## Things that matter (new for Bonus 1)
 

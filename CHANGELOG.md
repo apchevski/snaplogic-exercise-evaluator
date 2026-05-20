@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Consolidate universal SnapLogic best-practice rules (filter-before-sort, CSV Formatter *Ignore empty stream*, Mapper *Pass through*, no extra Mapper snaps, all snaps renamed from defaults, bonus answers in pipeline version notes) into `exercises/general_evaluation_rules.md` and trim each task's `notes.md` down to genuinely task-specific guidance. Per-task notes may still override any universal rule when the exercise calls for it.
 - Add Python project scaffold (requirements.txt, evaluator package).
 - Add GET-only SnapLogic REST client; validated against elastic.snaplogic.com.
 - Add pipeline definition + SLDB CSV download (Accept */*) helpers.

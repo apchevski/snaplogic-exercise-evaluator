@@ -4,36 +4,24 @@ These notes are passed to the AI evaluator as *hints*, not strict rules.
 The model uses them when deciding whether a difference between the
 student and solution pipelines is meaningful.
 
+The universal best-practice rules in
+`exercises/general_evaluation_rules.md` apply to this exercise as-is.
+
 Unlike Task 01, this exercise does not produce a CSV. The pipeline is
 exposed as a **Triggered Task** and the evaluator verifies behavior by
 calling that task over HTTP with different `mathOperation` values and
-comparing the JSON response.
+comparing the JSON response. The Triggered Task name (`<pipeline name>
+Task`) and per-scenario response matching are both enforced by hard
+gates before the AI evaluator runs (see `general_evaluation_rules.md`,
+rules 3 and 4).
 
-## Things that matter
+The evaluator issues five GET requests covering the four supported
+operators (`+`, `-`, `*`, `/`) plus one input with no valid operator.
+Each response must match the expected shape exactly:
+- With an operator: `[{"result": "3 + 5 = 8"}]`
+- Without an operator: `[{"result": "No operator in the equation"}]`
 
-- **A Triggered Task with the convention name must exist.**
-  The Triggered Task name **must** be `<pipeline name> Task` — for
-  this exercise that is exactly `Task 02 – Calculator Task` (pipeline
-  name plus the suffix ` Task`). This is enforced by a hard gate
-  before the AI evaluator runs: if no Triggered Task with that exact
-  name exists in the student's project, the submission is an
-  **automatic FAIL**. A correctly-behaving task registered under a
-  different name still fails the gate — the convention is strict, not
-  a soft preference. The only allowed deviation is the dash glyph:
-  hyphen-minus `-`, en dash `–`, and em dash `—` count as the same
-  character, so `Task 02 - Calculator Task` also passes.
-
-- **The Triggered Task must return the correct response for every
-  tested scenario.**
-  The evaluator issues five GET requests covering the four supported
-  operators (`+`, `-`, `*`, `/`) plus one input with no valid
-  operator. Each response must match the expected shape exactly:
-  - With an operator: `[{"result": "3 + 5 = 8"}]`
-  - Without an operator: `[{"result": "No operator in the equation"}]`
-
-  Response matching is a hard gate too: any scenario whose response
-  doesn't structurally match the cached expected response is an
-  **automatic FAIL**. The AI only runs once every scenario matches.
+## Things that matter (task-specific)
 
 - **The "no operator" branch must be implemented.**
   The pipeline must explicitly handle the case where the input
@@ -53,7 +41,7 @@ comparing the JSON response.
   **minor** — the result is correct, but the Conditional-based
   layout is the preferred pattern.
 
-## Things that don't matter
+## Things that don't matter (task-specific)
 
 - **The exact expression used to parse the operator or perform the
   calculation.** Any expression that correctly extracts the operator
@@ -67,5 +55,3 @@ comparing the JSON response.
   (e.g. spacing around the operator must be `3 + 5 = 8`, not
   `3+5=8`). This is enforced by the response comparison, not by
   inspecting the expression.
-
-- Snap label positions and view-layout coordinates.

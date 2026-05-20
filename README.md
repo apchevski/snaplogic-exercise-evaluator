@@ -211,7 +211,10 @@ Exit codes:
    `# Task 03 – Join Employee Records`); both the solution and the student's
    pipeline must use that name in SnapLogic.
 2. Optionally create `exercises/<slug>/notes.md` (instructor hints — fed
-   to the AI judge).
+   to the AI judge). Put only **task-specific** rules here; the universal
+   best-practice rules in `exercises/general_evaluation_rules.md` apply
+   automatically. Use `notes.md` to override a universal rule when the
+   exercise legitimately requires it.
 3. Run `/prep`.
 
    - For **csv_writer** exercises, `/prep` auto-creates `task.json` and fetches
