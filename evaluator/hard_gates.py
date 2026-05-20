@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .name_match import names_match
+
 
 @dataclass
 class GateResult:
@@ -30,9 +32,21 @@ class GateResult:
 
 
 def check_pipeline_name_match(solution_name: str, student_name: str) -> GateResult:
-    passed = solution_name == student_name
+    """Compare pipeline names. Exact match except dash glyphs are interchangeable.
+
+    See `evaluator.name_match`: en-dash / em-dash / hyphen-minus all count
+    as the same character. Everything else (case, spacing, punctuation)
+    must match exactly.
+    """
+    passed = names_match(solution_name, student_name)
     if passed:
-        detail = f"Pipeline name matches: {solution_name!r}"
+        if solution_name == student_name:
+            detail = f"Pipeline name matches: {solution_name!r}"
+        else:
+            detail = (
+                f"Pipeline name matches (dash glyph differs): "
+                f"solution={solution_name!r}, student={student_name!r}"
+            )
     else:
         detail = (
             f"Pipeline name mismatch — solution={solution_name!r}, "

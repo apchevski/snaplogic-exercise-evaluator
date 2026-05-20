@@ -47,6 +47,7 @@ from urllib.parse import quote
 import httpx
 
 from .config import Settings
+from .name_match import names_match
 
 
 class SnapLogicClient:
@@ -112,9 +113,14 @@ class SnapLogicClient:
         Useful for cache invalidation: callers can read the entry's
         modified-at timestamp (e.g. `update_time`) without fetching the
         full pipeline body.
+
+        Name comparison is exact except dash glyphs (en/em-dash count as
+        hyphen-minus) — see `evaluator.name_match`.
         """
         for entry in self.list_assets(org, project_space, project):
-            if entry.get("asset_type") == "Pipeline" and entry.get("name") == pipeline_name:
+            if entry.get("asset_type") == "Pipeline" and names_match(
+                entry.get("name", ""), pipeline_name
+            ):
                 return entry
         raise LookupError(
             f"No pipeline named {pipeline_name!r} in "
@@ -179,11 +185,14 @@ class SnapLogicClient:
         `metadata.type="triggered"`. Scheduled and ultra-task jobs use
         different `metadata.type` values; filtering on "triggered"
         avoids matching those.
+
+        Name comparison is exact except dash glyphs (en/em-dash count as
+        hyphen-minus) — see `evaluator.name_match`.
         """
         for entry in self.list_assets(org, project_space, project):
             if (
                 entry.get("asset_type") == "Job"
-                and entry.get("name") == task_name
+                and names_match(entry.get("name", ""), task_name)
                 and (entry.get("metadata") or {}).get("type") == "triggered"
             ):
                 return entry
