@@ -21,7 +21,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from .snaplogic_client import SnapLogicClient
+from .tasks import TriggeredRequest
 
 
 class SolutionNotReadyError(Exception):
@@ -263,6 +266,245 @@ def load_cached_solution_pipeline(
         location=loc,
         definition=definition,
         raw_json_path=solution_json_path,
+    )
+
+
+def load_cached_solution_triggered_task(
+    client: SnapLogicClient,
+    loc: PipelineLocation,
+    solution_json_path: Path,
+    sidecar_path: Path,
+    *,
+    expected_dir: Path,
+    requests: tuple[TriggeredRequest, ...],
+) -> FetchedPipeline:
+    """Strict read of the cached triggered-task solution. No writes.
+
+    Triggered-task analog of `load_cached_solution_pipeline`. Hits the
+    remote ONCE to read the asset-list timestamp, then compares it
+    against the sidecar signature. Raises SolutionNotReadyError if any
+    cached file is missing or the cache is stale. Callers that get this
+    exception should surface a `needs_prep` outcome and stop —
+    refreshing the cache is /prep's job.
+    """
+    if not solution_json_path.exists():
+        raise SolutionNotReadyError(
+            "missing_solution_json",
+            f"Cached solution.json not found at {solution_json_path}",
+        )
+    if not sidecar_path.exists():
+        raise SolutionNotReadyError(
+            "missing_sidecar",
+            f"Cached sidecar not found at {sidecar_path}",
+        )
+    for req in requests:
+        expected_path = expected_dir / f"{req.name}.json"
+        if not expected_path.exists():
+            raise SolutionNotReadyError(
+                "missing_expected_response",
+                f"Cached expected response not found at {expected_path}",
+            )
+
+    try:
+        entry = client.find_pipeline_asset_entry(
+            loc.org, loc.project_space, loc.project, loc.name
+        )
+    except LookupError as e:
+        raise SolutionNotReadyError("pipeline_not_found", str(e)) from e
+
+    remote_sig = _extract_remote_signature(entry)
+
+    try:
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise SolutionNotReadyError(
+            "corrupt_sidecar",
+            f"Unreadable sidecar at {sidecar_path}: {e}",
+        ) from e
+
+    if remote_sig is not None:
+        sidecar_sig = (sidecar.get("signature_kind"), sidecar.get("signature"))
+        if sidecar_sig != remote_sig:
+            raise SolutionNotReadyError(
+                "stale_signature",
+                (
+                    f"Solution cache is stale for {loc.name!r}: "
+                    f"sidecar={sidecar_sig}, remote={remote_sig}"
+                ),
+            )
+
+    definition = json.loads(solution_json_path.read_text(encoding="utf-8"))
+    return FetchedPipeline(
+        location=loc,
+        definition=definition,
+        raw_json_path=solution_json_path,
+    )
+
+
+def fetch_student_triggered_responses(
+    client: SnapLogicClient,
+    loc: PipelineLocation,
+    triggered_task_name: str,
+    requests: tuple[TriggeredRequest, ...],
+    dest_dir: Path,
+) -> dict[str, tuple[Path, int | None, str | None]]:
+    """Invoke the student's Triggered Task once per scenario.
+
+    Writes each response body to `dest_dir/<request_name>.json` verbatim
+    (no reformatting). Returns a mapping `{request_name: (path, http_status, error)}`
+    where `error` is None on success or a short string on failure (in
+    which case `path` is still where the body — possibly an error body —
+    was written, and `http_status` is the response code or None if the
+    request didn't reach the server).
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    results: dict[str, tuple[Path, int | None, str | None]] = {}
+    for req in requests:
+        out_path = dest_dir / f"{req.name}.json"
+        try:
+            body = client.invoke_triggered_task(
+                loc.org, loc.project_space, loc.project,
+                triggered_task_name,
+                params=req.params,
+            )
+            out_path.write_bytes(body)
+            results[req.name] = (out_path, 200, None)
+        except httpx.HTTPStatusError as e:
+            # Write the error body so the AI / report can see what
+            # SnapLogic actually returned (often a JSON error envelope).
+            try:
+                out_path.write_bytes(e.response.content)
+            except OSError:
+                pass
+            results[req.name] = (
+                out_path,
+                e.response.status_code,
+                f"HTTP {e.response.status_code}",
+            )
+        except httpx.RequestError as e:
+            results[req.name] = (out_path, None, f"request error: {e!s}")
+    return results
+
+
+def load_or_refresh_solution_triggered_task(
+    client: SnapLogicClient,
+    loc: PipelineLocation,
+    solution_json_path: Path,
+    sidecar_path: Path,
+    *,
+    expected_dir: Path,
+    triggered_task_name: str,
+    requests: tuple[TriggeredRequest, ...],
+    force_refresh: bool = False,
+) -> tuple[FetchedPipeline, bool]:
+    """Triggered-task analog of `load_or_refresh_solution_pipeline`.
+
+    Reuses the same signature-based cache (solution.json + sidecar
+    keyed off the pipeline asset's `time_updated`) but refreshes
+    `expected/<request_name>.json` instead of a single CSV. The
+    Triggered Task is invoked once per request when a refresh fires;
+    each response body is written to expected/ verbatim.
+
+    Returns (fetched, refreshed). When refreshed=True every expected
+    JSON was rewritten — pipeline definition changes typically imply
+    response changes, so the caches are invalidated atomically.
+    """
+    if force_refresh:
+        entry = client.find_pipeline_asset_entry(
+            loc.org, loc.project_space, loc.project, loc.name
+        )
+        return _do_refresh_triggered(
+            client, loc, entry, solution_json_path, sidecar_path,
+            expected_dir, triggered_task_name, requests,
+        )
+
+    entry = client.find_pipeline_asset_entry(
+        loc.org, loc.project_space, loc.project, loc.name
+    )
+    remote_sig = _extract_remote_signature(entry)
+
+    expected_paths = [expected_dir / f"{r.name}.json" for r in requests]
+    all_expected_present = all(p.exists() for p in expected_paths)
+
+    if (
+        remote_sig is not None
+        and solution_json_path.exists()
+        and sidecar_path.exists()
+        and all_expected_present
+    ):
+        try:
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            sidecar = None
+        if (
+            sidecar is not None
+            and sidecar.get("signature_kind") == remote_sig[0]
+            and sidecar.get("signature") == remote_sig[1]
+        ):
+            definition = json.loads(solution_json_path.read_text(encoding="utf-8"))
+            return (
+                FetchedPipeline(
+                    location=loc,
+                    definition=definition,
+                    raw_json_path=solution_json_path,
+                ),
+                False,
+            )
+
+    return _do_refresh_triggered(
+        client, loc, entry, solution_json_path, sidecar_path,
+        expected_dir, triggered_task_name, requests,
+    )
+
+
+def _do_refresh_triggered(
+    client: SnapLogicClient,
+    loc: PipelineLocation,
+    asset_entry: dict[str, Any],
+    solution_json_path: Path,
+    sidecar_path: Path,
+    expected_dir: Path,
+    triggered_task_name: str,
+    requests: tuple[TriggeredRequest, ...],
+) -> tuple[FetchedPipeline, bool]:
+    snode_id = asset_entry["snode_id"]
+    definition = client.get_pipeline_definition(snode_id)
+
+    sig = _extract_remote_signature(asset_entry) or _content_signature(definition)
+
+    solution_json_path.parent.mkdir(parents=True, exist_ok=True)
+    solution_json_path.write_text(json.dumps(definition, indent=2), encoding="utf-8")
+
+    sidecar = {
+        "signature_kind": sig[0],
+        "signature": sig[1],
+        "snode_id": snode_id,
+        "pipeline_name": loc.name,
+        "triggered_task_name": triggered_task_name,
+        "cached_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+    }
+    sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+
+    expected_dir.mkdir(parents=True, exist_ok=True)
+    for req in requests:
+        body = client.invoke_triggered_task(
+            loc.org, loc.project_space, loc.project,
+            triggered_task_name,
+            params=req.params,
+        )
+        out_path = expected_dir / f"{req.name}.json"
+        # The triggered-task feed always serves JSON for these exercises,
+        # but we write bytes verbatim so we never reformat / re-encode
+        # the response. Comparisons in /grade use structural JSON diff.
+        out_path.write_bytes(body)
+
+    return (
+        FetchedPipeline(
+            location=loc,
+            definition=definition,
+            raw_json_path=solution_json_path,
+        ),
+        True,
     )
 
 

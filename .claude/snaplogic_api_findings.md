@@ -35,6 +35,23 @@ with `evaluator/snaplogic_client.py` when you discover something new.
 - `GET /api/1/rest/slfs/{org}/{ps}/{project}/{file_name}` — download a
   file asset from SLDB. Requires `Accept: */*` (the client's default
   `Accept: application/json` triggers a 406).
+- `GET /api/1/rest/slsched/feed/{org}/{ps}/{project}/{task_name}` —
+  invoke a Triggered Task with HTTP Basic auth and query-string
+  parameters. Returns the pipeline's output (typically JSON) verbatim.
+  Verified 2026-05-20 against `Task 02 – Calculator Task`:
+  `?mathOperation=3+5` returned `[{"result":"3 + 5 = 8"}]` with
+  `Content-Type: application/json`. The cloud URL accepts basic auth
+  in place of the task's bearer token, so we never need to fetch the
+  token from the asset (which is not exposed by the asset endpoints
+  anyway — see below).
+- **Triggered Tasks** appear in `list_assets` as `asset_type="Job"`
+  with `metadata.type="triggered"`. Other `metadata.type` values
+  (`scheduled`, `ultra`) also use `asset_type="Job"` — filter on
+  `metadata.type == "triggered"` if you only want Triggered Tasks.
+  The single-asset endpoint (`/api/1/rest/asset/{org}/{ps}/{project}/{task_name}`)
+  works for Jobs and returns the same metadata shape, but does NOT
+  expose the bearer token or any auth secrets. Use the cloud URL above
+  with basic auth instead.
 
 ## Endpoint-naming gotcha (verb-before-id)
 

@@ -1,6 +1,6 @@
 """Deterministic orchestrator for a single exercise evaluation.
 
-Flow:
+Flow (csv_writer):
   1. Strictly load the cached solution pipeline from
      `exercises/<task>/solution.json` (plus its sidecar and expected CSV).
      If anything is missing or the sidecar signature does not match the
@@ -10,10 +10,18 @@ Flow:
   2. Fetch the student pipeline definition from SnapLogic.
   3. Hard gate: pipeline names must match.
   4. Hard gate: CSV outputs must match (header + row multiset).
-  5. If both gates pass, write an AI-context bundle to
-     `.tmp/grades/<student>/<task>/ai_context.json` and emit
-     "READY_FOR_AI_REVIEW" on stdout. The `grade` skill picks up from
-     there and produces the final evaluation.json next to it.
+  5. If both gates pass, write an AI-context bundle and emit READY_FOR_AI_REVIEW.
+
+Flow (triggered_task):
+  1. Strictly load the cached solution pipeline + every expected response.
+  2. Fetch the student pipeline definition.
+  3. Hard gate: pipeline names must match.
+  4. Hard gate: a Triggered Task named `<pipeline name> Task` must exist
+     in the student's project (convention is strict).
+  5. Invoke the student's Triggered Task once per scenario.
+  6. Hard gate: every scenario's response must structurally match the
+     cached expected response.
+  7. If all gates pass, write an AI-context bundle and emit READY_FOR_AI_REVIEW.
 
 This module never calls an LLM. Judgment lives in `.claude/skills/grade/`.
 """
@@ -23,6 +31,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -31,17 +40,27 @@ from .hard_gates import (
     GateResult,
     check_csv_outputs_match,
     check_pipeline_name_match,
+    check_triggered_responses_match,
+    check_triggered_task_exists,
 )
 from .pipeline_fetch import (
     PipelineLocation,
     SolutionNotReadyError,
     fetch_pipeline,
     fetch_pipeline_csv_output,
+    fetch_student_triggered_responses,
     flow_order_summary,
     load_cached_solution_pipeline,
+    load_cached_solution_triggered_task,
 )
 from .snaplogic_client import SnapLogicClient
-from .tasks import TaskConfig, list_tasks, load_task
+from .tasks import (
+    TASK_TYPE_CSV_WRITER,
+    TASK_TYPE_TRIGGERED_TASK,
+    TaskConfig,
+    list_tasks,
+    load_task,
+)
 
 READY_MARKER = "READY_FOR_AI_REVIEW"
 
@@ -69,8 +88,43 @@ def run_evaluation(
 
     print(f"[1/5] Solution pipeline: {solution_loc}")
     print(f"[1/5] Student pipeline:  {student_loc}")
+    print(f"[1/5] Task type:         {task.task_type}")
     print(f"[1/5] Student artifacts: {student_task_dir}")
 
+    if task.task_type == TASK_TYPE_CSV_WRITER:
+        return _run_csv_writer(
+            task=task,
+            solution_loc=solution_loc,
+            student_loc=student_loc,
+            settings=settings,
+            student_task_dir=student_task_dir,
+            student_subdir=student_subdir,
+        )
+    if task.task_type == TASK_TYPE_TRIGGERED_TASK:
+        return _run_triggered_task(
+            task=task,
+            solution_loc=solution_loc,
+            student_loc=student_loc,
+            settings=settings,
+            student_task_dir=student_task_dir,
+            student_subdir=student_subdir,
+        )
+    print(
+        f"ERROR: Unknown task_type {task.task_type!r} for slug {task_slug!r}.",
+        file=sys.stderr,
+    )
+    return 2
+
+
+def _run_csv_writer(
+    *,
+    task: TaskConfig,
+    solution_loc: PipelineLocation,
+    student_loc: PipelineLocation,
+    settings: Any,
+    student_task_dir: Path,
+    student_subdir: Path,
+) -> int:
     with SnapLogicClient(settings) as client:
         print("[2/5] Resolving pipeline definitions...")
         solution = load_cached_solution_pipeline(
@@ -84,15 +138,7 @@ def run_evaluation(
         student = fetch_pipeline(client, student_loc, student_subdir)
         print(f"      student fetched -> {student.raw_json_path}")
 
-        # Per-checkpoint version notes (Designer "Versions" dialog) —
-        # the canonical place for bonus-question answers. Empty list
-        # if the student never created a checkpoint.
-        student_snode_id = client.find_pipeline_snode_id(
-            student_loc.org, student_loc.project_space,
-            student_loc.project, student_loc.name,
-        )
-        student_version_notes = client.get_pipeline_versions(student_snode_id)
-        print(f"      student version notes: {len(student_version_notes)} checkpoint(s)")
+        student_version_notes = _fetch_student_version_notes(client, student_loc)
 
         print("[3/5] Hard gate: pipeline name match...")
         name_gate = check_pipeline_name_match(solution.location.name, student.location.name)
@@ -109,9 +155,6 @@ def run_evaluation(
         except httpx.HTTPStatusError as e:
             if e.response.status_code != 404:
                 raise
-            # Student didn't run their pipeline — SLDB has no output file.
-            # Convert into a graceful csv_output_match failure instead of
-            # crashing the whole plan loop.
             missing_gate = GateResult(
                 name="csv_output_match",
                 passed=False,
@@ -139,19 +182,158 @@ def run_evaluation(
         student_definition=student.definition,
         student_version_notes=student_version_notes,
         hard_gates=[name_gate, csv_gate],
+        extra={},
     )
+    _print_ready(bundle_path)
+    return 0
+
+
+def _run_triggered_task(
+    *,
+    task: TaskConfig,
+    solution_loc: PipelineLocation,
+    student_loc: PipelineLocation,
+    settings: Any,
+    student_task_dir: Path,
+    student_subdir: Path,
+) -> int:
+    assert task.triggered_task_name is not None
+    student_responses_dir = student_subdir / "responses"
+    expected_task_name = task.triggered_task_name
+
+    with SnapLogicClient(settings) as client:
+        print("[2/6] Resolving pipeline definitions...")
+        solution = load_cached_solution_triggered_task(
+            client,
+            solution_loc,
+            task.solution_json_path,
+            task.solution_cache_sidecar_path,
+            expected_dir=task.expected_dir,
+            requests=task.requests,
+        )
+        print(f"      solution cached -> {task.solution_json_path}")
+        student = fetch_pipeline(client, student_loc, student_subdir)
+        print(f"      student fetched -> {student.raw_json_path}")
+
+        student_version_notes = _fetch_student_version_notes(client, student_loc)
+
+        print("[3/6] Hard gate: pipeline name match...")
+        name_gate = check_pipeline_name_match(solution.location.name, student.location.name)
+        _print_gate(name_gate)
+        if not name_gate.passed:
+            return _write_fail_artifact(task, student_task_dir, name_gate)
+
+        print(f"[4/6] Hard gate: Triggered Task {expected_task_name!r} exists...")
+        try:
+            student_task_entry = client.find_triggered_task_entry(
+                student_loc.org, student_loc.project_space,
+                student_loc.project, expected_task_name,
+            )
+        except LookupError:
+            student_task_entry = None
+        exists_gate = check_triggered_task_exists(expected_task_name, student_task_entry)
+        _print_gate(exists_gate)
+        if not exists_gate.passed:
+            return _write_fail_artifact(
+                task, student_task_dir, exists_gate, [name_gate]
+            )
+
+        print(f"[5/6] Invoking student Triggered Task ({len(task.requests)} scenario(s))...")
+        invocation_results = fetch_student_triggered_responses(
+            client, student_loc, expected_task_name,
+            task.requests, student_responses_dir,
+        )
+        for req in task.requests:
+            path, status, err = invocation_results[req.name]
+            label = err if err else f"HTTP {status}"
+            print(f"      {req.name:<20} -> {label}  ({path.name})")
+
+    print("[6/6] Hard gate: Triggered Task response match...")
+    scenarios_for_gate: list[dict[str, Any]] = []
+    for req in task.requests:
+        path, status, err = invocation_results[req.name]
+        scenarios_for_gate.append({
+            "name": req.name,
+            "expected_path": task.expected_response_path(req.name),
+            "student_path": path,
+            "student_http_status": status,
+            "student_error": err,
+        })
+    responses_gate = check_triggered_responses_match(scenarios_for_gate)
+    _print_gate(responses_gate)
+    if not responses_gate.passed:
+        return _write_fail_artifact(
+            task, student_task_dir, responses_gate, [name_gate, exists_gate]
+        )
+
+    # Build per-scenario payload for the AI context.
+    scenarios_payload = []
+    for req in task.requests:
+        path, status, err = invocation_results[req.name]
+        scenarios_payload.append({
+            "name": req.name,
+            "params": dict(req.params),
+            "expected": _read_json_or_text(task.expected_response_path(req.name)),
+            "student": _read_json_or_text(path),
+            "student_http_status": status,
+            "student_error": err,
+        })
+
+    bundle_path = _write_ai_context(
+        task=task,
+        student_task_dir=student_task_dir,
+        solution_definition=solution.definition,
+        student_definition=student.definition,
+        student_version_notes=student_version_notes,
+        hard_gates=[name_gate, exists_gate, responses_gate],
+        extra={
+            "triggered_task_name_expected": expected_task_name,
+            "triggered_task_scenarios": scenarios_payload,
+        },
+    )
+    _print_ready(bundle_path)
+    return 0
+
+
+def _fetch_student_version_notes(
+    client: SnapLogicClient, student_loc: PipelineLocation,
+) -> list[dict[str, Any]]:
+    """Per-checkpoint Designer Versions notes — bonus-answer canonical home."""
+    student_snode_id = client.find_pipeline_snode_id(
+        student_loc.org, student_loc.project_space,
+        student_loc.project, student_loc.name,
+    )
+    notes = client.get_pipeline_versions(student_snode_id)
+    print(f"      student version notes: {len(notes)} checkpoint(s)")
+    return notes
+
+
+def _read_json_or_text(path: Path) -> Any:
+    """Return parsed JSON, or the raw text if it isn't valid JSON."""
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return f"<{path.stat().st_size} bytes, non-utf8>"
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
+def _print_gate(g: GateResult) -> None:
+    flag = "PASS" if g.passed else "FAIL"
+    print(f"      [{flag}] {g.name}: {g.detail}")
+
+
+def _print_ready(bundle_path: Path) -> None:
     print()
     print("=" * 70)
     print("HARD GATES PASSED — ready for AI review")
     print("=" * 70)
     print(f"AI context bundle: {bundle_path}")
     print(READY_MARKER)
-    return 0
-
-
-def _print_gate(g: GateResult) -> None:
-    flag = "PASS" if g.passed else "FAIL"
-    print(f"      [{flag}] {g.name}: {g.detail}")
 
 
 def _write_fail_artifact(
@@ -197,11 +379,13 @@ def _write_ai_context(
     student_definition: dict,
     student_version_notes: list[dict],
     hard_gates: list[GateResult],
+    extra: dict[str, Any],
 ) -> Path:
     bundle_path = student_task_dir / "ai_context.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    bundle = {
+    bundle: dict[str, Any] = {
         "task_slug": task.slug,
+        "task_type": task.task_type,
         "exercise_description": _read_text(task.description_path),
         "general_rules": _read_text(EXERCISES_DIR / "general_evaluation_rules.md"),
         "task_notes": _read_text(task.task_notes_path),
@@ -215,6 +399,7 @@ def _write_ai_context(
             for g in hard_gates
         ],
     }
+    bundle.update(extra)
     bundle_path.write_text(json.dumps(bundle, indent=2), encoding="utf-8")
     return bundle_path
 

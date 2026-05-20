@@ -11,9 +11,15 @@ final judgment has to come from a model rather than a hand-coded rubric.
 1. **Hard gates (deterministic)** — cheap, fast, fail-closed. Implemented
    in `evaluator/`, invoked via `python -m evaluator <slug> --student ...`.
    - Pipeline name must exactly match the solution's.
-   - The output file (CSV today, other types later) must exactly match
-     the solution's output (header + row multiset).
-   If either fails, the run aborts and writes a `verdict: "fail"`
+   - For csv_writer: the student's CSV output must match the solution's
+     (header + row multiset).
+   - For triggered_task: (a) a Triggered Task named exactly
+     `<pipeline name> Task` (the convention is strict — see
+     [triggered-task-naming-strict](conventions/triggered-task-naming-strict.md))
+     must exist in the student's project, and (b) every scenario's JSON
+     response — invoked at grading time via the cloud URL — must
+     structurally match the cached expected response.
+   If any gate fails, the run aborts and writes a `verdict: "fail"`
    `evaluation.json` with the failing gate and detail. No AI step.
 
 2. **AI judgment** — a **Claude Code skill** (`.claude/skills/grade/SKILL.md`),
@@ -73,23 +79,48 @@ The client is **GET-only** by construction. Endpoints validated against
 - `GET /api/1/rest/pipeline/{snode_id}` → full pipeline definition.
 - `GET /api/1/rest/slfs/{org}/{ps}/{project}/{file}` (with `Accept: */*`,
   the default `application/json` triggers a 406) → file content from SLDB.
+- `GET /api/1/rest/slsched/feed/{org}/{ps}/{project}/{task_name}` →
+  invoke a Triggered Task with basic auth + query-string params; body
+  is the pipeline's output (typically JSON). Used by /prep to capture
+  solution responses for `triggered_task` exercises.
 
 The Public-API `/catalog/...` endpoint is a paid feature; we don't use it.
 
-## Why no pipeline execution
+## Pipeline execution for triggered-task exercises
 
-Exercises like Task 01 have no Triggered Task and we don't assume one
-is set up for every student submission. Instead we fetch the already-
-produced CSV from SLDB for both solution and student. Execution-based
-comparison is reserved for future exercises that have triggers — the
-client can be extended, but it's not implemented today.
+Two execution models, selected per-exercise via `task_type` in
+`task.json`:
+
+- `csv_writer` (Task 01 etc.) — pipeline runs server-side at some point
+  earlier; we fetch the already-produced CSV from SLDB for both
+  solution and student. No execution at evaluation time.
+- `triggered_task` (Task 02 onward) — pipeline is exposed as a
+  SnapLogic Triggered Task. /prep invokes the solution task once per
+  scenario in `task.json.requests` and saves each JSON response to
+  `expected/<scenario_name>.json`. /grade does the same against the
+  student's task. This DOES execute the pipeline server-side and
+  counts against execution quota; the prep cache (sidecar keyed off
+  the pipeline's `time_updated`) ensures re-runs are no-ops unless
+  the pipeline definition changed.
+
+The execution path is GET-only — Triggered Tasks expose a cloud URL
+that accepts HTTP Basic auth in place of the per-task bearer token,
+so `SnapLogicClient` stays GET-only by construction (see
+`feedback_snaplogic_api_get_only`).
 
 ## Per-exercise registration
 
 Each exercise lives at `exercises/<slug>/` with:
-- `task.json` (required) — `{ solution_pipeline_path, output_csv_filename }`
+- `task.json` (required) — shape depends on `task_type`:
+  - `csv_writer` (default for back-compat): `{ task_type, solution_pipeline_path, output_csv_filename }`
+  - `triggered_task`: `{ task_type, solution_pipeline_path, triggered_task_name, requests }`
+    where `requests` is a non-empty list of `{ name, params }` scenarios
+    (each `name` becomes a filename in `expected/<name>.json`).
 - `description.md` (required) — student-facing prompt
-- `notes.md` (optional) — instructor hints fed to the AI judge
+- `notes.md` (optional) — instructor hints fed to the AI judge.
+  For triggered_task exercises this is also where the canonical
+  Triggered Task name and scenario list live (in prose); /prep reads
+  notes.md to derive task.json's `triggered_task_name` and `requests`.
 
 The Python loader (`evaluator/tasks.py`) globs `exercises/*/task.json`.
 Adding a new exercise = drop a folder. No code changes.
@@ -110,9 +141,12 @@ Claude Code skill (full flow, one student, all exercises):
 Outputs:
 - `exercises/<slug>/solution.json` + `solution.cache.json` — repo-cached
   solution pipeline JSON and its signature sidecar. Committed to git.
-- `exercises/<slug>/expected/<csv>` — golden output for the current writer
-  filename. `/prep` deletes any other files in `expected/` during reconcile,
-  so stale CSVs from renamed writers don't accumulate.
+- `exercises/<slug>/expected/...` — golden output cache.
+  - csv_writer: one CSV named by `output_csv_filename`.
+  - triggered_task: one JSON file per scenario, `<request_name>.json`.
+  /prep deletes any other files in `expected/` during reconcile, so
+  stale outputs from renamed writers or removed scenarios don't
+  accumulate.
 - `grades/<student>/report.md` — **persistent** aggregated human-readable
   report. Only file that survives a `/grade` run.
 - `.tmp/grades/<student>/...` — **scratch only**, deleted at the end of
