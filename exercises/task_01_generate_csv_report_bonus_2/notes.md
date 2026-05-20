@@ -8,8 +8,9 @@ This exercise builds directly on **Bonus 1** (which itself builds on
 Task 01). The student copies their Bonus 1 pipeline into a new
 pipeline and adds a **Domain** column to the output. The Domain value
 is the portion of the email starting at the `@` character (the `@` is
-included). All Task 01 and Bonus 1 rules still apply — only the
-points below are specific to this bonus.
+included). The universal best-practice rules in
+`general_evaluation_rules.md` and all Task 01 / Bonus 1 task-specific
+rules still apply — only the points below are specific to this bonus.
 
 ## Things that matter (new for Bonus 2)
 
@@ -32,15 +33,13 @@ points below are specific to this bonus.
   the `@`-prefixed domain.
 
 - **Domain must be added to the existing Mapper carried over from
-  Bonus 1 — do not introduce a new Mapper snap for it.** The Bonus 1
-  pipeline already has a Mapper shaping the output rows; the Domain
-  field should be added as another mapping inside that same snap.
-  Adding a second Mapper snap whose only job is to produce the
-  Domain field is not best practice — it splits closely-related
-  output-shaping logic across two snaps for no benefit. This is also
-  consistent with the Task 01 "no extra Mapper snaps" rule. Flag as
-  **minor** if the student introduced a separate Mapper for Domain
-  instead of extending the existing one.
+  Bonus 1.** The Bonus 1 pipeline already has a Mapper shaping the
+  output rows; the Domain field belongs as another mapping inside
+  that same snap, not in a brand-new Mapper. (This is a task-specific
+  application of the universal "no extra Mapper snaps" and
+  "Mapper Pass through" rules.) Flag as **minor** if the student
+  introduced a separate Mapper for Domain instead of extending the
+  existing one.
 
 ## Things that don't matter (new for Bonus 2)
 
