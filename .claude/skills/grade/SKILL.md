@@ -1,6 +1,6 @@
 ---
 name: grade
-description: Grade a SnapLogic student's exercises by comparing each of their pipelines against the official solution. Usage — /grade <student name>  OR  /grade --space <project space> <student name>. Iterates every exercise registered in exercises/<slug>/task.json, runs deterministic hard gates via the Python evaluator, performs AI judgment on each one whose hard gates passed, and produces an aggregated Markdown report at grades/<student>/report.md.
+description: Grade a SnapLogic student's exercises by comparing each of their pipelines against the official solution. Usage — /grade <student name>  OR  /grade --space <project space> <student name>. Iterates every exercise registered in exercises/<slug>/task.json, runs deterministic hard gates via the Python evaluator (supports both csv_writer and triggered_task exercises), performs AI judgment on each one whose hard gates passed, and produces an aggregated Markdown report at grades/<student>/report.md.
 ---
 
 # /grade — Skill workflow
@@ -30,7 +30,11 @@ Exit code ≠ 0 from `plan` means a setup problem (missing `.env`, project not f
 
 For every manifest entry with `status: "ready_for_ai"`, read its `ai_context_path` and write the verdict to its `evaluation_path` using `json.dumps(..., indent=2)`.
 
-`ai_context.json` contains: `exercise_description`, `general_rules`, `task_notes`, `solution_flow` and `student_flow` (topologically-sorted snap labels — use these for snap-order reasoning; never iterate `snap_map`), `solution_definition`, `student_definition`, `student_version_notes` (list of `{version_number, creator, time_created, version_tag, version_note}` from the Designer "Versions" dialog; empty list if the student never created a checkpoint), `hard_gates`.
+`ai_context.json` always contains: `task_slug`, `task_type` (`csv_writer` or `triggered_task`), `exercise_description`, `general_rules`, `task_notes`, `solution_flow` and `student_flow` (topologically-sorted snap labels — use these for snap-order reasoning; never iterate `snap_map`), `solution_definition`, `student_definition`, `student_version_notes` (list of `{version_number, creator, time_created, version_tag, version_note}` from the Designer "Versions" dialog; empty list if the student never created a checkpoint), `hard_gates`.
+
+When `task_type == "triggered_task"`, the bundle also contains:
+- `triggered_task_name_expected` — the convention name (`<pipeline name> Task`). The hard gate already verified a task with this exact name exists in the student's project; you do not need to re-judge naming.
+- `triggered_task_scenarios` — list of `{name, params, expected, student, student_http_status, student_error}` per scenario. `expected` and `student` are parsed JSON (or raw text if invalid). The hard gate already verified every scenario response structurally matches; these are included so you can reason about *how* the student's pipeline produced them when judging structure / bad practice.
 
 **Judging principles** (apply in order):
 

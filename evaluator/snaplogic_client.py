@@ -24,9 +24,20 @@ Endpoint shapes (validated against `elastic.snaplogic.com`):
                           Note: verb-before-id; /pipeline/{snode_id}/versions
                           returns 400.
 
+    GET /api/1/rest/slsched/feed/{org}/{ps}/{project}/{task_name}
+        -> raw pipeline output (typically JSON). Invokes a Triggered Task
+        with basic auth and query-string parameters. Used by /prep to
+        capture solution responses and by /grade to compare against
+        student responses. Verified 2026-05-20: returns the same JSON
+        body the task's Designer view shows.
+
 Notes:
 - The Public-API `/catalog/...` endpoint is a paid feature; we don't use it.
 - Authentication is HTTP Basic with admin credentials.
+- Triggered Tasks appear in `list_assets` as `asset_type="Job"` with
+  `metadata.type="triggered"`. The cloud URL above accepts basic auth
+  in place of the per-task bearer token, so we never need to fetch
+  task-side secrets.
 """
 from __future__ import annotations
 
@@ -154,6 +165,59 @@ class SnapLogicClient:
         """Convenience: resolve name → snode_id → fetch definition."""
         snode_id = self.find_pipeline_snode_id(org, project_space, project, pipeline_name)
         return self.get_pipeline_definition(snode_id)
+
+    def find_triggered_task_entry(
+        self,
+        org: str,
+        project_space: str,
+        project: str,
+        task_name: str,
+    ) -> dict[str, Any]:
+        """Return the asset-list entry for a Triggered Task by name.
+
+        Triggered Tasks are stored as `asset_type="Job"` entries with
+        `metadata.type="triggered"`. Scheduled and ultra-task jobs use
+        different `metadata.type` values; filtering on "triggered"
+        avoids matching those.
+        """
+        for entry in self.list_assets(org, project_space, project):
+            if (
+                entry.get("asset_type") == "Job"
+                and entry.get("name") == task_name
+                and (entry.get("metadata") or {}).get("type") == "triggered"
+            ):
+                return entry
+        raise LookupError(
+            f"No Triggered Task named {task_name!r} in "
+            f"{org}/{project_space}/{project}"
+        )
+
+    def invoke_triggered_task(
+        self,
+        org: str,
+        project_space: str,
+        project: str,
+        task_name: str,
+        params: dict[str, str] | None = None,
+    ) -> bytes:
+        """Invoke a Triggered Task via its cloud URL and return raw bytes.
+
+        Endpoint: `GET /api/1/rest/slsched/feed/{org}/{ps}/{project}/{task_name}`
+        with HTTP Basic auth and query-string `params`. The response body
+        is whatever the task's final output snap produces — for most
+        SnapLogic exercises that means a JSON array.
+
+        This DOES execute the pipeline server-side (it counts against
+        SnapLogic execution quotas). Caching of responses is the caller's
+        responsibility — see `pipeline_fetch` for the cache logic /prep
+        and /grade use.
+        """
+        path = "/api/1/rest/slsched/feed/" + self._encode_path_segments(
+            org, project_space, project, task_name
+        )
+        resp = self._http.get(path, params=params or {})
+        resp.raise_for_status()
+        return resp.content
 
     def download_sldb_file(
         self,
