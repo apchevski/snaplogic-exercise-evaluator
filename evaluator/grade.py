@@ -78,7 +78,11 @@ def _find_student_pipeline(
 # ---------- `plan` subcommand ----------
 
 
-def cmd_plan(student: str, project_space: str | None) -> int:
+def cmd_plan(
+    student: str,
+    project_space: str | None,
+    task_slug: str | None = None,
+) -> int:
     try:
         settings = load_settings()
     except RuntimeError as e:
@@ -102,8 +106,21 @@ def cmd_plan(student: str, project_space: str | None) -> int:
         )
         return 2
 
-    registered_set = set(registered)
-    unregistered = [f for f in all_folders if f not in registered_set]
+    if task_slug is not None:
+        if task_slug not in all_folders:
+            print(
+                f"ERROR: No exercise folder named {task_slug!r} under exercises/. "
+                f"Known: {all_folders}",
+                file=sys.stderr,
+            )
+            return 2
+        # Single-task mode: ignore other registered/unregistered folders entirely.
+        was_registered = task_slug in registered
+        registered = [task_slug] if was_registered else []
+        unregistered = [] if was_registered else [task_slug]
+    else:
+        registered_set = set(registered)
+        unregistered = [f for f in all_folders if f not in registered_set]
 
     entries: list[dict[str, Any]] = []
     for folder in unregistered:
@@ -284,7 +301,113 @@ def _render_task_section(slug: str, eval_data: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def cmd_report(student: str, project_space: str | None) -> int:
+def _render_entry_section(entry: dict[str, Any]) -> tuple[str, str]:
+    """Render one manifest entry as (section_markdown, count_bucket)."""
+    slug = entry["slug"]
+    status = entry["status"]
+    if status == "needs_prep":
+        return (
+            f"## {slug} — ⏳ NEEDS PREP\n\n"
+            f"**Reason**: {entry.get('reason', 'Solution cache not ready.')}\n\n"
+            f"Run `/prep` to bootstrap or refresh, then re-run `/grade`.",
+            "needs_prep",
+        )
+    if status == "missing":
+        return (
+            f"## {slug} — ⊘ MISSING\n\n"
+            f"**Reason**: {entry.get('reason', 'No matching pipeline.')}",
+            "missing",
+        )
+    if status == "config_error":
+        return (
+            f"## {slug} — ✗ CONFIG ERROR\n\n"
+            f"**Reason**: {entry.get('reason', 'Unknown error.')}",
+            "fail",
+        )
+    eval_path = Path(entry["evaluation_path"])
+    if not eval_path.exists():
+        return (
+            f"## {slug} — ✗ MISSING EVALUATION\n\n"
+            f"Expected `{eval_path}` after AI judgment but it was not written.",
+            "fail",
+        )
+    eval_data = json.loads(eval_path.read_text(encoding="utf-8"))
+    verdict = eval_data.get("verdict", "fail")
+    bucket = verdict if verdict in {"pass", "pass_with_minor_issues", "fail"} else "fail"
+    return _render_task_section(slug, eval_data), bucket
+
+
+def _split_report_sections(text: str) -> tuple[str, list[str]]:
+    """Split a rendered report.md into (head_block, [task_sections]).
+
+    Sections are separated by '\\n\\n---\\n\\n'. The head block contains
+    the title, metadata bullets, and the Overall section. Returns the
+    full text as head_block and [] if no separator is found.
+    """
+    parts = text.split("\n\n---\n\n")
+    if len(parts) <= 1:
+        return text, []
+    return parts[0], parts[1:]
+
+
+def _section_matches_slug(section: str, slug: str) -> bool:
+    head = section.lstrip().splitlines()[0] if section.strip() else ""
+    return head.startswith(f"## {slug} ") or head == f"## {slug}"
+
+
+def _update_report_in_place(
+    out_path: Path,
+    entry: dict[str, Any],
+    manifest: dict[str, Any],
+    student: str,
+) -> None:
+    """Replace one task's section in the existing report.md (or create one).
+
+    Header, counts, date, and Overall are intentionally left untouched —
+    a single-task re-grade should not claim to have refreshed everything.
+    If no report exists yet, a minimal single-task report is written
+    instead.
+    """
+    new_section, _ = _render_entry_section(entry)
+    slug = entry["slug"]
+
+    if out_path.exists():
+        existing = out_path.read_text(encoding="utf-8")
+        head_block, sections = _split_report_sections(existing)
+        updated_sections: list[str] = []
+        replaced = False
+        for sec in sections:
+            if not replaced and _section_matches_slug(sec, slug):
+                updated_sections.append(new_section)
+                replaced = True
+            else:
+                updated_sections.append(sec)
+        if not replaced:
+            updated_sections.append(new_section)
+        merged = head_block + "\n\n---\n\n" + "\n\n---\n\n".join(updated_sections) + "\n"
+        out_path.write_text(merged, encoding="utf-8")
+        return
+
+    # No existing report — produce a minimal single-task one. Counts are
+    # omitted on purpose (we don't know about other tasks).
+    header_lines = [
+        f"# Grade report — {student}",
+        "",
+        f"- **Project**: `{manifest['student_project_path']}`",
+        f"- **Date**: {manifest['generated_at']}",
+        f"- **Single-task grading**: `{slug}`",
+        "",
+    ]
+    report = "\n".join(header_lines) + "\n\n---\n\n" + new_section + "\n"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(report, encoding="utf-8")
+
+
+def cmd_report(
+    student: str,
+    project_space: str | None,
+    task_slug: str | None = None,
+) -> int:
     manifest_path = _manifest_path(student)
     if not manifest_path.exists():
         print(
@@ -297,6 +420,41 @@ def cmd_report(student: str, project_space: str | None) -> int:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = manifest["entries"]
 
+    if task_slug is not None:
+        entry = next((e for e in entries if e["slug"] == task_slug), None)
+        if entry is None:
+            print(
+                f"ERROR: Manifest has no entry for {task_slug!r}. "
+                f"Available: {[e['slug'] for e in entries]}",
+                file=sys.stderr,
+            )
+            return 2
+        out_path = _student_report_dir(student) / "report.md"
+        _update_report_in_place(out_path, entry, manifest, student)
+
+        # Print result line for the one task.
+        status = entry["status"]
+        if status == "needs_prep":
+            print(f"  {task_slug} -> NEEDS_PREP")
+        elif status == "missing":
+            print(f"  {task_slug} -> MISSING")
+        elif status == "config_error":
+            print(f"  {task_slug} -> CONFIG_ERROR")
+        else:
+            eval_path = Path(entry["evaluation_path"])
+            if eval_path.exists():
+                v = json.loads(eval_path.read_text(encoding="utf-8")).get("verdict", "?")
+                print(f"  {task_slug} -> {v}")
+            else:
+                print(f"  {task_slug} -> NO_EVALUATION")
+        print(f"Report updated in place: {out_path}")
+
+        tmp_dir = _student_dir(student)
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            print(f"Cleaned up scratch dir: {tmp_dir}")
+        return 0
+
     counts = {
         "pass": 0,
         "pass_with_minor_issues": 0,
@@ -307,47 +465,9 @@ def cmd_report(student: str, project_space: str | None) -> int:
     sections: list[str] = []
 
     for entry in entries:
-        slug = entry["slug"]
-        status = entry["status"]
-        if status == "needs_prep":
-            counts["needs_prep"] += 1
-            sections.append(
-                f"## {slug} — ⏳ NEEDS PREP\n\n"
-                f"**Reason**: {entry.get('reason', 'Solution cache not ready.')}\n\n"
-                f"Run `/prep` to bootstrap or refresh, then re-run `/grade`."
-            )
-            continue
-        if status == "missing":
-            counts["missing"] += 1
-            sections.append(
-                f"## {slug} — ⊘ MISSING\n\n"
-                f"**Reason**: {entry.get('reason', 'No matching pipeline.')}"
-            )
-            continue
-        if status == "config_error":
-            counts["fail"] += 1
-            sections.append(
-                f"## {slug} — ✗ CONFIG ERROR\n\n"
-                f"**Reason**: {entry.get('reason', 'Unknown error.')}"
-            )
-            continue
-
-        eval_path = Path(entry["evaluation_path"])
-        if not eval_path.exists():
-            counts["fail"] += 1
-            sections.append(
-                f"## {slug} — ✗ MISSING EVALUATION\n\n"
-                f"Expected `{eval_path}` after AI judgment but it was not written."
-            )
-            continue
-
-        eval_data = json.loads(eval_path.read_text(encoding="utf-8"))
-        verdict = eval_data.get("verdict", "fail")
-        if verdict in counts:
-            counts[verdict] += 1
-        else:
-            counts["fail"] += 1
-        sections.append(_render_task_section(slug, eval_data))
+        section, bucket = _render_entry_section(entry)
+        counts[bucket] = counts.get(bucket, 0) + 1
+        sections.append(section)
 
     total = len(entries)
     header = [
@@ -428,6 +548,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Override SNAPLOGIC_STUDENT_PROJECT_SPACE.",
     )
+    p_plan.add_argument(
+        "--task",
+        dest="task_slug",
+        default=None,
+        help="Limit the run to a single exercise folder (slug under exercises/).",
+    )
 
     p_report = subparsers.add_parser(
         "report",
@@ -435,12 +561,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_report.add_argument("student")
     p_report.add_argument("--space", dest="project_space", default=None)
+    p_report.add_argument(
+        "--task",
+        dest="task_slug",
+        default=None,
+        help=(
+            "Update only one task's section in the existing report.md in place "
+            "(or create a single-task report if none exists)."
+        ),
+    )
 
     args = parser.parse_args(argv)
     if args.cmd == "plan":
-        return cmd_plan(args.student, args.project_space)
+        return cmd_plan(args.student, args.project_space, args.task_slug)
     if args.cmd == "report":
-        return cmd_report(args.student, args.project_space)
+        return cmd_report(args.student, args.project_space, args.task_slug)
     parser.error(f"Unknown subcommand: {args.cmd}")
     return 2
 

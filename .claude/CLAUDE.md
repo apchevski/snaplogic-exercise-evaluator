@@ -38,6 +38,19 @@ When in doubt: write it to `.claude/`. Duplication into memory is unnecessary â€
 
 ---
 
+# Keep README.md and CHANGELOG.md current
+
+Whenever you add a feature, change behavior, rename a flag/env var, restructure folders, or otherwise modify how the project is used, **update BOTH `README.md` AND `CHANGELOG.md` in the same change**. Don't defer it â€” the docs drift fast.
+
+- **README.md** is the user-facing manual. Touch it whenever the user-visible surface changes: new slash command, new flag, renamed env var, new exercise type, changed project layout, new setup step.
+- **CHANGELOG.md** is the running log of changes (under `## [Unreleased]`). Add one bullet per logically distinct change. Lead with the "what changed" and add the "why" only when it's not obvious from the bullet.
+
+If a change is purely internal (refactor with no behavior change, new convention file, comment-only edits), skip the README but still add a brief CHANGELOG bullet so reviewers see it.
+
+If you're unsure whether a change is user-visible, default to updating both.
+
+---
+
 # Conventions
 
 All project-wide and skill-scoped rules live in their own files under [.claude/conventions/](conventions/). Read the relevant file when a rule applies. Skill workflows themselves live in the SKILL.md under [.claude/skills/](skills/); background architecture / project framing lives in [.claude/architecture.md](architecture.md) and [.claude/project.md](project.md).
