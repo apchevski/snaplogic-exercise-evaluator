@@ -19,7 +19,9 @@ comparing the JSON response.
   name exists in the student's project, the submission is an
   **automatic FAIL**. A correctly-behaving task registered under a
   different name still fails the gate — the convention is strict, not
-  a soft preference.
+  a soft preference. The only allowed deviation is the dash glyph:
+  hyphen-minus `-`, en dash `–`, and em dash `—` count as the same
+  character, so `Task 02 - Calculator Task` also passes.
 
 - **The Triggered Task must return the correct response for every
   tested scenario.**

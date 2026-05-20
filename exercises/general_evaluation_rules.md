@@ -6,9 +6,14 @@ submission is marked **FAIL** and no AI tokens are spent.
 
 ## Hard rules (deterministic, applied before AI)
 
-1. **Pipeline name must match exactly.**
-   The student's pipeline name must be an exact, case-sensitive match of
-   the solution pipeline's name. Trailing/leading whitespace counts.
+1. **Pipeline name must match exactly (dash glyphs are interchangeable).**
+   The student's pipeline name must be a character-for-character,
+   case-sensitive match of the solution pipeline's name, except that the
+   three dash glyphs — hyphen-minus `-` (U+002D), en dash `–` (U+2013),
+   and em dash `—` (U+2014) — compare as equal. So
+   `Task 03 – Join Employee Records` (en dash) and
+   `Task 03 - Join Employee Records` (hyphen) are the same name.
+   Trailing/leading whitespace and all other punctuation still count.
 
 2. **(csv_writer) Output CSV must match exactly.**
    When an exercise produces a CSV via a binary-write snap, the
@@ -21,7 +26,9 @@ submission is marked **FAIL** and no AI tokens are spent.
    For triggered-task exercises, a Triggered Task named exactly
    `<pipeline name> Task` must exist in the student's project. The
    convention is strict — a correctly-behaving task under a different
-   name still fails this gate.
+   name still fails this gate. The same dash-glyph tolerance from rule 1
+   applies: hyphen-minus, en dash, and em dash compare as equal, but no
+   other deviation is allowed.
 
 4. **(triggered_task) Every scenario response must match.**
    Each scenario in `task.json`'s `requests` array is invoked against
