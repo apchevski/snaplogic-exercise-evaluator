@@ -378,14 +378,8 @@ def cmd_report(student: str, project_space: str | None) -> int:
         "Replace this comment with the paragraph. -->",
     ]
 
-    footer = [
-        "## Recommendations",
-        "",
-        "<!-- TODO Claude: actionable bullets for the student. Replace this comment. -->",
-    ]
-
     body = ("\n\n---\n\n").join(sections)
-    report = "\n".join(header) + "\n\n---\n\n" + body + "\n\n---\n\n" + "\n".join(footer) + "\n"
+    report = "\n".join(header) + "\n\n---\n\n" + body + "\n"
 
     out_path = _student_report_dir(student) / "report.md"
     out_path.parent.mkdir(parents=True, exist_ok=True)
