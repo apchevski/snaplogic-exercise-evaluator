@@ -50,6 +50,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from .config import EXERCISES_DIR, Settings, load_settings
+from .name_match import pipeline_paths_match
 from .pipeline_fetch import (
     PipelineLocation,
     SolutionNotReadyError,
@@ -294,7 +295,7 @@ def _classify_csv_writer(
             reason=reason,
         )
 
-    if task.solution_pipeline_path != proposed_path:
+    if not pipeline_paths_match(task.solution_pipeline_path, proposed_path):
         return FolderReport(
             slug=folder,
             status=STATUS_PIPELINE_RENAMED,
@@ -371,7 +372,7 @@ def _classify_triggered_task(
     request_names = [r.name for r in task.requests]
     expected_filenames = list(task.expected_response_filenames)
 
-    if task.solution_pipeline_path != proposed_path:
+    if not pipeline_paths_match(task.solution_pipeline_path, proposed_path):
         return FolderReport(
             slug=folder,
             status=STATUS_PIPELINE_RENAMED,
@@ -529,7 +530,9 @@ def _reconcile_csv_writer(
             existing = load_task(folder)
             need_write = (
                 existing.task_type != TASK_TYPE_CSV_WRITER
-                or existing.solution_pipeline_path != report.solution_pipeline_path
+                or not pipeline_paths_match(
+                    existing.solution_pipeline_path, report.solution_pipeline_path
+                )
                 or existing.output_csv_filename != report.output_csv_filename
             )
         except (json.JSONDecodeError, TypeError, KeyError, ValueError):

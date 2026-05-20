@@ -30,6 +30,7 @@ import httpx
 
 from .config import GRADES_DIR, TMP_DIR, load_settings
 from .evaluate import run_evaluation
+from .name_match import names_match
 from .pipeline_fetch import SolutionNotReadyError
 from .snaplogic_client import SnapLogicClient
 from .tasks import list_exercise_folders, list_tasks, load_task
@@ -52,16 +53,6 @@ def _manifest_path(student: str) -> Path:
     return _student_dir(student) / "manifest.json"
 
 
-def _normalize(name: str) -> str:
-    """Loosely equate en-dash / em-dash / hyphen and trim whitespace."""
-    return (
-        name.replace("–", "-")
-        .replace("—", "-")
-        .strip()
-        .lower()
-    )
-
-
 def _solution_pipeline_name(solution_pipeline_path: str) -> str:
     return solution_pipeline_path.rstrip("/").split("/")[-1]
 
@@ -70,14 +61,16 @@ def _find_student_pipeline(
     assets: list[dict[str, Any]],
     target_name: str,
 ) -> tuple[str | None, bool]:
-    """Return (matched_pipeline_name, is_fuzzy). None if no plausible match."""
-    target_norm = _normalize(target_name)
+    """Return (matched_pipeline_name, is_fuzzy). None if no plausible match.
+
+    Name comparison is exact except dash glyphs (en/em-dash count as
+    hyphen-minus) — see `evaluator.name_match`. `is_fuzzy` is kept in the
+    return signature for callers but is always False today: dash-tolerance
+    is the only allowed deviation, not a fuzzy heuristic.
+    """
     pipelines = [a for a in assets if a.get("asset_type") == "Pipeline"]
     for a in pipelines:
-        if a.get("name") == target_name:
-            return a["name"], False
-    for a in pipelines:
-        if _normalize(a.get("name", "")) == target_norm:
+        if names_match(a.get("name", ""), target_name):
             return a["name"], False
     return None, False
 

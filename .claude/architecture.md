@@ -10,7 +10,10 @@ final judgment has to come from a model rather than a hand-coded rubric.
 
 1. **Hard gates (deterministic)** — cheap, fast, fail-closed. Implemented
    in `evaluator/`, invoked via `python -m evaluator <slug> --student ...`.
-   - Pipeline name must exactly match the solution's.
+   - Pipeline name must match the solution's exactly, with the single
+     exception that the three dash glyphs (hyphen-minus, en dash, em
+     dash) compare as equal — see
+     [pipeline-name-dash-tolerant](conventions/pipeline-name-dash-tolerant.md).
    - For csv_writer: the student's CSV output must match the solution's
      (header + row multiset).
    - For triggered_task: (a) a Triggered Task named exactly

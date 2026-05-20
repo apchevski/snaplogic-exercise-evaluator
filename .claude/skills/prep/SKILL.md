@@ -75,7 +75,7 @@ Apply the matching rule per entry:
 
   1. Read `exercises/<slug>/description.md` (the student-facing prompt — describes the task's behavior and any input parameters).
   2. Read `exercises/<slug>/notes.md` (instructor-facing — usually specifies the expected Triggered Task name, the scenarios to exercise, and the expected response shape).
-  3. Determine the canonical Triggered Task name. By the project's naming convention this is the pipeline name plus the suffix ` Task` (e.g. `Task 02 – Calculator` → `Task 02 – Calculator Task`). The triggered task name must match the SnapLogic asset byte-for-byte — same en-dash/em-dash/hyphen, same spacing. If notes.md spells it out, trust notes.md; otherwise use the convention.
+  3. Determine the canonical Triggered Task name. By the project's naming convention this is the pipeline name plus the suffix ` Task` (e.g. `Task 02 – Calculator` → `Task 02 – Calculator Task`). The triggered task name must match the SnapLogic asset exactly except for dash glyphs: hyphen-minus `-` (U+002D), en dash `–` (U+2013), and em dash `—` (U+2014) compare as equal everywhere a name is checked (see [pipeline-name-dash-tolerant](../../conventions/pipeline-name-dash-tolerant.md)). Spacing, casing, and every other character must still match. If notes.md spells it out, trust notes.md; otherwise use the convention.
   4. Derive scenarios from notes.md (and description.md if notes.md is silent). Each scenario gets a snake_case `name` (filesystem-safe — it becomes a filename in `expected/`) and a `params` dict (the query-string parameters the triggered task accepts). Cover every behavior branch notes.md flags — operator branches, error/fallback branches, edge cases.
   5. Write `exercises/<slug>/task.json` with this shape:
 
