@@ -54,13 +54,17 @@ The `grade` skill then:
    structural differences in-conversation, and writes the final
    `evaluation.json`. **The AI step runs inside your Claude Code session
    — no API calls.**
-5. Composes `grades/<student>/report.md` aggregating every exercise. Scratch
-   artifacts under `.tmp/grades/<student>/` are deleted at the end of the run —
-   only `report.md` persists.
+5. Composes `grades/<student>/report.md` (human-readable) and
+   `grades/<student>/report.json` (structured mirror for downstream tooling /
+   future UI) aggregating every exercise. Scratch artifacts under
+   `.tmp/grades/<student>/` are deleted at the end of the run — only the two
+   `report.*` files persist.
 
 `/grade <student> --task <slug>` re-grades a single exercise and updates only
 that task's section in the existing `report.md` in place — the header, counts,
-date, and `## Overall` paragraph are left untouched.
+date, and `## Overall` paragraph are left untouched. The matching task entry in
+`report.json` is updated in lockstep, and the JSON `counts` field is
+recomputed from the merged task list.
 
 ### Pipeline-name matching: dash-tolerant for pipelines, strict for Triggered Tasks
 
@@ -109,7 +113,7 @@ silently route to the wrong task.
 │       ├── solution.json
 │       ├── solution.cache.json
 │       └── expected/           # one <scenario>.json per request in task.json
-├── grades/                     # persistent per-student report.md files (written by `/grade`)
+├── grades/                     # persistent per-student report.md + report.json (written by `/grade`)
 ├── evaluator/
 │   ├── __init__.py
 │   ├── __main__.py             # `python -m evaluator ...`
@@ -196,8 +200,35 @@ Flags:
 
 The `/prep` and `/grade` orchestrators are exposed as their own subcommands:
 `python -m evaluator.prep {survey,sync}` and
-`python -m evaluator.grade {plan,report}`. The skills under
-`.claude/skills/` document the exact invocations.
+`python -m evaluator.grade {plan,report,sync-overall}`. The skills under
+`.claude/skills/` document the exact invocations. `sync-overall` is a small
+helper that copies the rendered `## Overall` paragraph from `report.md` into
+`overall_summary` inside `report.json`; the `/grade` skill calls it after
+filling in the Overall paragraph (full mode only).
+
+## Grade dashboard (browser UI)
+
+`/grade` rebuilds `ui/index.html` silently at the end of every run (both full
+and single-task mode), so the dashboard stays in sync with `grades/`
+automatically. Open the file once in your browser and refresh after each
+grade run — no extra command needed.
+
+To explicitly build the page (and open it in the default browser):
+
+```powershell
+.\.venv\Scripts\python.exe -m evaluator.ui
+```
+
+This walks every `grades/<student>/report.json` and generates a single
+self-contained `ui/index.html` with the data embedded inline (no HTTP server,
+no `fetch` calls). Features: search by student name, filter by project space,
+sort by pass count or grading date, per-student card with verdict badges,
+overall summary, and a collapsible per-task accordion showing summaries,
+differences (with severity colors), failing gates, and bonus answers.
+
+Pass `--no-open` to build the page without opening it (this is what
+`/grade`'s auto-rebuild uses internally). The `ui/` folder is gitignored —
+it's purely derived from `grades/`.
 
 Exit codes:
 - `0` — hard gates passed (AI step pending, or all gates passed)

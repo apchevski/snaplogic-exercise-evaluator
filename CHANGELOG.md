@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- `/grade` now auto-rebuilds `ui/index.html` silently at the end of every run (both full and single-task mode, plus `sync-overall`) — no more manually running `python -m evaluator.ui` after each grade. The `python -m evaluator.ui` command is still there for explicit rebuilds that also open the browser. Also allowlist `sync-overall` and `evaluator.ui` in `.claude/settings.json` so the skill never prompts for these.
+- Add `python -m evaluator.ui` — generates a single self-contained `ui/index.html` (inline CSS/JS/JSON, no HTTP server) from every `grades/<student>/report.json` and opens it in the default browser. Filter by project space, search by student name, sort by pass count or grading date, expand per-task accordion to see verdicts/differences/bonus answers. `ui/` is gitignored.
+- `/grade` now also writes `grades/<student>/report.json` alongside `report.md` — a structured mirror of the report (student, project_space, counts, per-task verdict/summary/differences/bonus, overall_summary) intended to back a future UI without parsing markdown. Full mode writes both files; single-task mode updates the matching task entry in both and recomputes the JSON `counts`.
+- Add `python -m evaluator.grade sync-overall <student>` subcommand. The `/grade` skill calls it after Claude fills in the `## Overall` paragraph in `report.md` (full mode only); it copies that paragraph into `overall_summary` in `report.json` so the two stay in lockstep.
 - Consolidate universal SnapLogic best-practice rules (filter-before-sort, CSV Formatter *Ignore empty stream*, Mapper *Pass through*, no extra Mapper snaps, all snaps renamed from defaults, bonus answers in pipeline version notes) into `exercises/general_evaluation_rules.md` and trim each task's `notes.md` down to genuinely task-specific guidance. Per-task notes may still override any universal rule when the exercise calls for it.
 - Add Python project scaffold (requirements.txt, evaluator package).
 - Add GET-only SnapLogic REST client; validated against elastic.snaplogic.com.

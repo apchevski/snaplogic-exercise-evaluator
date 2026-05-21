@@ -80,13 +80,23 @@ Run (pass the same `--task` you passed to `plan`, if any):
 .venv/Scripts/python.exe -m evaluator.grade report "<student>" [--space "<project_space>"] [--task "<slug>"]
 ```
 
-**Full mode** (no `--task`): writes `grades/<student>/report.md` (the persistent location, outside `.tmp/`) with all per-task sections rendered from the per-task `evaluation.json` files, then deletes `.tmp/grades/<student>/` — only the report.md survives. The report contains one placeholder TODO comment — `## Overall`. Use the `Edit` tool to replace it in `grades/<student>/report.md`:
+Both modes silently rebuild `ui/index.html` after writing the report so the dashboard reflects the latest grades — you do NOT need to run `python -m evaluator.ui` yourself.
+
+**Full mode** (no `--task`): writes `grades/<student>/report.md` (the persistent location, outside `.tmp/`) with all per-task sections rendered from the per-task `evaluation.json` files, plus a structured mirror at `grades/<student>/report.json` for downstream tooling (future UI). Then deletes `.tmp/grades/<student>/` — only the persistent files survive. The report contains one placeholder TODO comment — `## Overall`. Use the `Edit` tool to replace it in `grades/<student>/report.md`:
 
 - `## Overall`: one paragraph summarizing the submission. Flag patterns across tasks (e.g. "consistently swaps filter/sort order").
 
+After editing the Overall paragraph into report.md, run:
+
+```
+.venv/Scripts/python.exe -m evaluator.grade sync-overall "<student>"
+```
+
+This copies the paragraph you wrote into `overall_summary` in `report.json` so the JSON mirror stays in sync with the markdown, then rebuilds `ui/index.html` so the dashboard picks up the new Overall summary. Always run it after editing `## Overall` in full mode.
+
 After step 3 runs in full mode, the per-task `ai_context.json` and `evaluation.json` files are gone. You don't need them — fill in the Overall paragraph from the conversation context you already have.
 
-**Single-task mode** (`--task <slug>`): replaces only that task's `## <slug> — …` section in the existing `grades/<student>/report.md`, leaving the header, counts, date, and `## Overall` untouched. If no report exists yet, a minimal single-task report is written instead (no `## Overall` placeholder). Do NOT write or edit an `## Overall` paragraph in this mode — the existing one (if any) is intentionally preserved, and a single-task re-grade should not claim to have re-evaluated the whole submission. The `.tmp/grades/<student>/` scratch dir is still cleaned up after.
+**Single-task mode** (`--task <slug>`): replaces only that task's `## <slug> — …` section in the existing `grades/<student>/report.md`, leaving the header, counts, date, and `## Overall` untouched. The matching task entry in `grades/<student>/report.json` is updated in lockstep (and `counts` there is recomputed from the merged task list). If no report exists yet, a minimal single-task report (md + json) is written instead (no `## Overall` placeholder). Do NOT write or edit an `## Overall` paragraph in this mode — the existing one (if any) is intentionally preserved, and a single-task re-grade should not claim to have re-evaluated the whole submission. Do NOT call `sync-overall` in single-task mode. The `.tmp/grades/<student>/` scratch dir is still cleaned up after.
 
 ### 4. Tell the user
 
