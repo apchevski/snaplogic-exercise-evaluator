@@ -23,22 +23,24 @@ Each response must match the expected shape exactly:
 
 ## Things that matter (task-specific)
 
-- **The "no operator" branch must be implemented.**
+- **The "no operator" branch must be implemented. `-2 points`.**
   The pipeline must explicitly handle the case where the input
   contains no valid operator and return the canonical
   `"No operator in the equation"` response. If this branch is
   missing (e.g. the pipeline errors out, returns an empty array, or
-  returns a partial calculation), flag as **major**.
+  returns a partial calculation), deduct **`-2`** (this case is
+  exercised by the no-operator scenario in the hard gates, so a
+  missing branch will usually have already produced a FAIL).
 
 - **Prefer Mapper → Conditional → Mapper (3 snaps) over
-  Router + 5 Mappers + Union.**
+  Router + 5 Mappers + Union. `-1 point`.**
   The clean solution uses a single Conditional snap to dispatch on
   the operator and a single downstream Mapper to shape the result.
   An alternative implementation using a Router with five outputs,
   five per-operator Mapper snaps, and a Union to recombine them is
   functionally equivalent but unnecessarily wide and harder to
-  maintain. If the student used the Router-fan-out approach, flag as
-  **minor** — the result is correct, but the Conditional-based
+  maintain. If the student used the Router-fan-out approach, deduct
+  **`-1`** — the result is correct, but the Conditional-based
   layout is the preferred pattern.
 
 ## Things that don't matter (task-specific)

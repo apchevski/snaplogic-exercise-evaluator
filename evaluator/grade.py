@@ -203,6 +203,23 @@ def cmd_plan(
                     "evaluation_path": str(per_task_eval),
                 }
             )
+        elif exit_code == 4 and per_task_eval.exists():
+            # Deliverable not submitted (e.g. csv_output_present 404)
+            # → treated as MISSING (not graded, excluded from totals).
+            eval_data = json.loads(per_task_eval.read_text(encoding="utf-8"))
+            entries.append(
+                {
+                    "slug": slug,
+                    "status": "missing",
+                    "student_pipeline_name": matched,
+                    "evaluation_path": str(per_task_eval),
+                    "reason": (
+                        eval_data.get("failing_gate_detail")
+                        or eval_data.get("summary")
+                        or "Deliverable not submitted."
+                    ),
+                }
+            )
         else:
             entries.append(
                 {
@@ -246,23 +263,39 @@ def cmd_plan(
 # ---------- `report` subcommand ----------
 
 
+MAX_POINTS_PER_EXERCISE = 10
+
 _VERDICT_BADGES = {
     "pass": "✓ PASS",
-    "pass_with_minor_issues": "⚠ PASS with minor issues",
     "fail": "✗ FAIL",
 }
 
-_SEVERITY_DOTS = {
-    "major": "🔴",
-    "minor": "🟡",
-    "cosmetic": "🔵",
-}
+
+def _format_points(points: Any) -> str:
+    """Render the `Points: X/10` line value.
+
+    None means MISSING (or any unscored state) — displayed as `—`.
+    Anything numeric clamps into [0, MAX_POINTS_PER_EXERCISE] for safety.
+    """
+    if points is None:
+        return f"—/{MAX_POINTS_PER_EXERCISE}"
+    try:
+        p = int(points)
+    except (TypeError, ValueError):
+        return f"—/{MAX_POINTS_PER_EXERCISE}"
+    p = max(0, min(p, MAX_POINTS_PER_EXERCISE))
+    return f"{p}/{MAX_POINTS_PER_EXERCISE}"
 
 
 def _render_task_section(slug: str, eval_data: dict[str, Any]) -> str:
     verdict = eval_data.get("verdict", "fail")
     badge = _VERDICT_BADGES.get(verdict, f"? {verdict}")
+    points = eval_data.get("points")
+    if verdict == "fail" and points is None:
+        points = 0
     lines = [f"## {slug} — {badge}", ""]
+    lines.append(f"**Points**: {_format_points(points)}")
+    lines.append("")
 
     summary = eval_data.get("summary") or "(no summary)"
     lines.append(f"**Summary**: {summary}")
@@ -281,16 +314,30 @@ def _render_task_section(slug: str, eval_data: dict[str, Any]) -> str:
         lines.append("")
 
     diffs = eval_data.get("differences") or []
-    if diffs:
-        lines.append("**Differences**:")
-        for d in diffs:
-            sev = (d.get("severity") or "").lower()
-            dot = _SEVERITY_DOTS.get(sev, "•")
+    # Split deductions (cost points) from notes (mentioned only).
+    deductions = [d for d in diffs if int(d.get("points_deducted") or 0) > 0]
+    notes = [d for d in diffs if int(d.get("points_deducted") or 0) == 0]
+
+    if deductions:
+        total_ded = sum(int(d.get("points_deducted") or 0) for d in deductions)
+        lines.append(f"**Deductions** (−{total_ded}):")
+        for d in deductions:
+            cost = int(d.get("points_deducted") or 0)
             area = d.get("area") or "(unspecified)"
             desc = d.get("description") or ""
             reasoning = d.get("reasoning") or ""
             tail = f" — {reasoning}" if reasoning else ""
-            lines.append(f"- {dot} **[{sev or 'note'}]** {area} — {desc}{tail}")
+            lines.append(f"- **−{cost}** · {area} — {desc}{tail}")
+        lines.append("")
+
+    if notes:
+        lines.append("**Notes** (no deduction):")
+        for d in notes:
+            area = d.get("area") or "(unspecified)"
+            desc = d.get("description") or ""
+            reasoning = d.get("reasoning") or ""
+            tail = f" — {reasoning}" if reasoning else ""
+            lines.append(f"- {area} — {desc}{tail}")
         lines.append("")
 
     bonus = eval_data.get("bonus_question_answer")
@@ -301,40 +348,61 @@ def _render_task_section(slug: str, eval_data: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def _render_entry_section(entry: dict[str, Any]) -> tuple[str, str]:
-    """Render one manifest entry as (section_markdown, count_bucket)."""
+def _render_entry_section(entry: dict[str, Any]) -> tuple[str, str, int | None]:
+    """Render one manifest entry as (section_markdown, count_bucket, points).
+
+    `points` is None for MISSING / NEEDS_PREP (not graded) and an int in
+    [0, MAX_POINTS_PER_EXERCISE] otherwise. The caller uses it to compute
+    the per-student total.
+    """
     slug = entry["slug"]
     status = entry["status"]
     if status == "needs_prep":
         return (
             f"## {slug} — ⏳ NEEDS PREP\n\n"
+            f"**Points**: {_format_points(None)}\n\n"
             f"**Reason**: {entry.get('reason', 'Solution cache not ready.')}\n\n"
             f"Run `/prep` to bootstrap or refresh, then re-run `/grade`.",
             "needs_prep",
+            None,
         )
     if status == "missing":
         return (
             f"## {slug} — ⊘ MISSING\n\n"
+            f"**Points**: {_format_points(None)}\n\n"
             f"**Reason**: {entry.get('reason', 'No matching pipeline.')}",
             "missing",
+            None,
         )
     if status == "config_error":
         return (
             f"## {slug} — ✗ CONFIG ERROR\n\n"
+            f"**Points**: {_format_points(0)}\n\n"
             f"**Reason**: {entry.get('reason', 'Unknown error.')}",
             "fail",
+            0,
         )
     eval_path = Path(entry["evaluation_path"])
     if not eval_path.exists():
         return (
             f"## {slug} — ✗ MISSING EVALUATION\n\n"
+            f"**Points**: {_format_points(0)}\n\n"
             f"Expected `{eval_path}` after AI judgment but it was not written.",
             "fail",
+            0,
         )
     eval_data = json.loads(eval_path.read_text(encoding="utf-8"))
     verdict = eval_data.get("verdict", "fail")
-    bucket = verdict if verdict in {"pass", "pass_with_minor_issues", "fail"} else "fail"
-    return _render_task_section(slug, eval_data), bucket
+    bucket = verdict if verdict in {"pass", "fail"} else "fail"
+    pts = eval_data.get("points")
+    if verdict == "fail" and pts is None:
+        pts = 0
+    if pts is not None:
+        try:
+            pts = max(0, min(int(pts), MAX_POINTS_PER_EXERCISE))
+        except (TypeError, ValueError):
+            pts = 0
+    return _render_task_section(slug, eval_data), bucket, pts
 
 
 def _split_report_sections(text: str) -> tuple[str, list[str]]:
@@ -368,7 +436,7 @@ def _update_report_in_place(
     If no report exists yet, a minimal single-task report is written
     instead.
     """
-    new_section, _ = _render_entry_section(entry)
+    new_section, _, _ = _render_entry_section(entry)
     slug = entry["slug"]
 
     if out_path.exists():
@@ -457,19 +525,33 @@ def cmd_report(
 
     counts = {
         "pass": 0,
-        "pass_with_minor_issues": 0,
         "fail": 0,
         "missing": 0,
         "needs_prep": 0,
     }
     sections: list[str] = []
+    points_earned = 0
+    points_possible = 0  # only counts graded exercises (PASS + FAIL)
 
     for entry in entries:
-        section, bucket = _render_entry_section(entry)
+        section, bucket, pts = _render_entry_section(entry)
         counts[bucket] = counts.get(bucket, 0) + 1
         sections.append(section)
+        if pts is not None:
+            points_earned += pts
+            points_possible += MAX_POINTS_PER_EXERCISE
 
     total = len(entries)
+    total_line = (
+        f"- **Total**: {points_earned}/{points_possible} points"
+        + (
+            f" (across {counts['pass'] + counts['fail']} graded exercise"
+            + ("s" if (counts['pass'] + counts['fail']) != 1 else "")
+            + ")"
+            if points_possible
+            else " — no exercises graded"
+        )
+    )
     header = [
         f"# Grade report — {student}",
         "",
@@ -478,11 +560,11 @@ def cmd_report(
         f"- **Exercises evaluated**: {total}",
         (
             f"- **Pass**: {counts['pass']} · "
-            f"**Pass with minor issues**: {counts['pass_with_minor_issues']} · "
             f"**Fail**: {counts['fail']} · "
             f"**Missing**: {counts['missing']} · "
             f"**Needs prep**: {counts['needs_prep']}"
         ),
+        total_line,
         "",
         "## Overall",
         "",

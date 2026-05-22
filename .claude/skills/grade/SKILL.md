@@ -27,7 +27,7 @@ When `--task` is supplied, the manifest will contain exactly one entry (the targ
 This writes `.tmp/grades/<student>/manifest.json` listing each task with one of:
 - `status: "ready_for_ai"` → hard gates passed; you must judge it (step 2).
 - `status: "fail"` → hard gate failed; per-task `evaluation.json` is already complete.
-- `status: "missing"` → no matching student pipeline; nothing to judge.
+- `status: "missing"` → the student didn't submit a runnable deliverable. Three flavors: (a) no matching student pipeline, (b) pipeline exists but no output CSV in SLDB (`csv_output_present` 404, csv_writer only), or (c) pipeline exists but no Triggered Task with the convention name (`triggered_task_exists` failed, triggered_task only). All three are excluded from totals; nothing to judge.
 - `status: "needs_prep"` → the exercise's solution cache is missing or stale, or the folder has no `task.json`. Do NOT try to repair it from `/grade`. Surface the reason and tell the user to run `/prep` first, then re-run `/grade`. The manifest still includes these entries so the final report lists them.
 - `status: "config_error"` → surface the reason to the user and stop.
 
@@ -41,29 +41,50 @@ For every manifest entry with `status: "ready_for_ai"`, read its `ai_context_pat
 
 When `task_type == "triggered_task"`, the bundle also contains:
 - `triggered_task_name_expected` — the convention name (`<pipeline name> Task`). The hard gate already verified a task with this exact name exists in the student's project; you do not need to re-judge naming.
-- `triggered_task_scenarios` — list of `{name, params, expected, student, student_http_status, student_error}` per scenario. `expected` and `student` are parsed JSON (or raw text if invalid). The hard gate already verified every scenario response structurally matches; these are included so you can reason about *how* the student's pipeline produced them when judging structure / bad practice.
+- `triggered_task_scenarios` — list of `{name, params, expected, student, student_http_status, student_error}` per scenario. `expected` and `student` are parsed JSON (or raw text if invalid). If the responses-match hard gate passed, these are FYI; if it failed (see below), they tell you *which* scenarios diverged.
+
+#### Decide the verdict from `hard_gates`
+
+Before you start deducting, read the `hard_gates` array in `ai_context.json`:
+
+- **All hard gates passed** → emit `verdict: "pass"`. Points start at 10, minus any rule-based deductions.
+- **An output-mismatch gate failed** (`csv_output_match` or `triggered_task_responses_match`) → emit `verdict: "fail"`. The orchestrator routed this case to you specifically so you can award partial points for pipeline structure even though the output is wrong. Points still start at 10 and you still deduct using the same rules — the output mismatch itself is **not** a separate deduction (FAIL already conveys "output is wrong"). Don't double-penalize.
+- **Any other gate failed** — you will never see this case. Procedural FAILs (pipeline name wrong) are handled by the orchestrator with a fixed 0-point FAIL artifact; no AI context bundle is written. "Deliverable not submitted" gates (`csv_output_present` 404, `triggered_task_exists` missing) are handled by the orchestrator as MISSING (not graded, excluded from totals); also no AI context bundle. If you somehow see one of these in a bundle, emit `verdict: "fail"` with `points: 0`.
+
+You never emit `verdict: "missing"` — MISSING is the orchestrator's status and no bundle is written.
 
 **Judging principles** (apply in order):
 
-1. There is usually more than one correct way to solve an exercise. Do not penalize stylistic choices, naming, or differently-shaped snaps that achieve the same correct outcome.
-2. Penalize only meaningful problems: incorrect logic, real bad practice (performance, correctness, maintainability), or explicit violations of `task_notes` / `exercise_description`.
-3. Reason about snap order from `solution_flow` / `student_flow`, not `snap_map`.
-4. Be specific. Name the snaps involved when flagging a difference and explain why it matters or doesn't.
-5. If the exercise has a bonus question, look for the student's answer in this priority order — students put it in different places: (a) **`student_version_notes[*].version_note`** — the per-checkpoint comments from the Designer "Versions" dialog, the canonical place; (b) pipeline-level `property_map.info.notes`, `property_map.info.purpose`, `property_map.info.pipeline_doc_uri`; (c) sticky notes in `render_map.notes`; (d) snap-level `property_map.info.notes` / `info.purpose` inside any snap in `snap_map`. When reporting a "not answered" finding, **name the specific fields you checked** (e.g. *"no answer in version notes, info.notes, info.purpose, sticky notes, or any snap-level notes"*); never assert absence on the basis of one field alone. Summarise the found answer + assessment in `bonus_question_answer`, or set it to null if genuinely missing across all those fields.
+1. **Points start at 10. Deduct only using values explicitly written in `general_rules` or `task_notes`.** Each rule that can cost points states its value (e.g. `-5 points`, `-2 points`, `-1 point`, or *mention only*). Use that exact value. **Never invent a deduction value.** If you see an issue that has no governing rule with explicit points, it becomes a Note (`points_deducted: 0`) — surface it to the student, but do not deduct.
+2. **Same rule, one deduction per exercise.** If the student violates the same rule in two places within one exercise (e.g. two default-named snaps), deduct the rule's value **once**. Name all occurrences in the description.
+3. **Floor at 0; verdict is independent of points.** If deductions sum past 10, `points` is `0`, never negative. The verdict stays whatever the hard gates decided: PASS stays PASS at 0 points (output is right), FAIL stays FAIL at 0 points (output is wrong). Points and verdict are two separate signals.
+4. **On FAIL, when a rule is already obviously the cause of the output mismatch, still deduct it.** The most common case: the CSV differs because the student's filter/sort is wrong, and that *same* configuration also violates a soft rule. The deduction still applies — the rule is what makes the difference *visible* and *consistent across students*. Don't add an *extra* "your output was wrong" deduction on top — FAIL already says that.
+5. There is usually more than one correct way to solve an exercise. Do not penalize stylistic choices, naming, or differently-shaped snaps that achieve the same correct outcome.
+6. Reason about snap order from `solution_flow` / `student_flow`, not `snap_map`.
+7. Be specific. Name the snaps involved when flagging a difference and explain why it matters or doesn't.
+8. If the exercise has a bonus question, look for the student's answer in this priority order — students put it in different places: (a) **`student_version_notes[*].version_note`** — the per-checkpoint comments from the Designer "Versions" dialog, the canonical place; (b) pipeline-level `property_map.info.notes`, `property_map.info.purpose`, `property_map.info.pipeline_doc_uri`; (c) sticky notes in `render_map.notes`; (d) snap-level `property_map.info.notes` / `info.purpose` inside any snap in `snap_map`. When reporting a "not answered" finding, **name the specific fields you checked** (e.g. *"no answer in version notes, info.notes, info.purpose, sticky notes, or any snap-level notes"*); never assert absence on the basis of one field alone. Summarise the found answer + assessment in `bonus_question_answer`, or set it to null if genuinely missing across all those fields. Apply the bonus-placement rule from `general_rules`: **correct answer in any of those fields → no deduction** (mention placement under Notes if it's outside version notes), **answer missing or wrong → `-2`**.
 
 **Required JSON shape** for `evaluation.json` (downstream code reads it — don't deviate):
 
 ```json
 {
-  "verdict": "pass" | "pass_with_minor_issues" | "fail",
+  "verdict": "pass",
+  "points": 8,
   "summary": "2–3 sentence overview",
   "differences": [
     {
       "area": "snap order | snap config | pipeline parameters | bad practice | ...",
-      "severity": "major" | "minor" | "cosmetic",
-      "description": "what specifically differs",
-      "matters": true | false,
-      "reasoning": "why this matters, or why it's fine"
+      "description": "what specifically differs (name the snaps)",
+      "points_deducted": 2,
+      "rule_source": "general_rules: filter before sort",
+      "reasoning": "why this matters per the rule"
+    },
+    {
+      "area": "naming",
+      "description": "snap label 'Filter1' is fine but could be more descriptive",
+      "points_deducted": 0,
+      "rule_source": null,
+      "reasoning": "no governing rule with explicit points → mention only"
     }
   ],
   "bonus_question_answer": "summary + assessment, or null",
@@ -71,6 +92,13 @@ When `task_type == "triggered_task"`, the bundle also contains:
   "failing_gate_detail": null
 }
 ```
+
+When you emit `verdict: "fail"` (output-mismatch FAIL routed to you), also populate `failing_gate` and `failing_gate_detail` from the failing entry in `hard_gates`, so the renderer can show the student which gate caused the FAIL alongside the partial-credit pipeline review.
+
+Where:
+- `points` MUST equal `max(0, 10 - sum(points_deducted))`. The renderer trusts this value — compute it correctly.
+- `points_deducted` is an integer (typically `0`, `1`, `2`, or `5`); use the literal value the rule states. `0` means the issue is a Note (surfaced to the student) and is not deducted.
+- `rule_source` is a short hint like `"general_rules: filter before sort"` or `"task_notes: no operator branch"` so the renderer/reader can trace each deduction back. Use `null` for Notes (no rule).
 
 ### 3. Render report
 

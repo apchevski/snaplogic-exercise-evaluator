@@ -37,8 +37,10 @@ There is intentionally no internal "Pipeline IR" abstraction.
 `task_01_generate_csv_report` — students unzip a provided ZIP, parse a
 CSV, filter California residents, sort by last name descending, and
 write `CA_Birthdays.csv`. Critical instructor concern: students often
-place the Sort snap *before* the Filter snap, which is wasteful. The
-AI is told this is a major issue via `notes.md`.
+place the Sort snap *before* the Filter snap, which is wasteful.
+That's the universal `filter before sort` rule in
+`exercises/general_evaluation_rules.md`, worth `-2 points` whenever it
+applies (see [.claude/conventions/grade-points-system.md](conventions/grade-points-system.md)).
 
 ## Living docs rule
 
