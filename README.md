@@ -24,7 +24,7 @@ point score:
 | **PASS**  | Every hard gate passed (output matches the solution) | `10 − Σ deductions`, floor `0`. Verdict stays PASS even if deductions exceed 10. |
 | **FAIL** (output-mismatch)  | `csv_output_match` or `triggered_task_responses_match` failed — output is wrong | `10 − Σ deductions`, floor `0` — AI judges pipeline structure for partial credit |
 | **FAIL** (procedural)       | Pipeline name wrong (deliverable is there but doesn't follow the naming convention) | `0` (AI not invoked) |
-| **MISSING** | Student didn't submit a runnable deliverable: no matching pipeline, OR no output uploaded to SLDB (csv_writer), OR no Triggered Task with the convention name (triggered_task) | `—` (not graded; excluded from totals) |
+| **MISSING** | Student didn't submit a runnable deliverable: no matching pipeline, OR no output uploaded to SLDB (csv_writer), OR no Triggered Task with the convention name (triggered_task) | `—` (not graded; counts as `0/10` toward the per-student total) |
 
 **Why FAIL has two flavors**: a student whose pipeline is structurally
 correct except for one misspelled string literal should not be ranked
@@ -40,10 +40,12 @@ that doesn't include a runnable deliverable can't be graded at all —
 the student didn't submit anything to evaluate. This covers both
 csv_writer (no output CSV in SLDB → student never ran it) and
 triggered_task (no Triggered Task with the convention name → student
-didn't create the artifact that lets the task be invoked). Treating
-these as MISSING (excluded from totals) instead of FAIL (0/10) keeps
-the per-student average meaningful for the exercises a student
-actually attempted.
+didn't create the artifact that lets the task be invoked). MISSING
+exercises are not AI-judged (there's nothing to judge) but they still
+count as `0/10` toward the per-student total — the denominator is
+always `(total exercises) × 10`, regardless of how many were
+actually graded, so a student who skipped half the exercises sees
+that reflected in their total.
 
 Deductions for every PASS or output-mismatch FAIL come from rules with
 **explicit point values** written into

@@ -531,7 +531,6 @@ def cmd_report(
     }
     sections: list[str] = []
     points_earned = 0
-    points_possible = 0  # only counts graded exercises (PASS + FAIL)
 
     for entry in entries:
         section, bucket, pts = _render_entry_section(entry)
@@ -539,18 +538,13 @@ def cmd_report(
         sections.append(section)
         if pts is not None:
             points_earned += pts
-            points_possible += MAX_POINTS_PER_EXERCISE
 
     total = len(entries)
+    points_possible = total * MAX_POINTS_PER_EXERCISE
     total_line = (
         f"- **Total**: {points_earned}/{points_possible} points"
-        + (
-            f" (across {counts['pass'] + counts['fail']} graded exercise"
-            + ("s" if (counts['pass'] + counts['fail']) != 1 else "")
-            + ")"
-            if points_possible
-            else " — no exercises graded"
-        )
+        if total
+        else "- **Total**: — no exercises"
     )
     header = [
         f"# Grade report — {student}",
