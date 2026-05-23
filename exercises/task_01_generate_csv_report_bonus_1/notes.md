@@ -13,22 +13,23 @@ still apply — only the points below are specific to this bonus.
 
 ## Things that matter (new for Bonus 1)
 
-- **The pipeline must filter to birth years 1963, 1964, and 1965.**
-  This is the core requirement of the bonus. If the year filter is
-  missing, uses the wrong years, or uses the wrong inclusivity (e.g.
-  1964–1965 only, or 1962–1965), flag as **major**. The CSV output
-  hard gate should already catch most miscounts, but call out the
-  cause in the pipeline review.
+- **The pipeline must filter to birth years 1963, 1964, and 1965.
+  `-2 points`.** This is the core requirement of the bonus. If the
+  year filter is missing, uses the wrong years, or uses the wrong
+  inclusivity (e.g. 1964–1965 only, or 1962–1965), deduct **`-2`**.
+  The CSV output hard gate should already catch most miscounts as a
+  FAIL — this deduction applies when the filter is visibly wrong but
+  the output still matches.
 
 - **The year check must be combined with the California check in a
-  single Filter snap.** The combined expression is short and readable
-  (e.g. `$State == "CA" && [1963,1964,1965].contains($DOB.year)`), so
-  there is no need to split the state and year checks across two
+  single Filter snap. `-1 point`.** The combined expression is short
+  and readable (e.g. `$State == "CA" && [1963,1964,1965].contains($DOB.year)`),
+  so there is no need to split the state and year checks across two
   Filter snaps. Any equivalent single-snap expression
   (`$DOB.year >= 1963 && $DOB.year <= 1965`, regex on the DOB string,
   etc.) is acceptable as long as the result is correct. If the
   student uses two separate Filter snaps instead of one combined
-  snap, flag as **minor**.
+  snap, deduct **`-1`**.
 
 ## Things that don't matter (new for Bonus 1)
 

@@ -7,6 +7,11 @@ server, no `fetch` calls, double-clickable.
 
     python -m evaluator.ui              # build + open in browser
     python -m evaluator.ui --no-open    # build only
+
+The UI reflects the points-based grading system: each student card
+shows a `Total: X/Y points` badge plus verdict counts; each task's
+header shows `points/10` and the differences list is split into
+Deductions (point cost) and Notes (mention-only).
 """
 from __future__ import annotations
 
@@ -100,7 +105,7 @@ main {
   justify-content: space-between;
   align-items: baseline;
   gap: 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   flex-wrap: wrap;
 }
 .student-card h2 {
@@ -119,6 +124,37 @@ main {
   font-family: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, monospace;
   font-size: 0.8125rem;
 }
+.total-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.total-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  padding: 0.375rem 0.875rem;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  border: 1px solid #c7d2fe;
+}
+.total-badge .pct {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #4338ca;
+  opacity: 0.85;
+}
+.total-badge.tier-high { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+.total-badge.tier-high .pct { color: #047857; }
+.total-badge.tier-mid  { background: #fef3c7; color: #78350f; border-color: #fcd34d; }
+.total-badge.tier-mid  .pct { color: #92400e; }
+.total-badge.tier-low  { background: #fee2e2; color: #7f1d1d; border-color: #fca5a5; }
+.total-badge.tier-low  .pct { color: #991b1b; }
 .badges {
   display: flex;
   flex-wrap: wrap;
@@ -132,7 +168,6 @@ main {
   font-weight: 500;
 }
 .badge.pass { background: #d1fae5; color: #047857; }
-.badge.minor { background: #fef3c7; color: #92400e; }
 .badge.fail { background: #fee2e2; color: #991b1b; }
 .badge.missing { background: #f3f4f6; color: #374151; }
 .badge.needs-prep { background: #dbeafe; color: #1e40af; }
@@ -199,10 +234,24 @@ details[open] summary { margin-bottom: 1rem; }
   white-space: nowrap;
 }
 .verdict-badge.pass { background: #10b981; }
-.verdict-badge.pass_with_minor_issues { background: #f59e0b; }
 .verdict-badge.fail, .verdict-badge.config_error, .verdict-badge.missing_evaluation { background: #ef4444; }
 .verdict-badge.missing { background: #6b7280; }
 .verdict-badge.needs_prep { background: #3b82f6; }
+.points-pill {
+  margin-left: auto;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+}
+.points-pill.tier-high { background: #d1fae5; color: #047857; border-color: #a7f3d0; }
+.points-pill.tier-mid  { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.points-pill.tier-low  { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+.points-pill.tier-none { background: #f3f4f6; color: #6b7280; border-color: #e5e7eb; }
 .task-pipeline {
   font-size: 0.8125rem;
   color: #6b7280;
@@ -215,24 +264,47 @@ details[open] summary { margin-bottom: 1rem; }
   color: #991b1b;
   font-family: ui-monospace, "Cascadia Mono", monospace;
 }
-.task .differences {
-  margin: 0.5rem 0 0;
+.section-label {
+  margin: 0.75rem 0 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+.section-label .total-cost {
+  margin-left: 0.375rem;
+  color: #991b1b;
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+}
+.diff-list {
+  margin: 0;
   padding-left: 1.25rem;
   font-size: 0.9375rem;
 }
-.task .differences li { margin-bottom: 0.25rem; color: #4b5563; }
-.task .differences li .sev {
-  font-weight: 600;
-  font-size: 0.6875rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+.diff-list li {
+  margin-bottom: 0.375rem;
+  color: #4b5563;
+}
+.cost-chip {
+  display: inline-block;
   padding: 0.0625rem 0.375rem;
   border-radius: 3px;
   margin-right: 0.375rem;
+  font-weight: 600;
+  font-size: 0.6875rem;
+  letter-spacing: 0.03em;
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+  background: #fee2e2;
+  color: #991b1b;
 }
-.task .differences li.major .sev { background: #fee2e2; color: #991b1b; }
-.task .differences li.minor .sev { background: #fef3c7; color: #92400e; }
-.task .differences li.cosmetic .sev { background: #dbeafe; color: #1e40af; }
+.rule-source {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+}
 .task .bonus {
   margin: 0.5rem 0 0;
   padding: 0.5rem 0.75rem;
@@ -270,6 +342,8 @@ details[open] summary { margin-bottom: 1rem; }
   <input type="search" id="search" placeholder="Search by student name…">
   <select id="ps-filter"><option value="">All project spaces</option></select>
   <select id="sort">
+    <option value="points-desc">Highest total points</option>
+    <option value="points-asc">Lowest total points</option>
     <option value="passes-desc">Most passes</option>
     <option value="passes-asc">Fewest passes</option>
     <option value="name-asc">Name (A → Z)</option>
@@ -287,8 +361,34 @@ details[open] summary { margin-bottom: 1rem; }
 <script id="grades-data" type="application/json">__DATA_PLACEHOLDER__</script>
 <script>
 const DATA = JSON.parse(document.getElementById('grades-data').textContent);
+const MAX_POINTS = 10;
 
-const passCount = r => ((r.counts && r.counts.pass) || 0) + ((r.counts && r.counts.pass_with_minor_issues) || 0);
+function passCount(r) { return (r.counts && r.counts.pass) || 0; }
+
+function pointsEarned(r) {
+  if (typeof r.points_earned === 'number') return r.points_earned;
+  let total = 0;
+  for (const t of (r.tasks || [])) {
+    if (typeof t.points === 'number') total += t.points;
+  }
+  return total;
+}
+
+function pointsPossible(r) {
+  if (typeof r.points_possible === 'number') return r.points_possible;
+  const c = r.counts || {};
+  const totalExercises = (c.total != null) ? c.total : (r.tasks || []).length;
+  const per = r.max_points_per_exercise || MAX_POINTS;
+  return totalExercises * per;
+}
+
+function tierForRatio(num, den) {
+  if (!den) return 'none';
+  const r = num / den;
+  if (r >= 0.8) return 'high';
+  if (r >= 0.5) return 'mid';
+  return 'low';
+}
 
 function el(tag, props, ...children) {
   const e = document.createElement(tag);
@@ -301,6 +401,28 @@ function el(tag, props, ...children) {
   return e;
 }
 
+function renderDiff(d) {
+  const cost = Number(d.points_deducted || 0);
+  const area = d.area || '(unspecified)';
+  const desc = d.description || '';
+  const reasoning = d.reasoning || '';
+  const ruleSrc = d.rule_source || '';
+
+  const li = el('li');
+  if (cost > 0) {
+    li.appendChild(el('span', {class: 'cost-chip', text: '−' + cost + ' pt' + (cost === 1 ? '' : 's')}));
+  }
+  const headLine = area + (desc ? ' — ' + desc : '');
+  li.appendChild(document.createTextNode(headLine));
+  if (reasoning) {
+    li.appendChild(document.createTextNode(' — ' + reasoning));
+  }
+  if (ruleSrc) {
+    li.appendChild(el('span', {class: 'rule-source', text: 'rule: ' + ruleSrc}));
+  }
+  return li;
+}
+
 function renderTask(t) {
   const verdict = t.verdict || t.status || 'unknown';
   const verdictLabel = (t.verdict || t.status || 'unknown').replace(/_/g, ' ');
@@ -310,6 +432,12 @@ function renderTask(t) {
     el('span', {class: 'verdict-badge ' + verdict, text: verdictLabel}),
     el('h3', {text: t.slug || ''}),
   );
+
+  // Points pill: numeric → X/10 with tier color; null/None → —/10 in muted style.
+  const pts = (typeof t.points === 'number') ? t.points : null;
+  const tier = (pts === null) ? 'none' : tierForRatio(pts, MAX_POINTS);
+  const pointsText = (pts === null ? '—' : pts) + '/' + MAX_POINTS;
+  header.appendChild(el('span', {class: 'points-pill tier-' + tier, text: pointsText}));
   div.appendChild(header);
 
   if (t.student_pipeline_name) {
@@ -334,16 +462,25 @@ function renderTask(t) {
     }
   }
 
-  if (t.differences && t.differences.length > 0) {
-    const ul = el('ul', {class: 'differences'});
-    for (const d of t.differences) {
-      const sev = (d.severity || '').toLowerCase();
-      const li = el('li', {class: sev || 'note'});
-      li.appendChild(el('span', {class: 'sev', text: sev || 'note'}));
-      const text = (d.area || '(unspecified)') + ' — ' + (d.description || '') + (d.reasoning ? ' — ' + d.reasoning : '');
-      li.appendChild(document.createTextNode(text));
-      ul.appendChild(li);
-    }
+  const diffs = t.differences || [];
+  const deductions = diffs.filter(d => Number(d.points_deducted || 0) > 0);
+  const notes = diffs.filter(d => Number(d.points_deducted || 0) === 0);
+
+  if (deductions.length > 0) {
+    const totalCost = deductions.reduce((s, d) => s + Number(d.points_deducted || 0), 0);
+    const label = el('div', {class: 'section-label'});
+    label.appendChild(document.createTextNode('Deductions'));
+    label.appendChild(el('span', {class: 'total-cost', text: '(−' + totalCost + ')'}));
+    div.appendChild(label);
+    const ul = el('ul', {class: 'diff-list'});
+    for (const d of deductions) ul.appendChild(renderDiff(d));
+    div.appendChild(ul);
+  }
+
+  if (notes.length > 0) {
+    div.appendChild(el('div', {class: 'section-label', text: 'Notes (no deduction)'}));
+    const ul = el('ul', {class: 'diff-list'});
+    for (const d of notes) ul.appendChild(renderDiff(d));
     div.appendChild(ul);
   }
 
@@ -368,9 +505,21 @@ function renderCard(r) {
     meta,
   ));
 
+  const earned = pointsEarned(r);
+  const possible = pointsPossible(r);
+  const totalRow = el('div', {class: 'total-row'});
+  const totalTier = tierForRatio(earned, possible);
+  const totalBadge = el('span', {class: 'total-badge tier-' + totalTier});
+  totalBadge.appendChild(document.createTextNode('Total: ' + earned + '/' + possible + ' pts'));
+  if (possible > 0) {
+    const pct = Math.round((earned / possible) * 100);
+    totalBadge.appendChild(el('span', {class: 'pct', text: '(' + pct + '%)'}));
+  }
+  totalRow.appendChild(totalBadge);
+  card.appendChild(totalRow);
+
   const badges = el('div', {class: 'badges'});
   badges.appendChild(el('span', {class: 'badge pass', text: (c.pass || 0) + ' pass'}));
-  if (c.pass_with_minor_issues) badges.appendChild(el('span', {class: 'badge minor', text: c.pass_with_minor_issues + ' minor'}));
   if (c.fail) badges.appendChild(el('span', {class: 'badge fail', text: c.fail + ' fail'}));
   if (c.missing) badges.appendChild(el('span', {class: 'badge missing', text: c.missing + ' missing'}));
   if (c.needs_prep) badges.appendChild(el('span', {class: 'badge needs-prep', text: c.needs_prep + ' needs prep'}));
@@ -423,15 +572,24 @@ function init() {
     if (ps) items = items.filter(r => r.project_space === ps);
 
     items.sort((a, b) => {
+      const nameCmp = (a.student || '').localeCompare(b.student || '');
+      if (mode === 'points-desc') {
+        const d = pointsEarned(b) - pointsEarned(a);
+        return d !== 0 ? d : nameCmp;
+      }
+      if (mode === 'points-asc') {
+        const d = pointsEarned(a) - pointsEarned(b);
+        return d !== 0 ? d : nameCmp;
+      }
       if (mode === 'passes-desc') {
         const d = passCount(b) - passCount(a);
-        return d !== 0 ? d : (a.student || '').localeCompare(b.student || '');
+        return d !== 0 ? d : nameCmp;
       }
       if (mode === 'passes-asc') {
         const d = passCount(a) - passCount(b);
-        return d !== 0 ? d : (a.student || '').localeCompare(b.student || '');
+        return d !== 0 ? d : nameCmp;
       }
-      if (mode === 'name-asc') return (a.student || '').localeCompare(b.student || '');
+      if (mode === 'name-asc') return nameCmp;
       if (mode === 'date-desc') return (b.graded_at || '').localeCompare(a.graded_at || '');
       return 0;
     });

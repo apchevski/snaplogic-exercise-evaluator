@@ -14,6 +14,51 @@ Two slash commands in Claude Code:
 /grade Gabriela Shurbeska      # grade one student against the registered exercises
 ```
 
+## Verdicts and points
+
+Every exercise resolves to exactly one of three verdicts, with a 0–10
+point score:
+
+| Verdict   | Meaning                                              | Points  |
+|-----------|------------------------------------------------------|---------|
+| **PASS**  | Every hard gate passed (output matches the solution) | `10 − Σ deductions`, floor `0`. Verdict stays PASS even if deductions exceed 10. |
+| **FAIL** (output-mismatch)  | `csv_output_match` or `triggered_task_responses_match` failed — output is wrong | `10 − Σ deductions`, floor `0` — AI judges pipeline structure for partial credit |
+| **FAIL** (procedural)       | Pipeline name wrong (deliverable is there but doesn't follow the naming convention) | `0` (AI not invoked) |
+| **MISSING** | Student didn't submit a runnable deliverable: no matching pipeline, OR no output uploaded to SLDB (csv_writer), OR no Triggered Task with the convention name (triggered_task) | `—` (not graded; counts as `0/10` toward the per-student total) |
+
+**Why FAIL has two flavors**: a student whose pipeline is structurally
+correct except for one misspelled string literal should not be ranked
+alongside a student who submitted an empty pipeline. Output-mismatch
+FAILs (`csv_output_match`, `triggered_task_responses_match`) still go
+to the AI for partial credit — the verdict stays FAIL because the
+output is wrong, but points reflect how close the pipeline is to a
+correct solution. Procedural FAILs (name mismatch) stay at 0 because
+there's nothing partial to credit.
+
+**Why "deliverable not submitted" is MISSING, not FAIL**: a submission
+that doesn't include a runnable deliverable can't be graded at all —
+the student didn't submit anything to evaluate. This covers both
+csv_writer (no output CSV in SLDB → student never ran it) and
+triggered_task (no Triggered Task with the convention name → student
+didn't create the artifact that lets the task be invoked). MISSING
+exercises are not AI-judged (there's nothing to judge) but they still
+count as `0/10` toward the per-student total — the denominator is
+always `(total exercises) × 10`, regardless of how many were
+actually graded, so a student who skipped half the exercises sees
+that reflected in their total.
+
+Deductions for every PASS or output-mismatch FAIL come from rules with
+**explicit point values** written into
+`exercises/general_evaluation_rules.md` (universal SnapLogic best
+practices) and per-exercise `exercises/<slug>/notes.md` (task-specific
+guidance). The AI judge applies the value the rule states (`-2`, `-1`,
+or *mention only*) — it never invents a deduction value. This is what
+guarantees the same mistake costs the same points for every student,
+every time.
+
+If the AI sees something off that no rule covers with explicit points,
+it surfaces it under **Notes** in the report — no points deducted.
+
 ### `/prep` — keep exercise folders in sync with SnapLogic
 
 The `prep` skill walks `exercises/`, reads the canonical pipeline name from each
@@ -221,10 +266,17 @@ To explicitly build the page (and open it in the default browser):
 
 This walks every `grades/<student>/report.json` and generates a single
 self-contained `ui/index.html` with the data embedded inline (no HTTP server,
-no `fetch` calls). Features: search by student name, filter by project space,
-sort by pass count or grading date, per-student card with verdict badges,
-overall summary, and a collapsible per-task accordion showing summaries,
-differences (with severity colors), failing gates, and bonus answers.
+no `fetch` calls). Features:
+
+- Search by student name; filter by project space.
+- Sort by total points (default), pass count, name, or grading date.
+- Per-student card with a colored **Total: X/Y pts** badge (green/amber/red by
+  ratio) plus verdict counts (pass / fail / missing / needs prep).
+- Overall summary paragraph (from `## Overall` in `report.md`).
+- Collapsible per-task accordion showing each task's verdict, `points/10`
+  pill, summary, failing gate (if any), and the differences list split into
+  **Deductions** (with `−N pts` chip and the `rule_source`) and **Notes**
+  (mention-only). Bonus-question answers are surfaced inline.
 
 Pass `--no-open` to build the page without opening it (this is what
 `/grade`'s auto-rebuild uses internally). The `ui/` folder is gitignored —
@@ -232,8 +284,9 @@ it's purely derived from `grades/`.
 
 Exit codes:
 - `0` — hard gates passed (AI step pending, or all gates passed)
-- `1` — hard gate failed
+- `1` — procedural hard gate failed (pipeline name mismatch)
 - `2` — bad CLI args / missing required env var / unknown task slug
+- `4` — deliverable not submitted (`csv_output_present` 404 OR `triggered_task_exists` missing) — orchestrator treats as MISSING
 
 ## Adding a new exercise
 

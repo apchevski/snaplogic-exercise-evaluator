@@ -13,7 +13,7 @@ down to San Francisco residents *before* joining against
 
 ## Things that matter (task-specific)
 
-- **The two data sources must be joined on Zip code.**
+- **The two data sources must be joined on Zip code. `-2 points`.**
   The pipeline must join `Leads.csv` with `CAIncomeByZip.csv` so that
   each San Francisco lead is associated with the income distribution
   for their zip code. Any join snap pattern that produces the correct
@@ -21,19 +21,20 @@ down to San Francisco residents *before* joining against
   matters is that the join key is Zip code and that the result
   includes the income columns alongside the lead columns. If the join
   is missing, performed on the wrong key, or uses the wrong join type
-  such that rows are duplicated or dropped, flag as **major**. (The
-  CSV output hard gate will already catch the row-level mismatch —
-  name the cause in the pipeline review.)
+  such that rows are duplicated or dropped, deduct **`-2`**. (The
+  CSV output hard gate will already catch the row-level mismatch as a
+  FAIL — this deduction only applies when the join structure is
+  visibly wrong but the output still matches.)
 
-- **Output filter: San Francisco leads only.**
+- **Output filter: San Francisco leads only. `-2 points`.**
   Already caught by the CSV hard gate, but if the filter expression is
   visibly wrong in a way that *happens* to produce the right rows on
-  this dataset (unlikely), flag it.
+  this dataset (unlikely), deduct **`-2`**.
 
-- **Sort order: Zip code, ascending.**
+- **Sort order: Zip code, ascending. `-2 points`.**
   If the student sorts descending, or sorts by the wrong column,
-  that's a **major** issue (though it should also already be caught
-  by the CSV output hard gate before the AI runs).
+  deduct **`-2`** (this should also already be caught by the CSV
+  output hard gate as a FAIL).
 
 ## Things that don't matter (task-specific)
 
