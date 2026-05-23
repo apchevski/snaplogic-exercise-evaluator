@@ -34,14 +34,14 @@ passes**:
 
 If the student takes the optimized path, **call it out as exemplary
 in the per-task review** ("kudos for moving the filter ahead of the
-join — this is the performance-aware solution"). If the student
-takes the standard path, that is still a full pass; do not penalize
-it.
+join — this is the performance-aware solution") — *mention only,
+no point bonus*. If the student takes the standard path, that is
+still a full pass; do not penalize it.
 
 ## Things that matter (new for Bonus 2)
 
 - **A row-reducing step that keeps only the `true`-eligible records
-  must be present.** Either pattern is acceptable:
+  must be present. `-2 points`.** Either pattern is acceptable:
   - Standard: a Filter after the Bonus 1 Mapper with
     `$['MoreThan10K-Boolean'] == true` (or any equivalent
     expression that keeps only true rows).
@@ -51,9 +51,10 @@ it.
 
   If neither pattern is present, the filter keeps the wrong rows, or
   the optimized path is attempted but the post-join Mapper does not
-  actually set the boolean column, flag as **major**. The CSV
-  output hard gate will already catch the row-level mismatch — name
-  the cause in the pipeline review.
+  actually set the boolean column, deduct **`-2`**. The CSV output
+  hard gate will normally catch this as a FAIL — the deduction
+  applies only when the gate passed but the pipeline structure is
+  visibly wrong.
 
 - **Sort placement must be optimized for the new pipeline shape.**
   This is a stricter, task-specific extension of the universal
@@ -65,9 +66,13 @@ it.
   In the optimized path Sort still belongs at the end of the
   pipeline (downstream of the Join). Leaving Sort upstream of any
   row-reducing filter means sorting rows that will then be thrown
-  away. Flag as **major** if Sort is upstream of any row-reducing
-  filter, and as **minor** if Sort is in a defensible-but-not-optimal
-  position.
+  away.
+  - Deduct **`-2`** if Sort is upstream of any row-reducing filter
+    (this *replaces* the universal filter-before-sort `-2` for this
+    exercise — apply once, not both).
+  - Deduct **`-1`** if Sort is in a defensible-but-not-optimal
+    position (downstream of all filters, but not as close to the
+    CSV Formatter as it could be).
 
 - **Column rename (`MoreThan10K-Boolean` → `NewColumn`) is
   acceptable.** The description explicitly tells students they may

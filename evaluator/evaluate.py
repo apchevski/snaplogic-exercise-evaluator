@@ -8,20 +8,40 @@ Flow (csv_writer):
      caller (grade or CLI) surfaces this as `needs_prep`. Refreshing the
      cache is /prep's job, not /grade's.
   2. Fetch the student pipeline definition from SnapLogic.
-  3. Hard gate: pipeline names must match.
-  4. Hard gate: CSV outputs must match (header + row multiset).
-  5. If both gates pass, write an AI-context bundle and emit READY_FOR_AI_REVIEW.
+  3. Hard gate: pipeline names must match (procedural — fail = 0 pts, no AI).
+  4. Hard gate: the student's CSV output exists in SLDB. If the 404
+     fires (student never ran the pipeline), the exercise resolves to
+     MISSING — there's nothing to grade, so it's excluded from totals
+     rather than scored as 0/10. AI not invoked.
+  5. Hard gate: CSV outputs must match (header + row multiset). If this
+     gate fails, the verdict is still FAIL but the AI is invoked for
+     partial credit — pipeline structure is judgeable even when output
+     differs by a small amount.
+  6. If both gates pass, write an AI-context bundle and emit READY_FOR_AI_REVIEW.
 
 Flow (triggered_task):
   1. Strictly load the cached solution pipeline + every expected response.
   2. Fetch the student pipeline definition.
-  3. Hard gate: pipeline names must match.
+  3. Hard gate: pipeline names must match (procedural — fail = 0 pts, no AI).
   4. Hard gate: a Triggered Task named `<pipeline name> Task` must exist
-     in the student's project (convention is strict).
+     in the student's project. The convention is strict; failure here
+     resolves to MISSING (excluded from totals), same as csv_output_present
+     404 — the student didn't submit a runnable deliverable.
   5. Invoke the student's Triggered Task once per scenario.
   6. Hard gate: every scenario's response must structurally match the
-     cached expected response.
+     cached expected response. If this gate fails, the verdict is still
+     FAIL but the AI is invoked for partial credit.
   7. If all gates pass, write an AI-context bundle and emit READY_FOR_AI_REVIEW.
+
+In both flows, output-mismatch FAILs (`csv_output_match`,
+`triggered_task_responses_match`) write an AI context bundle and exit 0
+(READY_FOR_AI). The AI reads `hard_gates` in the bundle, sees the
+failure, and emits `verdict: "fail"` with partial points. Procedural
+FAILs (pipeline name wrong) write a complete `evaluation.json` directly
+with 0 points and exit 1. "Deliverable not submitted" cases
+(`csv_output_present`, `triggered_task_exists`) write a MISSING
+artifact and exit 4 — treated the same as "no matching pipeline" (not
+graded, excluded from totals).
 
 This module never calls an LLM. Judgment lives in `.claude/skills/grade/`.
 """
@@ -63,6 +83,14 @@ from .tasks import (
 )
 
 READY_MARKER = "READY_FOR_AI_REVIEW"
+
+# Hard-gate failures that represent "output didn't match" rather than a
+# procedural problem. For these, the AI judge is still invoked so it can
+# award partial points for pipeline structure — the verdict stays FAIL
+# (output is wrong) but points reflect the pipeline quality. Other
+# hard-gate failures (pipeline name wrong, Triggered Task missing, no
+# output file uploaded) are procedural — 0 points, no AI.
+_OUTPUT_MISMATCH_GATES = frozenset({"csv_output_match", "triggered_task_responses_match"})
 
 
 def run_evaluation(
@@ -144,6 +172,7 @@ def _run_csv_writer(
         name_gate = check_pipeline_name_match(solution.location.name, student.location.name)
         _print_gate(name_gate)
         if not name_gate.passed:
+            # Procedural fail: 0 points, no AI.
             return _write_fail_artifact(task, student_task_dir, name_gate)
 
         print("[4/5] Fetching student CSV output...")
@@ -156,7 +185,7 @@ def _run_csv_writer(
             if e.response.status_code != 404:
                 raise
             missing_gate = GateResult(
-                name="csv_output_match",
+                name="csv_output_present",
                 passed=False,
                 detail=(
                     f"Student output file {task.output_csv_filename!r} not "
@@ -165,7 +194,10 @@ def _run_csv_writer(
                 ),
             )
             _print_gate(missing_gate)
-            return _write_fail_artifact(task, student_task_dir, missing_gate, [name_gate])
+            # No deliverable submitted → MISSING (excluded from totals).
+            return _write_missing_artifact(
+                task, student_task_dir, missing_gate, [name_gate]
+            )
         print(f"      expected CSV -> {task.expected_csv_path}")
         print(f"      student CSV  -> {student_csv_path}")
 
@@ -173,7 +205,16 @@ def _run_csv_writer(
     csv_gate = check_csv_outputs_match(task.expected_csv_path, student_csv_path)
     _print_gate(csv_gate)
     if not csv_gate.passed:
-        return _write_fail_artifact(task, student_task_dir, csv_gate, [name_gate])
+        # Output mismatch — AI judges the pipeline for partial credit.
+        return _handle_gate_failure(
+            task=task,
+            student_task_dir=student_task_dir,
+            failing_gate=csv_gate,
+            passed_gates=[name_gate],
+            solution_definition=solution.definition,
+            student_definition=student.definition,
+            student_version_notes=student_version_notes,
+        )
 
     bundle_path = _write_ai_context(
         task=task,
@@ -221,6 +262,7 @@ def _run_triggered_task(
         name_gate = check_pipeline_name_match(solution.location.name, student.location.name)
         _print_gate(name_gate)
         if not name_gate.passed:
+            # Procedural fail: 0 points, no AI.
             return _write_fail_artifact(task, student_task_dir, name_gate)
 
         print(f"[4/6] Hard gate: Triggered Task {expected_task_name!r} exists...")
@@ -234,7 +276,9 @@ def _run_triggered_task(
         exists_gate = check_triggered_task_exists(expected_task_name, student_task_entry)
         _print_gate(exists_gate)
         if not exists_gate.passed:
-            return _write_fail_artifact(
+            # No Triggered Task → the deliverable wasn't submitted.
+            # MISSING (excluded from totals), same as csv_output_present 404.
+            return _write_missing_artifact(
                 task, student_task_dir, exists_gate, [name_gate]
             )
 
@@ -261,12 +305,10 @@ def _run_triggered_task(
         })
     responses_gate = check_triggered_responses_match(scenarios_for_gate)
     _print_gate(responses_gate)
-    if not responses_gate.passed:
-        return _write_fail_artifact(
-            task, student_task_dir, responses_gate, [name_gate, exists_gate]
-        )
 
-    # Build per-scenario payload for the AI context.
+    # Build per-scenario payload for the AI context — needed in both
+    # the pass path and the output-mismatch-FAIL path so the AI can see
+    # how each scenario's response differed.
     scenarios_payload = []
     for req in task.requests:
         path, status, err = invocation_results[req.name]
@@ -278,6 +320,22 @@ def _run_triggered_task(
             "student_http_status": status,
             "student_error": err,
         })
+
+    if not responses_gate.passed:
+        # Output mismatch — AI judges the pipeline for partial credit.
+        return _handle_gate_failure(
+            task=task,
+            student_task_dir=student_task_dir,
+            failing_gate=responses_gate,
+            passed_gates=[name_gate, exists_gate],
+            solution_definition=solution.definition,
+            student_definition=student.definition,
+            student_version_notes=student_version_notes,
+            extra={
+                "triggered_task_name_expected": expected_task_name,
+                "triggered_task_scenarios": scenarios_payload,
+            },
+        )
 
     bundle_path = _write_ai_context(
         task=task,
@@ -336,15 +394,76 @@ def _print_ready(bundle_path: Path) -> None:
     print(READY_MARKER)
 
 
+def _write_missing_artifact(
+    task: TaskConfig,
+    student_task_dir: Path,
+    failing_gate: GateResult,
+    passed_gates: list[GateResult] | None = None,
+) -> int:
+    """Write a MISSING evaluation.json for 'deliverable not submitted' gates.
+
+    Used for `csv_output_present` (HTTP 404 from SLDB — student never
+    ran their csv_writer pipeline so no output file exists) and
+    `triggered_task_exists` (no Triggered Task with the convention name
+    in the student's project — they didn't create the deliverable for
+    a triggered_task exercise). Treated the same as 'no matching
+    pipeline': not graded, no point value (neither 0 nor 10), excluded
+    from per-student totals. AI not invoked.
+
+    Exit code 4 signals MISSING to `evaluator.grade.cmd_plan` so it can
+    add the manifest entry with `status: "missing"`.
+    """
+    print()
+    print("=" * 70)
+    print(f"VERDICT: MISSING  (deliverable not submitted: {failing_gate.name})")
+    print("=" * 70)
+    print(failing_gate.detail)
+    artifact = student_task_dir / "evaluation.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        json.dumps(
+            {
+                "verdict": "missing",
+                "points": None,
+                "summary": failing_gate.detail,
+                "differences": [],
+                "bonus_question_answer": None,
+                "failing_gate": failing_gate.name,
+                "failing_gate_detail": failing_gate.detail,
+                "hard_gates": [
+                    {"name": g.name, "passed": g.passed, "detail": g.detail}
+                    for g in (passed_gates or []) + [failing_gate]
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"Artifact written to {artifact}")
+    return 4
+
+
 def _write_fail_artifact(
     task: TaskConfig,
     student_task_dir: Path,
     failing_gate: GateResult,
     passed_gates: list[GateResult] | None = None,
 ) -> int:
+    """Write a complete FAIL evaluation.json for *procedural* hard-gate fails.
+
+    Used for pipeline-name mismatch — the student named the pipeline
+    something other than the canonical name, so the deliverable IS
+    there but doesn't follow convention. Not partial-credit material,
+    so AI is not invoked and the score is fixed at 0 points. For
+    output-mismatch fails (csv_output_match,
+    triggered_task_responses_match), use the AI-judged path
+    (`_handle_gate_failure`). For "deliverable not submitted"
+    (csv_output_present, triggered_task_exists), use
+    `_write_missing_artifact`.
+    """
     print()
     print("=" * 70)
-    print(f"VERDICT: FAIL  (hard gate failed: {failing_gate.name})")
+    print(f"VERDICT: FAIL  (hard gate failed: {failing_gate.name}) — 0 points, AI not invoked")
     print("=" * 70)
     print(failing_gate.detail)
     artifact = student_task_dir / "evaluation.json"
@@ -353,6 +472,7 @@ def _write_fail_artifact(
         json.dumps(
             {
                 "verdict": "fail",
+                "points": 0,
                 "summary": f"Hard gate failed: {failing_gate.name}",
                 "differences": [],
                 "bonus_question_answer": None,
@@ -369,6 +489,54 @@ def _write_fail_artifact(
     )
     print(f"Artifact written to {artifact}")
     return 1
+
+
+def _handle_gate_failure(
+    *,
+    task: TaskConfig,
+    student_task_dir: Path,
+    failing_gate: GateResult,
+    passed_gates: list[GateResult],
+    # Pipeline definitions are only needed for the AI-judged path. For
+    # procedural fails (pipeline_name_match, etc.) the student definition
+    # may not even be available — pass None and we go straight to the
+    # zero-points artifact.
+    solution_definition: dict | None = None,
+    student_definition: dict | None = None,
+    student_version_notes: list[dict] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> int:
+    """Route a hard-gate failure to either the AI judge or a 0-point artifact.
+
+    Output-mismatch gates (`csv_output_match`,
+    `triggered_task_responses_match`) get the AI-judged path — the
+    verdict stays FAIL but the AI awards partial points for pipeline
+    structure. All other gates fall through to `_write_fail_artifact`
+    (procedural FAIL, 0 points, no AI).
+    """
+    if (
+        failing_gate.name in _OUTPUT_MISMATCH_GATES
+        and solution_definition is not None
+        and student_definition is not None
+    ):
+        bundle_path = _write_ai_context(
+            task=task,
+            student_task_dir=student_task_dir,
+            solution_definition=solution_definition,
+            student_definition=student_definition,
+            student_version_notes=student_version_notes or [],
+            hard_gates=passed_gates + [failing_gate],
+            extra=extra or {},
+        )
+        print()
+        print("=" * 70)
+        print(f"OUTPUT MISMATCH ({failing_gate.name}) — routing to AI for partial credit")
+        print("=" * 70)
+        print(failing_gate.detail)
+        print(f"AI context bundle: {bundle_path}")
+        print(READY_MARKER)
+        return 0
+    return _write_fail_artifact(task, student_task_dir, failing_gate, passed_gates)
 
 
 def _write_ai_context(
