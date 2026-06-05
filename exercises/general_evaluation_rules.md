@@ -103,6 +103,15 @@ verdict still FAIL).
    structure). If this gate fails, the AI is invoked to judge the
    pipeline structure and award partial points; the verdict stays
    FAIL.
+   **Columns-only override.** A task whose output is inherently
+   non-deterministic (e.g. a pipeline that calls an API returning random
+   rows every run) can set `"output_match_mode": "columns_only"` in its
+   `task.json`. In that mode this gate compares only the **column header**
+   (exact, order-sensitive) and ignores the row data — so a structurally
+   correct submission still **passes** the gate. The header reader is
+   format-aware: real `.xlsx` output (SnapLogic's Excel Formatter) is
+   parsed for its first worksheet row, everything else as CSV. Default is
+   `"exact"`. See `task_04_born_on_friday`.
 
 4. **[MISSING] (triggered_task) Triggered Task must exist with the convention name.**
    For triggered-task exercises, a Triggered Task named exactly
@@ -174,12 +183,22 @@ the relevant snap type is present in the student's pipeline.
   used to add or modify a column, it must have *Pass through* enabled
   so that existing fields flow downstream automatically; the Mapper's
   expression table should contain only the new/changed/removed
-  mappings, not a re-declaration of every pre-existing field. Manually
-  re-mapping every field is verbose, brittle (any upstream schema
-  change silently breaks the Mapper instead of flowing through), and
-  obscures what actually changed in this snap. Deduct **`-1`** if a
-  Mapper re-declares pre-existing fields instead of relying on Pass
-  through.
+  mappings, not a re-declaration of every pre-existing field.
+  Re-passing every field manually — whether by listing each field
+  one-by-one *or* by using a single expression that reproduces `$`
+  (e.g. a lambda like `$.filter((value, key) => ...)`, a spread
+  `{...$, newField: ...}`, or any other technique that yields the
+  same effect) — is verbose, brittle (any upstream schema change
+  silently breaks the Mapper instead of flowing through), and
+  obscures what actually changed in this snap. **Deduct `-1` if the
+  Mapper has *Pass through* disabled and the result is anything
+  other than a deliberate projection to a new schema (i.e. it still
+  carries the same fields forward via the expression table or via a
+  whole-document expression).** The deliberate-projection
+  exception: if the Mapper exists to reshape the row into a totally
+  new set of fields (e.g. Task 01's Mapper that renames `SURNAME`/
+  `GIVENNAME`/`BIRTHDAY` into a 3-column report schema), Pass
+  through is correctly disabled and no deduction applies.
 
 - **No extra Mapper snaps. `-1 point`.**
   Every Mapper in the pipeline must serve a real purpose. Mapper snaps

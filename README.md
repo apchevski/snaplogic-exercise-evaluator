@@ -22,14 +22,14 @@ point score:
 | Verdict   | Meaning                                              | Points  |
 |-----------|------------------------------------------------------|---------|
 | **PASS**  | Every hard gate passed (output matches the solution) | `10 − Σ deductions`, floor `0`. Verdict stays PASS even if deductions exceed 10. |
-| **FAIL** (output-mismatch)  | `csv_output_match` or `triggered_task_responses_match` failed — output is wrong | `10 − Σ deductions`, floor `0` — AI judges pipeline structure for partial credit |
+| **FAIL** (output-mismatch)  | `output_match` or `triggered_task_responses_match` failed — output is wrong | `10 − Σ deductions`, floor `0` — AI judges pipeline structure for partial credit |
 | **FAIL** (procedural)       | Pipeline name wrong (deliverable is there but doesn't follow the naming convention) | `0` (AI not invoked) |
-| **MISSING** | Student didn't submit a runnable deliverable: no matching pipeline, OR no output uploaded to SLDB (csv_writer), OR no Triggered Task with the convention name (triggered_task) | `—` (not graded; counts as `0/10` toward the per-student total) |
+| **MISSING** | Student didn't submit a runnable deliverable: no matching pipeline, OR no output uploaded to SLDB (file_writer), OR no Triggered Task with the convention name (triggered_task) | `—` (not graded; counts as `0/10` toward the per-student total) |
 
 **Why FAIL has two flavors**: a student whose pipeline is structurally
 correct except for one misspelled string literal should not be ranked
 alongside a student who submitted an empty pipeline. Output-mismatch
-FAILs (`csv_output_match`, `triggered_task_responses_match`) still go
+FAILs (`output_match`, `triggered_task_responses_match`) still go
 to the AI for partial credit — the verdict stays FAIL because the
 output is wrong, but points reflect how close the pipeline is to a
 correct solution. Procedural FAILs (name mismatch) stay at 0 because
@@ -38,7 +38,7 @@ there's nothing partial to credit.
 **Why "deliverable not submitted" is MISSING, not FAIL**: a submission
 that doesn't include a runnable deliverable can't be graded at all —
 the student didn't submit anything to evaluate. This covers both
-csv_writer (no output CSV in SLDB → student never ran it) and
+file_writer (no output file in SLDB → student never ran it) and
 triggered_task (no Triggered Task with the convention name → student
 didn't create the artifact that lets the task be invoked). MISSING
 exercises are not AI-judged (there's nothing to judge) but they still
@@ -65,10 +65,12 @@ The `prep` skill walks `exercises/`, reads the canonical pipeline name from each
 folder's `description.md` H1 heading, looks the pipeline up in the solution
 project space, and reconciles local files against the live SnapLogic state:
 
-- Auto-creates `task.json` for **csv_writer** exercises (writer filename is
-  derived from the binary-write snap).
-- Asks the operator to hand-write `task.json` for **triggered_task** exercises
-  (the script can't derive the Triggered Task name or scenarios).
+- Auto-creates `task.json` for **single-output file_writer** exercises (the lone
+  writer filename is derived from the binary-write snap).
+- Asks the operator to hand-write `task.json` for **multi-output file_writer**
+  exercises (lists every required output under `output_filenames`) and for
+  **triggered_task** exercises (the script can't derive the Triggered Task name
+  or scenarios).
 - Detects pipeline renames, writer-filename renames, and stale solution caches;
   rewrites `solution.json`, `solution.cache.json`, and `expected/` to match.
 - Prunes obsolete files in `expected/`, keeping only the current outputs.
@@ -88,7 +90,7 @@ The `grade` skill then:
 3. For each exercise, runs the deterministic Python evaluator which:
    - Fetches both the solution pipeline and the student's pipeline (GET-only).
    - Applies hard gates: pipeline name match (dash-tolerant) and **either**
-     output CSV match (csv_writer) **or** Triggered Task name match plus
+     output file match (file_writer) **or** Triggered Task name match plus
      per-scenario JSON response match (triggered_task).
    - On hard-gate fail → writes a complete `evaluation.json` and stops.
    - On hard-gate pass → writes an `ai_context.json` bundle (description,
@@ -105,11 +107,14 @@ The `grade` skill then:
    `.tmp/grades/<student>/` are deleted at the end of the run — only the two
    `report.*` files persist.
 
-`/grade <student> --task <slug>` re-grades a single exercise and updates only
-that task's section in the existing `report.md` in place — the header, counts,
-date, and `## Overall` paragraph are left untouched. The matching task entry in
-`report.json` is updated in lockstep, and the JSON `counts` field is
-recomputed from the merged task list.
+`/grade <student> --task <slug>` re-grades a single exercise and rewrites only
+that task's section in the existing `report.md` in place (the date is left
+untouched). The matching task entry in `report.json` is updated in lockstep,
+and the JSON `counts` / `points_earned` / `points_possible` are recomputed from
+the merged task list. The skill then **refreshes the `## Overall` paragraph and
+reconciles the markdown header totals** so the report reflects the just-graded
+task — every grading run, full or single-task, leaves a current Overall rather
+than a stale one. (The other tasks' sections are not re-evaluated.)
 
 ### Pipeline-name matching: dash-tolerant for pipelines, strict for Triggered Tasks
 
@@ -143,14 +148,14 @@ silently route to the wrong task.
 │       └── prep/SKILL.md       # the /prep slash command
 ├── exercises/
 │   ├── general_evaluation_rules.md
-│   ├── task_01_generate_csv_report/   # csv_writer example
-│   │   ├── task.json           # solution_pipeline_path + output_csv_filename
+│   ├── task_01_generate_csv_report/   # file_writer example
+│   │   ├── task.json           # solution_pipeline_path + output_filename (or output_filenames[] for multi-output)
 │   │   ├── description.md      # the student-facing prompt (H1 = canonical pipeline name)
 │   │   ├── notes.md            # instructor hints fed to the AI judge
 │   │   ├── Task1.zip           # student-facing input data
 │   │   ├── solution.json       # cached solution pipeline JSON (committed)
 │   │   ├── solution.cache.json # sidecar: signature + snode_id for cache invalidation
-│   │   └── expected/           # golden output CSV (auto-fetched; only the current writer's filename is kept)
+│   │   └── expected/           # golden output file(s) (auto-fetched; only registered writer filenames are kept)
 │   └── task_02_calculator/     # triggered_task example
 │       ├── task.json           # solution_pipeline_path + triggered_task_name + requests[]
 │       ├── description.md
@@ -166,8 +171,8 @@ silently route to the wrong task.
 │   ├── snaplogic_client.py     # GET-only SnapLogic REST client
 │   ├── pipeline_fetch.py       # pipeline + SLDB file retrieval, topo sort, triggered-task probes
 │   ├── name_match.py           # dash-tolerant pipeline-name comparison
-│   ├── hard_gates.py           # name + output equality checks (CSV or per-scenario JSON)
-│   ├── tasks.py                # task.json discovery + TaskConfig (csv_writer | triggered_task)
+│   ├── hard_gates.py           # name + output equality checks (CSV/XLSX or per-scenario JSON)
+│   ├── tasks.py                # task.json discovery + TaskConfig (file_writer | triggered_task)
 │   ├── evaluate.py             # per-task evaluator (no LLM call)
 │   ├── prep.py                 # /prep skill orchestrator + CLI
 │   └── grade.py                # /grade skill orchestrator + CLI
@@ -286,7 +291,7 @@ Exit codes:
 - `0` — hard gates passed (AI step pending, or all gates passed)
 - `1` — procedural hard gate failed (pipeline name mismatch)
 - `2` — bad CLI args / missing required env var / unknown task slug
-- `4` — deliverable not submitted (`csv_output_present` 404 OR `triggered_task_exists` missing) — orchestrator treats as MISSING
+- `4` — deliverable not submitted (`output_present` 404 OR `triggered_task_exists` missing) — orchestrator treats as MISSING
 
 ## Adding a new exercise
 
@@ -301,8 +306,41 @@ Exit codes:
    exercise legitimately requires it.
 3. Run `/prep`.
 
-   - For **csv_writer** exercises, `/prep` auto-creates `task.json` and fetches
-     `solution.json` + `expected/<output>.csv`.
+   - For **single-output file_writer** exercises, `/prep` auto-creates `task.json`
+     (with `"output_filename": "<output>.csv"`) and fetches `solution.json` +
+     `expected/<output>.csv`. By default the output gate compares the header
+     **and** row multiset exactly. For an exercise whose output is
+     non-deterministic (e.g. it calls an API that returns random rows every run),
+     add `"output_match_mode": "columns_only"` to `task.json` — the gate then
+     compares only the column header (exact, order-sensitive) and ignores rows,
+     so a correct submission still passes. The header reader is format-aware
+     (real `.xlsx` from the Excel Formatter, or CSV). Default is `"exact"`; see
+     `exercises/task_04_born_on_friday/`.
+   - For **multi-output file_writer** exercises (the pipeline writes several files
+     and the student must reproduce **all** of them — e.g.
+     `exercises/task_05_multiple_flows_one_pipeline/`), `/prep` can't guess which
+     writers are deliverables, so you hand-write `task.json` with the full list
+     under `output_filenames` and then run `/prep` to fetch every file:
+
+     ```json
+     {
+       "task_type": "file_writer",
+       "solution_pipeline_path": "Org/ProjectSpace/Project/Pipeline Name",
+       "output_filenames": ["Report1.csv", "Report2.csv", "Report3.csv"]
+     }
+     ```
+
+     The output gate compares **every** file (each header + row multiset); the
+     exercise PASSes only when all match. `output_match_mode` applies to all of
+     them. Use exactly one of `output_filename` / `output_filenames`.
+
+     > **Back-compat:** the `file_writer` task type was originally named
+     > `csv_writer`, with keys `output_csv_filename` / `output_csv_filenames`
+     > (the first exercises all wrote CSVs). Those old names are still accepted
+     > in `task.json` and normalize to the format-neutral ones; the
+     > `prep sync --output-csv` flag is likewise a deprecated alias for
+     > `--output-file`. Write new exercises with the `file_writer` /
+     > `output_filename(s)` names.
    - For **triggered_task** exercises, `/prep` asks you to hand-write
      `task.json` because the script can't derive the Triggered Task name or
      scenarios. The schema is:

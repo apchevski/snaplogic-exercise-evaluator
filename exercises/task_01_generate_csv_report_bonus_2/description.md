@@ -6,13 +6,13 @@ We want to edit the mapping by adding a field called “Domain” with the value
 
 ### Example:
 
-If the email address is “andrej.bogdanovski@iwconnect.com”:
+- If the email address is “andrej.bogdanovski@iwconnect.com”:
 
-We only want "@iwconnect.com".
+    We only want "@iwconnect.com".
 
-If the email address is “andrej.bogdanovski@snaplogic.com”:
+- If the email address is “andrej.bogdanovski@snaplogic.com”:
 
-We only want "@snaplogic.com".
+    We only want "@snaplogic.com".
 
 The same applies to every email address you have in the source document.
 

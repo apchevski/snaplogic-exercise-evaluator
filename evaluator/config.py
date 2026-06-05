@@ -11,7 +11,7 @@ EXERCISES_DIR = REPO_ROOT / "exercises"
 TMP_DIR = REPO_ROOT / ".tmp"
 # Persistent grading output — only report.md per student lives here.
 # Intermediate artifacts (manifest.json, ai_context.json, evaluation.json,
-# student CSV) live under .tmp/grades/<student>/ during a run and are
+# student output files) live under .tmp/grades/<student>/ during a run and are
 # deleted at the end of `evaluator.grade report`.
 GRADES_DIR = REPO_ROOT / "grades"
 
