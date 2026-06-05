@@ -1,6 +1,6 @@
 ---
 name: prep
-description: Prepare SnapLogic exercise folders for grading. Walks exercises/, creates task.json for folders missing one (by reading the canonical pipeline name from each folder's description.md H1 heading and looking up that pipeline in the solution project space), and refreshes solution.json + expected/ outputs when the SnapLogic pipeline has changed. Supports two exercise types: CSV-writer pipelines (one expected CSV) and triggered-task pipelines (one expected JSON response per scenario). Usage — /prep (no args, prep every folder)  OR  /prep --task <slug> (prep only one folder). Run /prep whenever you add a new exercise folder or edit a solution pipeline; /grade refuses to grade folders that are not fully prepped.
+description: Prepare SnapLogic exercise folders for grading. Walks exercises/, creates task.json for folders missing one (by reading the canonical pipeline name from each folder's description.md H1 heading and looking up that pipeline in the solution project space), and refreshes solution.json + expected/ outputs when the SnapLogic pipeline has changed. Supports two exercise types: file-writer pipelines (one or more output files, CSV or XLSX) and triggered-task pipelines (one expected JSON response per scenario). Usage — /prep (no args, prep every folder)  OR  /prep --task <slug> (prep only one folder). Run /prep whenever you add a new exercise folder or edit a solution pipeline; /grade refuses to grade folders that are not fully prepped.
 ---
 
 # /prep — Skill workflow
@@ -18,10 +18,10 @@ This skill supports two modes:
 
 **Exercise types:** prep supports two `task_type` values in task.json:
 
-- `csv_writer` (default for back-compat) — the solution pipeline writes a CSV via a binary-write snap. `expected/` holds that one CSV. Required fields: `solution_pipeline_path`, `output_csv_filename`.
+- `file_writer` (default for back-compat) — the solution pipeline writes one or more output files via binary-write snap(s); the format is incidental (the comparison gate handles CSV and XLSX). `expected/` holds those files. Required fields: `solution_pipeline_path`, plus **either** `output_filename` (a single file) **or** `output_filenames` (an array — the pipeline writes several files and the student must reproduce **all** of them exactly). Use exactly one of the two keys. (Back-compat: the old `task_type: "csv_writer"` and `output_csv_filename` / `output_csv_filenames` keys are still accepted and normalize to these; write new task.json with the `file_writer` / `output_filename(s)` names.)
 - `triggered_task` — the solution pipeline is exposed as a SnapLogic Triggered Task (asset_type=Job, metadata.type=triggered). Prep invokes the task via `GET /api/1/rest/slsched/feed/...` once per scenario and saves each response as `expected/<request_name>.json`. Required fields: `solution_pipeline_path`, `triggered_task_name`, `requests` (list of `{name, params}`).
 
-The Python script can auto-create `task.json` for `csv_writer` exercises (the writer filename is in the pipeline JSON). For `triggered_task` exercises it cannot — the scenarios and task name aren't in the pipeline JSON, they live in prose. The skill (you) reads description.md + notes.md and writes the file.
+The Python script can auto-create `task.json` for **single-output** `file_writer` exercises (the lone writer filename is in the pipeline JSON). It cannot for **multi-output** `file_writer` (it can't know whether several writers mean "one canonical output" vs "all are deliverables") or for `triggered_task` (scenarios + task name live in prose, not the pipeline JSON). In those two cases the skill (you) reads description.md + notes.md and hand-writes the file.
 
 ## Steps
 
@@ -40,9 +40,10 @@ Each report has:
 - `status`: one of `ready`, `needs_task_json`, `needs_task_json_triggered`, `stale_solution`, `pipeline_renamed`, `writer_changed`, `ambiguous_writer`, `pipeline_not_found`, `missing_description`, `config_error`
 - `task_json_exists`: bool
 - `solution_pipeline_path`: the heading-derived path (the path task.json *should* hold)
-- `output_csv_filename`: csv_writer only — the writer-derived filename, or `null` when ambiguous
+- `output_filename`: file_writer only — the single writer-derived filename, or `null` when there are several outputs / it's ambiguous
+- `output_filenames`: file_writer only — the full registered output list (one entry for single-output, several for multi-output)
 - `proposed_writer_filenames`: every binary-write snap filename found in the live solution pipeline
-- `task_type`: `csv_writer`, `triggered_task`, or `null` (when task.json doesn't exist yet and the type is undecided)
+- `task_type`: `file_writer`, `triggered_task`, or `null` (when task.json doesn't exist yet and the type is undecided)
 - `triggered_task_name`: triggered_task only — the task name from task.json
 - `request_names`: triggered_task only — list of scenario names in task.json
 - `expected_response_filenames`: triggered_task only — list of `<name>.json` files prep expects in expected/
@@ -62,19 +63,38 @@ Apply the matching rule per entry:
 
 - **`pipeline_not_found`**: the heading parsed from description.md does not exist as a pipeline in `<org>/<solution_project_space>/<solution_project>` (configured in `.env`). Surface the reason and tell the user to either create/rename the SnapLogic pipeline so it matches the heading, or fix the heading. Skip and move on.
 
-- **`ambiguous_writer`** (csv_writer only): the pipeline has multiple binary-write snaps and prep cannot auto-pick. List the candidates in `proposed_writer_filenames` and ask via `AskUserQuestion` which is the canonical output. Then run:
+- **`ambiguous_writer`** (file_writer only): the pipeline has multiple binary-write snaps and prep cannot auto-pick. Read `description.md` (and `notes.md` if present) to decide which case applies:
 
-  ```
-  .venv/Scripts/python.exe -m evaluator.prep sync --slug "<slug>" --output-csv "<chosen-filename>"
-  ```
+  - **One canonical output** — only one of the writers is the graded deliverable. Confirm which via `AskUserQuestion` (list `proposed_writer_filenames`), then run:
 
-- **`needs_task_json`** (no task.json yet, single writer detected → csv_writer fast path), **`stale_solution`**, **`pipeline_renamed`**, **`writer_changed`**: all auto-fixable. Run:
+    ```
+    .venv/Scripts/python.exe -m evaluator.prep sync --slug "<slug>" --output-file "<chosen-filename>"
+    ```
+
+  - **All writers are required deliverables** — the exercise asks the student to produce several files (e.g. "Multiple Flows"), and PASS means reproducing every one. Hand-write `exercises/<slug>/task.json` with the full list, then sync (no `--output-file`):
+
+    ```json
+    {
+      "slug": "<slug>",
+      "task_type": "file_writer",
+      "solution_pipeline_path": "<solution_pipeline_path from the survey report>",
+      "output_filenames": ["<file1>.csv", "<file2>.csv", "<file3>.csv"]
+    }
+    ```
+
+    ```
+    .venv/Scripts/python.exe -m evaluator.prep sync --slug "<slug>"
+    ```
+
+    Sync fetches every listed file into `expected/`. A multi-output task.json is hand-authored like `triggered_task` — sync refreshes its cache + expected files but never regenerates the filename list, so derive it correctly from the description.
+
+- **`needs_task_json`** (no task.json yet, single writer detected → file_writer fast path), **`stale_solution`**, **`pipeline_renamed`**, **`writer_changed`**: all auto-fixable. Run:
 
   ```
   .venv/Scripts/python.exe -m evaluator.prep sync --slug "<slug>"
   ```
 
-  Sync handles every drift in one pass. For csv_writer it rewrites `task.json` to match the heading + live writer and force-refreshes `solution.json` + sidecar + `expected/<csv>`. For triggered_task it force-refreshes `solution.json` + sidecar and re-invokes every scenario, rewriting each `expected/<name>.json`.
+  Sync handles every drift in one pass. For single-output file_writer it rewrites `task.json` to match the heading + live writer and force-refreshes `solution.json` + sidecar + `expected/<file>`; for multi-output file_writer it preserves the hand-authored `output_filenames` list (only fixing a drifted pipeline path) and re-fetches every `expected/<file>`. For triggered_task it force-refreshes `solution.json` + sidecar and re-invokes every scenario, rewriting each `expected/<name>.json`.
 
 - **`needs_task_json_triggered`**: no task.json AND the solution pipeline has 0 binary-write snaps — almost certainly a triggered-task exercise. The Python script cannot derive scenarios from prose; you must:
 
@@ -96,7 +116,7 @@ Apply the matching rule per entry:
      }
      ```
 
-  6. Run `sync --slug <slug>` (no `--output-csv`; that flag is csv_writer-only). Sync will invoke the triggered task once per scenario and write `expected/<name>.json` for each.
+  6. Run `sync --slug <slug>` (no `--output-file`; that flag is file_writer-only). Sync will invoke the triggered task once per scenario and write `expected/<name>.json` for each.
 
   Do not ask the user for scenario values — derive them from notes.md / description.md yourself. If notes.md is silent on scenarios and you genuinely cannot infer them, surface that gap to the user with a specific question (which scenarios to test) rather than guessing.
 
@@ -113,7 +133,7 @@ Print:
 ## Notes
 
 - This skill writes to `exercises/<slug>/{task.json, solution.json, solution.cache.json, expected/}`. Never under `.tmp/` — that belongs to `/grade`.
-- Reconcile-time cleanup: after refreshing the cache, prep deletes every file in `exercises/<slug>/expected/` that isn't currently registered — the one `output_csv_filename` for csv_writer, or any of the `<request_name>.json` files for triggered_task. Sync output prints a line per deleted file.
+- Reconcile-time cleanup: after refreshing the cache, prep deletes every file in `exercises/<slug>/expected/` that isn't currently registered — the registered output file(s) for file_writer (one or more), or any of the `<request_name>.json` files for triggered_task. Sync output prints a line per deleted file.
 - Never modify anything under `evaluator/` or `.claude/`.
 - The H1 heading → pipeline name rule is strict: prep does not fuzzy-match. If the heading and SnapLogic pipeline name don't agree byte-for-byte (capitalization, em-dash vs hyphen, spaces), prep returns `pipeline_not_found` and you must surface that to the user. Folder slugs are NOT used for the lookup.
 - Survey does one `list_assets` + one `get_pipeline_definition` per folder so it can detect writer-filename and pipeline-rename drift. For triggered_task folders, sync additionally invokes the Triggered Task once per scenario — this counts against SnapLogic execution quota but is cached (re-runs are no-ops unless the pipeline definition changes).

@@ -1,6 +1,6 @@
 ---
 name: grade
-description: Grade a SnapLogic student's exercises by comparing each of their pipelines against the official solution. Usage — /grade <student name>  OR  /grade --space <project space> <student name>  OR  /grade <student name> --task <slug> (grade only one exercise, updating that task's section in the existing report in place). Iterates every exercise registered in exercises/<slug>/task.json, runs deterministic hard gates via the Python evaluator (supports both csv_writer and triggered_task exercises), performs AI judgment on each one whose hard gates passed, and produces an aggregated Markdown report at grades/<student>/report.md.
+description: Grade a SnapLogic student's exercises by comparing each of their pipelines against the official solution. Usage — /grade <student name>  OR  /grade --space <project space> <student name>  OR  /grade <student name> --task <slug> (grade only one exercise, updating that task's section in the existing report in place). Iterates every exercise registered in exercises/<slug>/task.json, runs deterministic hard gates via the Python evaluator (supports both file_writer and triggered_task exercises), performs AI judgment on each one whose hard gates passed, and produces an aggregated Markdown report at grades/<student>/report.md.
 ---
 
 # /grade — Skill workflow
@@ -10,7 +10,7 @@ You (Claude) are the AI judge. A Python orchestrator handles every deterministic
 This skill supports two modes:
 
 - **Full grading** (default): evaluate every registered exercise, write a fresh `grades/<student>/report.md`, and ask you to fill in the `## Overall` paragraph.
-- **Single-task grading** (`--task <slug>`): evaluate only one exercise. The Python `report` step updates just that task's section in the existing report.md in place — the header, counts, date, and `## Overall` are left untouched. If no report exists yet, a minimal single-task one is created (no `## Overall` placeholder). You do NOT write an Overall paragraph in single-task mode.
+- **Single-task grading** (`--task <slug>`): evaluate only one exercise. The Python `report` step updates just that task's section in the existing report.md in place (the date is left untouched). Afterwards you **refresh the `## Overall` paragraph and reconcile the header counts/total** so the report reflects the just-(re-)graded task — every grading run leaves a current Overall, never a stale one. If no report exists yet, a minimal single-task one is created (no `## Overall` placeholder — nothing to refresh).
 
 ## Steps
 
@@ -27,7 +27,7 @@ When `--task` is supplied, the manifest will contain exactly one entry (the targ
 This writes `.tmp/grades/<student>/manifest.json` listing each task with one of:
 - `status: "ready_for_ai"` → hard gates passed; you must judge it (step 2).
 - `status: "fail"` → hard gate failed; per-task `evaluation.json` is already complete.
-- `status: "missing"` → the student didn't submit a runnable deliverable. Three flavors: (a) no matching student pipeline, (b) pipeline exists but no output CSV in SLDB (`csv_output_present` 404, csv_writer only), or (c) pipeline exists but no Triggered Task with the convention name (`triggered_task_exists` failed, triggered_task only). All three are excluded from totals; nothing to judge.
+- `status: "missing"` → the student didn't submit a runnable deliverable. Three flavors: (a) no matching student pipeline, (b) pipeline exists but **none** of the expected output file(s) are in SLDB (`output_present` 404, file_writer only — for a multi-output exercise this means every file is absent, i.e. the pipeline was never run), or (c) pipeline exists but no Triggered Task with the convention name (`triggered_task_exists` failed, triggered_task only). All three are excluded from totals; nothing to judge.
 - `status: "needs_prep"` → the exercise's solution cache is missing or stale, or the folder has no `task.json`. Do NOT try to repair it from `/grade`. Surface the reason and tell the user to run `/prep` first, then re-run `/grade`. The manifest still includes these entries so the final report lists them.
 - `status: "config_error"` → surface the reason to the user and stop.
 
@@ -37,7 +37,7 @@ Exit code ≠ 0 from `plan` means a setup problem (missing `.env`, project not f
 
 For every manifest entry with `status: "ready_for_ai"`, read its `ai_context_path` and write the verdict to its `evaluation_path` using `json.dumps(..., indent=2)`.
 
-`ai_context.json` always contains: `task_slug`, `task_type` (`csv_writer` or `triggered_task`), `exercise_description`, `general_rules`, `task_notes`, `solution_flow` and `student_flow` (topologically-sorted snap labels — use these for snap-order reasoning; never iterate `snap_map`), `solution_definition`, `student_definition`, `student_version_notes` (list of `{version_number, creator, time_created, version_tag, version_note}` from the Designer "Versions" dialog; empty list if the student never created a checkpoint), `hard_gates`.
+`ai_context.json` always contains: `task_slug`, `task_type` (`file_writer` or `triggered_task`), `exercise_description`, `general_rules`, `task_notes`, `solution_flow` and `student_flow` (topologically-sorted snap labels — use these for snap-order reasoning; never iterate `snap_map`), `solution_definition`, `student_definition`, `student_version_notes` (list of `{version_number, creator, time_created, version_tag, version_note}` from the Designer "Versions" dialog; empty list if the student never created a checkpoint), `hard_gates`.
 
 When `task_type == "triggered_task"`, the bundle also contains:
 - `triggered_task_name_expected` — the convention name (`<pipeline name> Task`). The hard gate already verified a task with this exact name exists in the student's project; you do not need to re-judge naming.
@@ -48,8 +48,8 @@ When `task_type == "triggered_task"`, the bundle also contains:
 Before you start deducting, read the `hard_gates` array in `ai_context.json`:
 
 - **All hard gates passed** → emit `verdict: "pass"`. Points start at 10, minus any rule-based deductions.
-- **An output-mismatch gate failed** (`csv_output_match` or `triggered_task_responses_match`) → emit `verdict: "fail"`. The orchestrator routed this case to you specifically so you can award partial points for pipeline structure even though the output is wrong. Points still start at 10 and you still deduct using the same rules — the output mismatch itself is **not** a separate deduction (FAIL already conveys "output is wrong"). Don't double-penalize.
-- **Any other gate failed** — you will never see this case. Procedural FAILs (pipeline name wrong) are handled by the orchestrator with a fixed 0-point FAIL artifact; no AI context bundle is written. "Deliverable not submitted" gates (`csv_output_present` 404, `triggered_task_exists` missing) are handled by the orchestrator as MISSING (not graded, excluded from totals); also no AI context bundle. If you somehow see one of these in a bundle, emit `verdict: "fail"` with `points: 0`.
+- **An output-mismatch gate failed** (`output_match` or `triggered_task_responses_match`) → emit `verdict: "fail"`. The orchestrator routed this case to you specifically so you can award partial points for pipeline structure even though the output is wrong. Points still start at 10 and you still deduct using the same rules — the output mismatch itself is **not** a separate deduction (FAIL already conveys "output is wrong"). Don't double-penalize. For a **multi-output** file_writer exercise, `output_match` aggregates every expected file into one gate; its detail lists each file's PASS/FAIL (and which rows/columns differed), so use it to see which report(s) diverged. It's still one gate and one FAIL — don't add an extra deduction per differing or missing file.
+- **Any other gate failed** — you will never see this case. Procedural FAILs (pipeline name wrong) are handled by the orchestrator with a fixed 0-point FAIL artifact; no AI context bundle is written. "Deliverable not submitted" gates (`output_present` 404, `triggered_task_exists` missing) are handled by the orchestrator as MISSING (not graded, excluded from totals); also no AI context bundle. If you somehow see one of these in a bundle, emit `verdict: "fail"` with `points: 0`.
 
 You never emit `verdict: "missing"` — MISSING is the orchestrator's status and no bundle is written.
 
@@ -58,7 +58,7 @@ You never emit `verdict: "missing"` — MISSING is the orchestrator's status and
 1. **Points start at 10. Deduct only using values explicitly written in `general_rules` or `task_notes`.** Each rule that can cost points states its value (e.g. `-5 points`, `-2 points`, `-1 point`, or *mention only*). Use that exact value. **Never invent a deduction value.** If you see an issue that has no governing rule with explicit points, it becomes a Note (`points_deducted: 0`) — surface it to the student, but do not deduct.
 2. **Same rule, one deduction per exercise.** If the student violates the same rule in two places within one exercise (e.g. two default-named snaps), deduct the rule's value **once**. Name all occurrences in the description.
 3. **Floor at 0; verdict is independent of points.** If deductions sum past 10, `points` is `0`, never negative. The verdict stays whatever the hard gates decided: PASS stays PASS at 0 points (output is right), FAIL stays FAIL at 0 points (output is wrong). Points and verdict are two separate signals.
-4. **On FAIL, when a rule is already obviously the cause of the output mismatch, still deduct it.** The most common case: the CSV differs because the student's filter/sort is wrong, and that *same* configuration also violates a soft rule. The deduction still applies — the rule is what makes the difference *visible* and *consistent across students*. Don't add an *extra* "your output was wrong" deduction on top — FAIL already says that.
+4. **On FAIL, when a rule is already obviously the cause of the output mismatch, still deduct it.** The most common case: the output differs because the student's filter/sort is wrong, and that *same* configuration also violates a soft rule. The deduction still applies — the rule is what makes the difference *visible* and *consistent across students*. Don't add an *extra* "your output was wrong" deduction on top — FAIL already says that.
 5. There is usually more than one correct way to solve an exercise. Do not penalize stylistic choices, naming, or differently-shaped snaps that achieve the same correct outcome.
 6. Reason about snap order from `solution_flow` / `student_flow`, not `snap_map`.
 7. Be specific. Name the snaps involved when flagging a difference and explain why it matters or doesn't.
@@ -124,14 +124,20 @@ This copies the paragraph you wrote into `overall_summary` in `report.json` so t
 
 After step 3 runs in full mode, the per-task `ai_context.json` and `evaluation.json` files are gone. You don't need them — fill in the Overall paragraph from the conversation context you already have.
 
-**Single-task mode** (`--task <slug>`): replaces only that task's `## <slug> — …` section in the existing `grades/<student>/report.md`, leaving the header, counts, date, and `## Overall` untouched. The matching task entry in `grades/<student>/report.json` is updated in lockstep (and `counts` there is recomputed from the merged task list). If no report exists yet, a minimal single-task report (md + json) is written instead (no `## Overall` placeholder). Do NOT write or edit an `## Overall` paragraph in this mode — the existing one (if any) is intentionally preserved, and a single-task re-grade should not claim to have re-evaluated the whole submission. Do NOT call `sync-overall` in single-task mode. The `.tmp/grades/<student>/` scratch dir is still cleaned up after.
+**Single-task mode** (`--task <slug>`): replaces only that task's `## <slug> — …` section in the existing `grades/<student>/report.md` (the date is left untouched). The matching task entry in `grades/<student>/report.json` is updated in lockstep, and `report.json`'s `counts` / `points_earned` / `points_possible` are recomputed from the merged task list — **but the markdown header is NOT** (the Python leaves the `Exercises evaluated`, `Pass`/`Fail`/`Missing`, and `Total` lines stale, so they go out of date the moment a new task is added or a re-grade changes a score). So after the `report` command, do three things:
+
+1. **Reconcile the markdown header.** Read `grades/<student>/report.json` and Edit the `- **Exercises evaluated**`, `- **Pass**: … · **Fail**: … · …`, and `- **Total**: …/… points` lines in report.md to match `counts` / `points_earned` / `points_possible`.
+2. **Refresh `## Overall`.** Edit the existing `## Overall` paragraph so it reads as one coherent summary of the *whole current* submission, folding in the task you just (re-)graded and quoting the corrected total — don't merely append a sentence. (This is the one place single-task mode deviates from "touch only the one section": a stale Overall that contradicts the new score is worse than re-stating the whole picture.)
+3. **Run `sync-overall`** (same command as full mode) to copy the refreshed paragraph into `report.json` and rebuild `ui/index.html`.
+
+If no report exists yet, a minimal single-task report (md + json) is written instead with **no** `## Overall` placeholder — its header already reflects the single task, so skip steps 1–3 entirely. The `.tmp/grades/<student>/` scratch dir is cleaned up after either way.
 
 ### 4. Tell the user
 
 Print to chat:
 - One line per task: `<slug> → <verdict>` (the `report` subcommand already prints this — relay it). In single-task mode this is one line.
 - The report path: `grades/<student>/report.md`.
-- One sentence of overall guidance. In single-task mode, mention that only that one section was updated and the rest of the report (including `## Overall`) is unchanged.
+- One sentence of overall guidance. In single-task mode, mention that the task's section was updated and that the `## Overall` paragraph and header totals were refreshed to include it (the other tasks' sections were not re-evaluated).
 
 ## Notes
 

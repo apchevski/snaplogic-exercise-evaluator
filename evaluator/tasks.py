@@ -3,14 +3,33 @@
 Each exercise lives under `exercises/<slug>/` with a `task.json` file.
 Two task types are supported:
 
-CSV-writer exercises (default — back-compat with the original schema):
+File-writer exercises (the solution pipeline writes one or more output
+files via binary-write snaps; the file format is incidental — the
+comparison gate handles CSV and XLSX):
 
     {
       "slug": "task_01_generate_csv_report",
-      "task_type": "csv_writer",
+      "task_type": "file_writer",
       "solution_pipeline_path": "Org/PS/Project/Pipeline Name",
-      "output_csv_filename": "CA_Birthdays.csv"
+      "output_filename": "CA_Birthdays.csv"
     }
+
+A file_writer pipeline that writes more than one file lists them all
+under `output_filenames` (an array) instead of `output_filename`. Every
+listed file must match for the exercise to PASS:
+
+    {
+      "slug": "task_05_multiple_flows_one_pipeline",
+      "task_type": "file_writer",
+      "solution_pipeline_path": "Org/PS/Project/Pipeline Name",
+      "output_filenames": ["Report1.csv", "Report2.csv", "Report3.csv"]
+    }
+
+Back-compat: this task type and its filename keys were originally named
+after CSV (the first exercises all wrote CSVs). The old names are still
+accepted in task.json — `task_type: "csv_writer"` is an alias for
+`file_writer`, and `output_csv_filename` / `output_csv_filenames` are
+aliases for `output_filename` / `output_filenames`.
 
 Triggered-task exercises (pipeline exposed as a SnapLogic Triggered Task,
 exercised over HTTP with one or more scenarios):
@@ -38,9 +57,30 @@ from typing import Any
 
 from .config import EXERCISES_DIR
 
-TASK_TYPE_CSV_WRITER = "csv_writer"
+TASK_TYPE_FILE_WRITER = "file_writer"
 TASK_TYPE_TRIGGERED_TASK = "triggered_task"
-KNOWN_TASK_TYPES = frozenset({TASK_TYPE_CSV_WRITER, TASK_TYPE_TRIGGERED_TASK})
+KNOWN_TASK_TYPES = frozenset({TASK_TYPE_FILE_WRITER, TASK_TYPE_TRIGGERED_TASK})
+
+# Back-compat: the original schema called the file-writer type "csv_writer"
+# (the first exercises all wrote CSVs). It's normalized to the format-neutral
+# canonical name on load, so old task.json files keep working unchanged.
+TASK_TYPE_ALIASES = {"csv_writer": TASK_TYPE_FILE_WRITER}
+
+# task.json output-filename keys. Each pair is (canonical, legacy-alias); the
+# legacy "_csv_" keys are still accepted but normalize to the canonical name.
+_SINGULAR_OUTPUT_KEYS = ("output_filename", "output_csv_filename")
+_PLURAL_OUTPUT_KEYS = ("output_filenames", "output_csv_filenames")
+
+# How the file_writer output gate compares the student file to the solution.
+#   "exact"        — header + row multiset must match (the default).
+#   "columns_only" — only the column header is compared; row data is
+#                    ignored. For exercises whose output is inherently
+#                    non-deterministic (e.g. an API that returns random
+#                    data every run), so the rows can never match but the
+#                    column schema still must. See task_04_born_on_friday.
+OUTPUT_MATCH_EXACT = "exact"
+OUTPUT_MATCH_COLUMNS_ONLY = "columns_only"
+KNOWN_OUTPUT_MATCH_MODES = frozenset({OUTPUT_MATCH_EXACT, OUTPUT_MATCH_COLUMNS_ONLY})
 
 
 @dataclass(frozen=True)
@@ -54,8 +94,10 @@ class TaskConfig:
     slug: str
     task_type: str
     solution_pipeline_path: str
-    # csv_writer fields
-    output_csv_filename: str | None = None
+    # file_writer fields — one or more output files; a single-output exercise
+    # is just a length-1 tuple (back-compat with the `output_filename` key).
+    output_filenames: tuple[str, ...] = ()
+    output_match_mode: str = OUTPUT_MATCH_EXACT
     # triggered_task fields
     triggered_task_name: str | None = None
     requests: tuple[TriggeredRequest, ...] = field(default_factory=tuple)
@@ -77,17 +119,18 @@ class TaskConfig:
         return self.dir / "expected"
 
     @property
-    def expected_csv_path(self) -> Path:
-        if self.task_type != TASK_TYPE_CSV_WRITER:
+    def expected_output_paths(self) -> list[Path]:
+        """Cached expected output file paths, one per registered filename."""
+        if self.task_type != TASK_TYPE_FILE_WRITER:
             raise AttributeError(
-                f"expected_csv_path is only valid for csv_writer tasks "
+                f"expected_output_paths is only valid for file_writer tasks "
                 f"(slug={self.slug!r}, task_type={self.task_type!r})"
             )
-        if self.output_csv_filename is None:
+        if not self.output_filenames:
             raise AttributeError(
-                f"output_csv_filename is None for csv_writer slug={self.slug!r}"
+                f"output_filenames is empty for file_writer slug={self.slug!r}"
             )
-        return self.expected_dir / self.output_csv_filename
+        return [self.expected_dir / f for f in self.output_filenames]
 
     def expected_response_path(self, request_name: str) -> Path:
         """For triggered_task tasks: the per-scenario JSON file path."""
@@ -117,6 +160,59 @@ class TaskConfig:
         return self.dir / "solution.cache.json"
 
 
+def _parse_output_filenames(slug: str, data: dict[str, Any]) -> tuple[str, ...]:
+    """Read file_writer output filenames from task.json.
+
+    Accepts exactly one of (canonical names, plus their legacy ``_csv_`` aliases):
+      - ``output_filename`` (str) — single-output schema.
+      - ``output_filenames`` (non-empty list of str) — multi-output.
+
+    Returns a tuple (length 1 for the single-output case). Filenames must be
+    non-empty and unique — they become filenames under ``expected/`` and the
+    student SLDB keys fetched at grade time, so a duplicate is ambiguous.
+    """
+    present_singular = [k for k in _SINGULAR_OUTPUT_KEYS if k in data]
+    present_plural = [k for k in _PLURAL_OUTPUT_KEYS if k in data]
+    present = present_singular + present_plural
+    if len(present) > 1:
+        raise ValueError(
+            f"task.json for slug {slug!r} (file_writer) specifies multiple "
+            f"output-filename keys ({present}); use exactly one of "
+            f"'output_filename' / 'output_filenames'."
+        )
+
+    if present_plural:
+        raw = data.pop(present_plural[0])
+        if not isinstance(raw, list) or not raw:
+            raise ValueError(
+                f"task.json for slug {slug!r} (file_writer): "
+                f"'{present_plural[0]}' must be a non-empty array."
+            )
+        filenames = [str(x) for x in raw]
+    elif present_singular:
+        filenames = [str(data.pop(present_singular[0]))]
+    else:
+        raise ValueError(
+            f"task.json for slug {slug!r} (file_writer) must specify "
+            f"'output_filename' (str) or 'output_filenames' (array)."
+        )
+
+    seen: set[str] = set()
+    for f in filenames:
+        if not f:
+            raise ValueError(
+                f"task.json for slug {slug!r} (file_writer) has an empty "
+                f"output filename."
+            )
+        if f in seen:
+            raise ValueError(
+                f"Duplicate output filename {f!r} in slug {slug!r}; "
+                f"output filenames must be unique (they're filenames in expected/)."
+            )
+        seen.add(f)
+    return tuple(filenames)
+
+
 def load_task(slug: str) -> TaskConfig:
     cfg_path = EXERCISES_DIR / slug / "task.json"
     if not cfg_path.exists():
@@ -128,7 +224,8 @@ def load_task(slug: str) -> TaskConfig:
     # task.json's `slug` field is optional; folder name is the source of truth.
     data.pop("slug", None)
 
-    task_type = data.pop("task_type", TASK_TYPE_CSV_WRITER)
+    task_type = data.pop("task_type", TASK_TYPE_FILE_WRITER)
+    task_type = TASK_TYPE_ALIASES.get(task_type, task_type)
     if task_type not in KNOWN_TASK_TYPES:
         raise ValueError(
             f"Unknown task_type {task_type!r} for slug {slug!r}. "
@@ -137,12 +234,19 @@ def load_task(slug: str) -> TaskConfig:
 
     pipeline_path = data.pop("solution_pipeline_path")
 
-    if task_type == TASK_TYPE_CSV_WRITER:
+    if task_type == TASK_TYPE_FILE_WRITER:
+        output_match_mode = data.pop("output_match_mode", OUTPUT_MATCH_EXACT)
+        if output_match_mode not in KNOWN_OUTPUT_MATCH_MODES:
+            raise ValueError(
+                f"Unknown output_match_mode {output_match_mode!r} for slug "
+                f"{slug!r}. Expected one of: {sorted(KNOWN_OUTPUT_MATCH_MODES)}"
+            )
         return TaskConfig(
             slug=slug,
             task_type=task_type,
             solution_pipeline_path=pipeline_path,
-            output_csv_filename=data.pop("output_csv_filename"),
+            output_filenames=_parse_output_filenames(slug, data),
+            output_match_mode=output_match_mode,
         )
 
     # triggered_task

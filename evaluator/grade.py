@@ -233,7 +233,7 @@ def cmd_plan(
                 }
             )
         elif exit_code == 4 and per_task_eval.exists():
-            # Deliverable not submitted (e.g. csv_output_present 404)
+            # Deliverable not submitted (e.g. output_present 404)
             # → treated as MISSING (not graded, excluded from totals).
             eval_data = json.loads(per_task_eval.read_text(encoding="utf-8"))
             entries.append(
