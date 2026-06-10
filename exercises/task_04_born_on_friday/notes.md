@@ -19,9 +19,9 @@ header**, not the row data. A correct submission whose columns match
 **passes** the gate and is graded normally — do **not** treat differing
 row data as a failure, and do **not** deduct for it.
 
-What **must** match are the **columns** — the exact header set, in order
-(the gate enforces this), plus the per-field formatting — not the row
-data:
+What **must** match are the **columns** — the same column names (the gate
+enforces this; column order does not matter), plus the per-field
+formatting — not the row data:
 
 - Full Name
 - City

@@ -112,7 +112,7 @@ Both modes silently rebuild `ui/index.html` after writing the report so the dash
 
 **Full mode** (no `--task`): writes `grades/<student>/report.md` (the persistent location, outside `.tmp/`) with all per-task sections rendered from the per-task `evaluation.json` files, plus a structured mirror at `grades/<student>/report.json` for downstream tooling (future UI). Then deletes `.tmp/grades/<student>/` — only the persistent files survive. The report contains one placeholder TODO comment — `## Overall`. Use the `Edit` tool to replace it in `grades/<student>/report.md`:
 
-- `## Overall`: one paragraph summarizing the submission. Flag patterns across tasks (e.g. "consistently swaps filter/sort order").
+- `## Overall`: a **short, general** synthesis of the submission as a whole — **1–2 sentences, no more**. Lead with the headline (pass/fail count and total points), then characterize overall performance and any recurring themes **in general terms**. Two hard limits: **(a) no specific tasks** — never mention or enumerate individual tasks/slugs or their issues (e.g. don't write "Task 02's triggered task 404s" or "Task 03 leaves an extra column"); the per-task sections cover those. **(b) no recommendations or suggestions for improvement** — no next steps, no "the single highest-value area to improve", no "the area to focus on", no "fixing X would make it flawless" advice. The Overall only *describes* how the submission did; it never advises. Recurring best-practice *categories* stated generally (e.g. "points were lost to snaps left at default names") are fine as description; per-exercise callouts and forward-looking advice are not. See [`.claude/conventions/grade-overall-short.md`](../../conventions/grade-overall-short.md).
 
 After editing the Overall paragraph into report.md, run:
 
@@ -127,7 +127,7 @@ After step 3 runs in full mode, the per-task `ai_context.json` and `evaluation.j
 **Single-task mode** (`--task <slug>`): replaces only that task's `## <slug> — …` section in the existing `grades/<student>/report.md` (the date is left untouched). The matching task entry in `grades/<student>/report.json` is updated in lockstep, and `report.json`'s `counts` / `points_earned` / `points_possible` are recomputed from the merged task list — **but the markdown header is NOT** (the Python leaves the `Exercises evaluated`, `Pass`/`Fail`/`Missing`, and `Total` lines stale, so they go out of date the moment a new task is added or a re-grade changes a score). So after the `report` command, do three things:
 
 1. **Reconcile the markdown header.** Read `grades/<student>/report.json` and Edit the `- **Exercises evaluated**`, `- **Pass**: … · **Fail**: … · …`, and `- **Total**: …/… points` lines in report.md to match `counts` / `points_earned` / `points_possible`.
-2. **Refresh `## Overall`.** Edit the existing `## Overall` paragraph so it reads as one coherent summary of the *whole current* submission, folding in the task you just (re-)graded and quoting the corrected total — don't merely append a sentence. (This is the one place single-task mode deviates from "touch only the one section": a stale Overall that contradicts the new score is worse than re-stating the whole picture.)
+2. **Refresh `## Overall`.** Rewrite the existing `## Overall` as one **short, general** 1–2 sentence summary of the *whole current* submission (same rules as full mode — headline, recurring themes in general terms; **no specific-task mentions, and no recommendations or suggestions for improvement**), folding in the effect of the task you just (re-)graded and quoting the corrected total. Don't merely append a sentence, and don't let it grow into a recap. (This is the one place single-task mode deviates from "touch only the one section": a stale Overall that contradicts the new score is worse than re-stating the whole picture.)
 3. **Run `sync-overall`** (same command as full mode) to copy the refreshed paragraph into `report.json` and rebuild `ui/index.html`.
 
 If no report exists yet, a minimal single-task report (md + json) is written instead with **no** `## Overall` placeholder — its header already reflects the single task, so skip steps 1–3 entirely. The `.tmp/grades/<student>/` scratch dir is cleaned up after either way.
@@ -141,5 +141,5 @@ Print to chat:
 
 ## Notes
 
-- If `plan` reports an ambiguous fuzzy name match for a task (multiple plausible pipelines), call this out in the `## Overall` section since name match is the most basic expectation.
+- If `plan` reports an ambiguous fuzzy name match for a task (multiple plausible pipelines), call this out in **that task's per-task section** (the `## Overall` paragraph stays general and names no specific task) since name match is the most basic expectation.
 - Never modify anything under `evaluator/`, `exercises/`, or `.claude/context/`. If you'd want to, surface it as a recommendation to the user instead.

@@ -824,8 +824,10 @@ def cmd_report(
         "",
         "## Overall",
         "",
-        "<!-- TODO Claude: one-paragraph synthesis across all tasks. "
-        "Flag patterns (e.g. \"consistently swapping filter/sort order\"). "
+        "<!-- TODO Claude: SHORT (1-2 sentence) GENERAL synthesis of the whole "
+        "submission. Lead with pass/fail count + total points, then characterize "
+        "overall performance / recurring themes in general terms. NO specific "
+        "tasks/slugs. NO recommendations or suggestions for improvement. "
         "Replace this comment with the paragraph. -->",
     ]
 
@@ -914,6 +916,16 @@ def cmd_sync_overall(student: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Gate details and SnapLogic pipeline names carry non-ASCII text (e.g. an
+    # en-dash in a task name, or accented characters in sample output rows).
+    # The default Windows console is cp1252 and raises UnicodeEncodeError on
+    # those, which would abort an otherwise-healthy run mid-print. Force UTF-8
+    # with errors="replace" so progress output never crashes the orchestrator.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(
         prog="evaluator.grade",
         description="Orchestrate /grade: plan tasks, then render the report.",

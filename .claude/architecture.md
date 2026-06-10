@@ -15,7 +15,8 @@ final judgment has to come from a model rather than a hand-coded rubric.
      dash) compare as equal — see
      [pipeline-name-dash-tolerant](conventions/pipeline-name-dash-tolerant.md).
    - For csv_writer: the student's CSV output must match the solution's
-     (header + row multiset).
+     (column-name set + row multiset; both column order and row order are
+     ignored — reordered columns are realigned by name before comparing).
    - For triggered_task: (a) a Triggered Task named exactly
      `<pipeline name> Task` (the convention is strict — see
      [triggered-task-naming-strict](conventions/triggered-task-naming-strict.md))

@@ -308,13 +308,17 @@ Exit codes:
 
    - For **single-output file_writer** exercises, `/prep` auto-creates `task.json`
      (with `"output_filename": "<output>.csv"`) and fetches `solution.json` +
-     `expected/<output>.csv`. By default the output gate compares the header
-     **and** row multiset exactly. For an exercise whose output is
-     non-deterministic (e.g. it calls an API that returns random rows every run),
-     add `"output_match_mode": "columns_only"` to `task.json` — the gate then
-     compares only the column header (exact, order-sensitive) and ignores rows,
-     so a correct submission still passes. The header reader is format-aware
-     (real `.xlsx` from the Excel Formatter, or CSV). Default is `"exact"`; see
+     `expected/<output>.csv`. By default the output gate compares the column-name
+     set **and** the row multiset. **Column order and row order are both
+     ignored** — the student just needs the same column names (same names, same
+     count) and the same rows; a different column order is realigned by name
+     before rows are compared, so it never fails. Only a missing/extra column or
+     differing row data fails. For an exercise whose output is non-deterministic
+     (e.g. it calls an API that returns random rows every run), add
+     `"output_match_mode": "columns_only"` to `task.json` — the gate then
+     compares only the column-name set (any order) and ignores rows, so a correct
+     submission still passes. The header reader is format-aware (real `.xlsx`
+     from the Excel Formatter, or CSV). Default is `"exact"`; see
      `exercises/task_04_born_on_friday/`.
    - For **multi-output file_writer** exercises (the pipeline writes several files
      and the student must reproduce **all** of them — e.g.
