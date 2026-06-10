@@ -57,31 +57,95 @@ def check_pipeline_name_match(solution_name: str, student_name: str) -> GateResu
     return GateResult(name="pipeline_name_match", passed=passed, detail=detail)
 
 
+def _columns_match(exp_header: list[str], act_header: list[str]) -> bool:
+    """True when both headers carry the same column names with the same
+    multiplicity, regardless of order.
+
+    Column order is never significant at the output gate; only a missing or
+    extra column (or a change in column count) is a real schema difference.
+    """
+    return sorted(exp_header) == sorted(act_header)
+
+
+def _column_diff_note(exp_header: list[str], act_header: list[str]) -> str:
+    """Human-readable 'missing'/'unexpected' column summary for a mismatch.
+
+    Returns "" when the only difference is order (so callers never print a
+    misleading diff for a pure reordering).
+    """
+    exp_set, act_set = set(exp_header), set(act_header)
+    missing = [c for c in exp_header if c not in act_set]
+    extra = [c for c in act_header if c not in exp_set]
+    parts = []
+    if missing:
+        parts.append(f"missing: {missing}")
+    if extra:
+        parts.append(f"unexpected: {extra}")
+    return ("\n  " + "; ".join(parts)) if parts else ""
+
+
+def _build_column_index_map(
+    target_header: list[str], source_header: list[str]
+) -> list[int] | None:
+    """Map each target column to a source column position, by name.
+
+    Returns ``index_map`` where ``index_map[i]`` is the position of the
+    ``i``-th target column within ``source_header``. Returns ``None`` when
+    the source has duplicate column names (the by-name mapping is then
+    ambiguous), so the caller skips realignment and compares positionally.
+    """
+    if len(set(source_header)) != len(source_header):
+        return None
+    pos = {name: i for i, name in enumerate(source_header)}
+    try:
+        return [pos[name] for name in target_header]
+    except KeyError:
+        return None
+
+
+def _reorder_row(row: tuple[str, ...], index_map: list[int]) -> tuple[str, ...]:
+    """Reorder a row's cells into the target column order via ``index_map``.
+
+    Out-of-range source positions (a row shorter than the header) yield ""
+    so a ragged row never raises during realignment.
+    """
+    return tuple(row[src] if src < len(row) else "" for src in index_map)
+
+
 def check_output_files_match(
     expected_file: Path,
     actual_file: Path,
     *,
     columns_only: bool = False,
 ) -> GateResult:
-    """Compare two tabular outputs (CSV or XLSX), header-aware.
+    """Compare two tabular outputs (CSV or XLSX), header-aware and
+    column-order-insensitive.
 
-    Default (``columns_only=False``): both files must have identical
-    header sets and identical row multisets. Row order does NOT matter at
-    this gate — pipeline ordering (sort/filter placement) is handled by
-    the AI evaluator on the pipeline structure, not by re-checking output
-    order here.
+    Column ORDER never matters at this gate. Two outputs are treated as
+    having matching columns when they carry the same column names with the
+    same multiplicity, in any order — so a student who emits ``C, A, B``
+    instead of ``A, B, C`` is not penalized here. Only a genuine schema
+    difference (a missing column, an extra column, or a different column
+    count) fails the column check.
 
-    ``columns_only=True``: only the column header is compared; row data
-    is ignored. For exercises whose output is inherently non-deterministic
+    Default (``columns_only=False``): the two files must have the same
+    column-name set AND the same row multiset. When the student's columns
+    are in a different order, their rows are realigned to the expected
+    column order (matched by name) before the multiset is compared, so a
+    reordering does not produce a spurious row mismatch. Row order does NOT
+    matter — pipeline ordering (sort/filter placement) is judged by the AI
+    on the pipeline structure, not re-checked here.
+
+    ``columns_only=True``: only the column-name set is compared; row data is
+    ignored. For exercises whose output is inherently non-deterministic
     (e.g. an API that returns random rows every run) the rows can never
     match, but the column schema still must. The gate keeps the
-    ``output_match`` name in both modes, so a column mismatch still
-    routes to the AI judge for partial credit exactly like a row mismatch.
+    ``output_match`` name in both modes, so a column mismatch still routes
+    to the AI judge for partial credit exactly like a row mismatch.
 
-    Both modes read the header in a format-aware way: SnapLogic's Excel
-    Formatter emits real ``.xlsx`` (a zip of XML), which is parsed for its
-    first worksheet row; everything else is read as CSV. Row-multiset
-    comparison (exact mode) still assumes CSV.
+    Both modes read in a format-aware way: SnapLogic's Excel Formatter emits
+    real ``.xlsx`` (a zip of XML), parsed for its worksheet rows; everything
+    else is read as CSV.
     """
     if not expected_file.exists():
         return GateResult(
@@ -99,7 +163,7 @@ def check_output_files_match(
     if columns_only:
         exp_header = _read_header(expected_file)
         act_header = _read_header(actual_file)
-        if exp_header != act_header:
+        if not _columns_match(exp_header, act_header):
             return GateResult(
                 name="output_match",
                 passed=False,
@@ -109,28 +173,45 @@ def check_output_files_match(
                     "non-deterministic).\n"
                     f"  expected columns: {exp_header}\n"
                     f"  actual columns:   {act_header}"
+                    f"{_column_diff_note(exp_header, act_header)}"
                 ),
             )
+        order_note = (
+            " (column order differs; ignored)" if exp_header != act_header else ""
+        )
         return GateResult(
             name="output_match",
             passed=True,
             detail=(
                 f"Output columns match ({len(exp_header)} columns): "
-                f"{exp_header}. Row data not compared (non-deterministic output)."
+                f"{exp_header}{order_note}. "
+                f"Row data not compared (non-deterministic output)."
             ),
         )
 
-    exp_header, exp_rows = _read_csv(expected_file)
-    act_header, act_rows = _read_csv(actual_file)
+    exp_header, exp_rows = _read_tabular(expected_file)
+    act_header, act_rows = _read_tabular(actual_file)
 
-    if exp_header != act_header:
+    if not _columns_match(exp_header, act_header):
         return GateResult(
             name="output_match",
             passed=False,
             detail=(
-                f"Output header mismatch.\n  expected: {exp_header}\n  actual:   {act_header}"
+                f"Output header mismatch.\n  expected: {exp_header}\n"
+                f"  actual:   {act_header}"
+                f"{_column_diff_note(exp_header, act_header)}"
             ),
         )
+
+    # Same column set. If the student's columns are in a different order,
+    # realign their rows to the expected column order (matched by name) so
+    # that column order is irrelevant to the row-multiset comparison below.
+    order_note = ""
+    if exp_header != act_header:
+        index_map = _build_column_index_map(exp_header, act_header)
+        if index_map is not None:
+            act_rows = [_reorder_row(r, index_map) for r in act_rows]
+            order_note = " (student column order differed; realigned by name)"
 
     exp_sorted = sorted(exp_rows)
     act_sorted = sorted(act_rows)
@@ -151,7 +232,10 @@ def check_output_files_match(
     return GateResult(
         name="output_match",
         passed=True,
-        detail=f"Output matches ({len(exp_rows)} rows, {len(exp_header)} columns).",
+        detail=(
+            f"Output matches ({len(exp_rows)} rows, {len(exp_header)} columns)"
+            f"{order_note}."
+        ),
     )
 
 
@@ -335,6 +419,20 @@ def _read_csv(path: Path) -> tuple[list[str], list[tuple[str, ...]]]:
     return header, body
 
 
+def _read_tabular(path: Path) -> tuple[list[str], list[tuple[str, ...]]]:
+    """Read a CSV or XLSX output into ``(header, body)`` for the exact-match gate.
+
+    Sniffs the zip magic the same way :func:`_read_header` does so the
+    row-multiset comparison handles SnapLogic's Excel Formatter output
+    (a zip of XML) instead of crashing on the binary as if it were UTF-8 CSV.
+    """
+    with path.open("rb") as fh:
+        magic = fh.read(4)
+    if magic == b"PK\x03\x04":
+        return _read_xlsx_rows(path)
+    return _read_csv(path)
+
+
 # --- Format-aware header extraction (CSV or XLSX) ---------------------------
 
 # SpreadsheetML namespace used throughout an .xlsx workbook's XML parts.
@@ -377,6 +475,63 @@ def _read_xlsx_header(path: Path) -> list[str]:
         _xlsx_cell_text(c, shared)
         for c in first_row.findall("x:c", _XLSX_NS_MAP)
     ]
+
+
+def _read_xlsx_rows(path: Path) -> tuple[list[str], list[tuple[str, ...]]]:
+    """Read a SnapLogic Excel Formatter ``.xlsx`` into ``(header, body)``.
+
+    Mirrors :func:`_read_csv` for the exact-match gate. Cells are placed by
+    their column reference (``r="B2"``) so sparse rows — where the formatter
+    omits empty cells — stay column-aligned; gaps are filled with "". The
+    first worksheet row is the header; the remaining rows are the body,
+    each padded to the header width so trailing empties don't desync the
+    multiset comparison between the two files.
+    """
+    with zipfile.ZipFile(path) as zf:
+        sheet_part = _xlsx_first_sheet_part(zf)
+        if sheet_part is None:
+            return [], []
+        shared = _xlsx_shared_strings(zf)
+        with zf.open(sheet_part) as fh:
+            root = ET.parse(fh).getroot()
+    sheet_data = root.find("x:sheetData", _XLSX_NS_MAP)
+    if sheet_data is None:
+        return [], []
+    rows: list[list[str]] = []
+    for row_el in sheet_data.findall("x:row", _XLSX_NS_MAP):
+        cells: dict[int, str] = {}
+        pos = 0
+        max_idx = -1
+        for c in row_el.findall("x:c", _XLSX_NS_MAP):
+            idx = _xlsx_col_index(c.get("r"))
+            if idx is None:
+                idx = pos
+            cells[idx] = _xlsx_cell_text(c, shared)
+            pos = idx + 1
+            max_idx = max(max_idx, idx)
+        rows.append([cells.get(i, "") for i in range(max_idx + 1)])
+    if not rows:
+        return [], []
+    header = rows[0]
+    width = len(header)
+    body = [
+        tuple(r + [""] * (width - len(r)) if len(r) < width else r)
+        for r in rows[1:]
+    ]
+    return header, body
+
+
+def _xlsx_col_index(ref: str | None) -> int | None:
+    """Column index from a cell ref like ``"B2"`` → 1; None if unparseable."""
+    if not ref:
+        return None
+    letters = "".join(ch for ch in ref if ch.isalpha())
+    if not letters:
+        return None
+    idx = 0
+    for ch in letters.upper():
+        idx = idx * 26 + (ord(ch) - ord("A") + 1)
+    return idx - 1
 
 
 def _xlsx_first_sheet_part(zf: zipfile.ZipFile) -> str | None:

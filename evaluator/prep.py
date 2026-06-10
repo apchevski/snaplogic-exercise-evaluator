@@ -47,6 +47,7 @@ import argparse
 import json
 import sys
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 from .config import EXERCISES_DIR, Settings, load_settings
@@ -62,6 +63,7 @@ from .pipeline_fetch import (
 )
 from .snaplogic_client import SnapLogicClient
 from .tasks import (
+    OUTPUT_MATCH_EXACT,
     TASK_TYPE_FILE_WRITER,
     TASK_TYPE_TRIGGERED_TASK,
     list_exercise_folders,
@@ -544,13 +546,42 @@ def _write_file_writer_task_json(
         "solution_pipeline_path": solution_pipeline_path,
         "output_filename": output_filename,
     }
+    # The writer regenerates task.json from scratch, but output_match_mode is
+    # a hand-set field the writer doesn't manage (currently only "columns_only"
+    # for non-deterministic-output exercises like task_04_born_on_friday).
+    # Carry it through a regeneration so reconciling a rename doesn't silently
+    # revert the output gate to the "exact" default.
+    preserved_mode = _existing_output_match_mode(path)
+    if preserved_mode is not None:
+        data["output_match_mode"] = preserved_mode
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    extra = (
+        f", output_match_mode={preserved_mode!r}" if preserved_mode is not None else ""
+    )
     print(
         f"[{folder}] wrote task.json "
         f"(task_type=file_writer, "
         f"solution_pipeline_path={solution_pipeline_path!r}, "
-        f"output_filename={output_filename!r})"
+        f"output_filename={output_filename!r}{extra})"
     )
+
+
+def _existing_output_match_mode(task_json_path: Path) -> str | None:
+    """Return a non-default output_match_mode already in task.json, if any.
+
+    Lets :func:`_write_file_writer_task_json` carry a hand-authored
+    output_match_mode (only "columns_only" today) through a regeneration
+    instead of dropping it back to the "exact" default. Returns None when the
+    file is absent (fresh create), unreadable, or already uses the default.
+    """
+    try:
+        data = json.loads(task_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    mode = data.get("output_match_mode")
+    if mode and mode != OUTPUT_MATCH_EXACT:
+        return mode
+    return None
 
 
 def _reconcile_file_writer(

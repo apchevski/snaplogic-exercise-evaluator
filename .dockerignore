@@ -1,0 +1,47 @@
+# Keep the build context small, the image clean, and secrets out of layers.
+
+# Secrets / local env
+.env
+.env.local
+.env.*.local
+
+# Version control & CI
+.git/
+.gitignore
+.gitattributes
+
+# Host-only AI-assistant config (the AI step runs on the host, not in the
+# container — none of this is read by the evaluator package).
+.claude/
+.github/
+AGENTS.md
+
+# Python caches / virtualenvs
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated / mutable data — produced at run time onto bind mounts, never
+# baked into the image (would otherwise ship stale caches and reports).
+.tmp/
+grades/
+ui/
+exercises/*/task.json
+exercises/*/solution.json
+exercises/*/solution.cache.json
+exercises/*/expected/
+
+# Docker / IDE / docs that the runtime never needs
+Dockerfile
+.dockerignore
+docker-compose.yml
+.vscode/
+.idea/
+*.swp

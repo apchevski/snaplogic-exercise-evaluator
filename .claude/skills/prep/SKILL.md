@@ -7,6 +7,8 @@ description: Prepare SnapLogic exercise folders for grading. Walks exercises/, c
 
 You (Claude) orchestrate this skill. The Python script `evaluator.prep` does all deterministic work: discovering folders, reading description.md, looking up pipelines, fetching definitions, detecting drift, and writing files. Your job is to read the survey, ask the user when the script needs disambiguation, write task.json by hand for triggered-task exercises (the only case Python can't fully derive), and re-invoke sync.
 
+**Runtime (Docker-native).** The Python script runs in the project's Docker container — every `docker compose run …` command below must be invoked **from the repo root** (where `docker-compose.yml` lives), with Docker running and `.env` filled in. The container writes `task.json` / `solution.json` / `expected/` straight into the bind-mounted `exercises/`, so the results appear in your workspace. The hand-authored `task.json` files you write (triggered_task / multi-output) are plain host files. If you change anything under `evaluator/`, run `docker compose build` once first. (To run without Docker, substitute your local interpreter, e.g. `.venv/Scripts/python.exe -m evaluator.prep …`.)
+
 This skill supports two modes:
 
 - **Full prep** (default): survey and reconcile every folder under `exercises/`.
@@ -30,7 +32,7 @@ The Python script can auto-create `task.json` for **single-output** `file_writer
 Run (add `--slug "<slug>"` only when the user invoked `/prep --task <slug>`):
 
 ```
-.venv/Scripts/python.exe -m evaluator.prep survey [--slug "<slug>"]
+docker compose run --rm -T evaluator python -m evaluator.prep survey [--slug "<slug>"]
 ```
 
 The script prints a plain summary followed by a JSON block delimited by `---SURVEY_JSON_BEGIN---` and `---SURVEY_JSON_END---`. Parse the JSON to get a list of per-folder reports. With `--slug`, the list contains exactly one report; without it, one per folder under `exercises/`.
@@ -68,7 +70,7 @@ Apply the matching rule per entry:
   - **One canonical output** — only one of the writers is the graded deliverable. Confirm which via `AskUserQuestion` (list `proposed_writer_filenames`), then run:
 
     ```
-    .venv/Scripts/python.exe -m evaluator.prep sync --slug "<slug>" --output-file "<chosen-filename>"
+    docker compose run --rm -T evaluator python -m evaluator.prep sync --slug "<slug>" --output-file "<chosen-filename>"
     ```
 
   - **All writers are required deliverables** — the exercise asks the student to produce several files (e.g. "Multiple Flows"), and PASS means reproducing every one. Hand-write `exercises/<slug>/task.json` with the full list, then sync (no `--output-file`):
@@ -83,7 +85,7 @@ Apply the matching rule per entry:
     ```
 
     ```
-    .venv/Scripts/python.exe -m evaluator.prep sync --slug "<slug>"
+    docker compose run --rm -T evaluator python -m evaluator.prep sync --slug "<slug>"
     ```
 
     Sync fetches every listed file into `expected/`. A multi-output task.json is hand-authored like `triggered_task` — sync refreshes its cache + expected files but never regenerates the filename list, so derive it correctly from the description.
@@ -91,7 +93,7 @@ Apply the matching rule per entry:
 - **`needs_task_json`** (no task.json yet, single writer detected → file_writer fast path), **`stale_solution`**, **`pipeline_renamed`**, **`writer_changed`**: all auto-fixable. Run:
 
   ```
-  .venv/Scripts/python.exe -m evaluator.prep sync --slug "<slug>"
+  docker compose run --rm -T evaluator python -m evaluator.prep sync --slug "<slug>"
   ```
 
   Sync handles every drift in one pass. For single-output file_writer it rewrites `task.json` to match the heading + live writer and force-refreshes `solution.json` + sidecar + `expected/<file>`; for multi-output file_writer it preserves the hand-authored `output_filenames` list (only fixing a drifted pipeline path) and re-fetches every `expected/<file>`. For triggered_task it force-refreshes `solution.json` + sidecar and re-invokes every scenario, rewriting each `expected/<name>.json`.

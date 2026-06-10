@@ -133,9 +133,15 @@ silently route to the wrong task.
 .
 ├── README.md
 ├── CHANGELOG.md
+├── AGENTS.md                   # tool-neutral guide for any AI assistant (Docker-native flow)
 ├── LICENSE
 ├── requirements.txt
+├── Dockerfile                  # deterministic-evaluator image (multi-stage, non-root)
+├── docker-compose.yml          # bind-mounts the repo, injects .env
+├── .dockerignore
 ├── .env.example                # template; copy to .env and fill in
+├── .github/
+│   └── copilot-instructions.md # points GitHub Copilot agent mode at AGENTS.md
 ├── .claude/
 │   ├── CLAUDE.md               # operating rules (auto-loaded by Claude Code)
 │   ├── architecture.md         # design notes
@@ -149,15 +155,15 @@ silently route to the wrong task.
 ├── exercises/
 │   ├── general_evaluation_rules.md
 │   ├── task_01_generate_csv_report/   # file_writer example
-│   │   ├── task.json           # solution_pipeline_path + output_filename (or output_filenames[] for multi-output)
+│   │   ├── task.json           # COMMITTED: intent (output_filename(s)); solution_pipeline_path auto-rewritten by /prep
 │   │   ├── description.md      # the student-facing prompt (H1 = canonical pipeline name)
 │   │   ├── notes.md            # instructor hints fed to the AI judge
 │   │   ├── Task1.zip           # student-facing input data
-│   │   ├── solution.json       # cached solution pipeline JSON (committed)
-│   │   ├── solution.cache.json # sidecar: signature + snode_id for cache invalidation
-│   │   └── expected/           # golden output file(s) (auto-fetched; only registered writer filenames are kept)
+│   │   ├── solution.json       # cached solution pipeline JSON (gitignored; fetched by /prep)
+│   │   ├── solution.cache.json # sidecar: signature + snode_id for cache invalidation (gitignored)
+│   │   └── expected/           # golden output file(s) (gitignored; auto-fetched by /prep)
 │   └── task_02_calculator/     # triggered_task example
-│       ├── task.json           # solution_pipeline_path + triggered_task_name + requests[]
+│       ├── task.json           # COMMITTED: intent (triggered_task_name + requests[]); path auto-rewritten by /prep
 │       ├── description.md
 │       ├── notes.md
 │       ├── solution.json
@@ -181,15 +187,21 @@ silently route to the wrong task.
 
 ## Setup
 
+> The recommended path is **[Running in Docker](#running-in-docker-no-local-python)** —
+> no Python install at all. The venv setup below is the optional escape hatch
+> (and is still how `.env` gets created — Docker needs that step too).
+
 ```powershell
 # from repo root
+
+# 1. Credentials (required for BOTH Docker and venv)
+Copy-Item .env.example .env
+notepad .env   # set SNAPLOGIC_* values
+
+# 2. Local Python (only if you are NOT using Docker)
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-
-# fill in credentials
-Copy-Item .env.example .env
-notepad .env   # set SNAPLOGIC_* values
 ```
 
 Required env vars (see `.env.example`):
@@ -256,6 +268,85 @@ helper that copies the rendered `## Overall` paragraph from `report.md` into
 `overall_summary` inside `report.json`; the `/grade` skill calls it after
 filling in the Overall paragraph (full mode only).
 
+## Running in Docker (no local Python)
+
+Docker is the **primary, fully self-contained way to run this project** — a new
+person needs only **Docker**, an **agentic AI assistant** (Claude Code or GitHub
+Copilot agent mode), and SnapLogic credentials. No Python install, no venv.
+
+The split is unchanged: the deterministic `evaluator/` engine runs **in the
+container**; the grading *judgment* is done by **your AI assistant on the host**
+(the project never uses an Anthropic/OpenAI key). They meet through
+bind-mounted folders — `docker-compose.yml` maps the repo into the container, so
+everything the engine writes (`exercises/…`, `.tmp/…`, `grades/…`,
+`ui/index.html`) lands directly in your workspace, and the `evaluation.json`
+your assistant writes is read back by the container.
+
+**The full agent-driven procedure lives in [`AGENTS.md`](AGENTS.md)** (tool-
+neutral). Claude Code users just run the `/prep` and `/grade` slash commands —
+**they now drive Docker directly** (no venv). GitHub Copilot agent mode reads
+[`.github/copilot-instructions.md`](.github/copilot-instructions.md), which
+points at `AGENTS.md`.
+
+### Prerequisites
+
+- Docker (Desktop on Windows/macOS, Engine on Linux), running.
+- A filled-in `.env` at the repo root (see [Setup](#setup)). `docker compose`
+  injects it as real environment variables; the file is never copied into the
+  image.
+- The solution pipelines must exist in your SnapLogic org under the names in
+  each exercise's `description.md` H1 heading.
+- Build the image once: `docker compose build` (re-run only when `evaluator/`
+  changes).
+
+### What a new person does, start to finish
+
+1. `git clone` the repo (the committed `task.json` files carry each exercise's
+   intent; `prep` rewrites their env-specific solution path for *your* org).
+2. Create `.env`; `docker compose build`.
+3. Tell your AI assistant **"prep all exercises"** → it runs `prep sync` in
+   Docker (fully deterministic — no judgment). Or run it yourself:
+   ```powershell
+   docker compose run --rm -T evaluator python -m evaluator.prep sync
+   ```
+4. Tell your assistant **"grade <student>"** → it runs the three-step flow below.
+5. Open `ui/index.html` in your browser.
+
+### The grade flow (container ↔ your AI assistant)
+
+A full grade is a three-step handoff, sharing the bind-mounted `.tmp/` + `grades/`:
+
+1. **Container** — `grade plan <student>` runs the hard gates and writes
+   `.tmp/grades/<student>/manifest.json` + an `ai_context.json` per gate-passing
+   exercise. The manifest stores **repo-root-relative** paths (e.g.
+   `.tmp/grades/<student>/<slug>/ai_context.json`) so the host AI tool and the
+   container both resolve them correctly.
+2. **Host (your AI assistant)** — reads each `ai_context.json`, applies the
+   rubric, and writes `evaluation.json` next to it.
+3. **Container** — `grade report <student>` aggregates the evaluations into
+   `grades/<student>/report.md` + `report.json`, rebuilds `ui/index.html`, and
+   clears the scratch.
+
+Raw command reference (run from the repo root; `-T` disables TTY for clean output):
+
+```powershell
+docker compose run --rm -T evaluator python -m evaluator.prep survey
+docker compose run --rm -T evaluator python -m evaluator.prep sync --slug task_02_calculator
+docker compose run --rm -T evaluator python -m evaluator.grade plan "Gabriela Shurbeska"
+docker compose run --rm -T evaluator python -m evaluator.grade report "Gabriela Shurbeska"
+docker compose run --rm -T evaluator python -m evaluator.ui --no-open   # container can't open a browser
+```
+
+> **Escape hatch (no Docker):** the flow is identical with a local interpreter —
+> substitute `.venv/Scripts/python.exe` (or `python`) for
+> `docker compose run --rm -T evaluator python` in any command above, after the
+> venv [Setup](#setup).
+
+> **Linux note:** bind-mounted files are owned by your host user, so the image's
+> non-root `uid 10001` may be denied writes to `exercises/` / `grades/`.
+> Uncomment the `user:` line in `docker-compose.yml` (defaults to `${UID}:${GID}`),
+> or run with `--user "$(id -u):$(id -g)"`.
+
 ## Grade dashboard (browser UI)
 
 `/grade` rebuilds `ui/index.html` silently at the end of every run (both full
@@ -263,11 +354,15 @@ and single-task mode), so the dashboard stays in sync with `grades/`
 automatically. Open the file once in your browser and refresh after each
 grade run — no extra command needed.
 
-To explicitly build the page (and open it in the default browser):
+To explicitly rebuild the page in Docker (headless — open `ui/index.html`
+yourself afterward):
 
 ```powershell
-.\.venv\Scripts\python.exe -m evaluator.ui
+docker compose run --rm -T evaluator python -m evaluator.ui --no-open
 ```
+
+(Or, with the venv escape hatch, `.\.venv\Scripts\python.exe -m evaluator.ui`
+also opens it in your default browser.)
 
 This walks every `grades/<student>/report.json` and generates a single
 self-contained `ui/index.html` with the data embedded inline (no HTTP server,
@@ -308,13 +403,17 @@ Exit codes:
 
    - For **single-output file_writer** exercises, `/prep` auto-creates `task.json`
      (with `"output_filename": "<output>.csv"`) and fetches `solution.json` +
-     `expected/<output>.csv`. By default the output gate compares the header
-     **and** row multiset exactly. For an exercise whose output is
-     non-deterministic (e.g. it calls an API that returns random rows every run),
-     add `"output_match_mode": "columns_only"` to `task.json` — the gate then
-     compares only the column header (exact, order-sensitive) and ignores rows,
-     so a correct submission still passes. The header reader is format-aware
-     (real `.xlsx` from the Excel Formatter, or CSV). Default is `"exact"`; see
+     `expected/<output>.csv`. By default the output gate compares the column-name
+     set **and** the row multiset. **Column order and row order are both
+     ignored** — the student just needs the same column names (same names, same
+     count) and the same rows; a different column order is realigned by name
+     before rows are compared, so it never fails. Only a missing/extra column or
+     differing row data fails. For an exercise whose output is non-deterministic
+     (e.g. it calls an API that returns random rows every run), add
+     `"output_match_mode": "columns_only"` to `task.json` — the gate then
+     compares only the column-name set (any order) and ignores rows, so a correct
+     submission still passes. The header reader is format-aware (real `.xlsx`
+     from the Excel Formatter, or CSV). Default is `"exact"`; see
      `exercises/task_04_born_on_friday/`.
    - For **multi-output file_writer** exercises (the pipeline writes several files
      and the student must reproduce **all** of them — e.g.

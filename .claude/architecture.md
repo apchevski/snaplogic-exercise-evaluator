@@ -15,7 +15,8 @@ final judgment has to come from a model rather than a hand-coded rubric.
      dash) compare as equal — see
      [pipeline-name-dash-tolerant](conventions/pipeline-name-dash-tolerant.md).
    - For csv_writer: the student's CSV output must match the solution's
-     (header + row multiset).
+     (column-name set + row multiset; both column order and row order are
+     ignored — reordered columns are realigned by name before comparing).
    - For triggered_task: (a) a Triggered Task named exactly
      `<pipeline name> Task` (the convention is strict — see
      [triggered-task-naming-strict](conventions/triggered-task-naming-strict.md))
@@ -158,6 +159,52 @@ Outputs:
   - `<slug>/ai_context.json` — bundle the skill consumes when hard gates pass.
   - `<slug>/evaluation.json` — per-exercise verdict produced by the skill.
   - `<slug>/student/` — fetched student pipeline JSON + student CSV.
+
+## Containerization
+
+`Dockerfile` + `docker-compose.yml` package **only the deterministic layer**
+(the `evaluator/` package). The AI-judgment layer stays on the host inside the
+operator's own AI assistant — baking an AI CLI + API key into the image would
+contradict the "no Anthropic API key, no per-evaluation cost" goal above, so it
+was deliberately left out (see the scope decision in `## Two-layer evaluation`).
+
+Docker is the **primary, fully-supported runtime** (chosen 2026-06-10): the
+`/prep` + `/grade` SKILL.md files invoke `docker compose run --rm -T evaluator
+python -m evaluator.…` rather than a local venv, so a fresh machine needs only
+Docker + an agentic AI assistant. The venv remains a documented escape hatch
+(swap the `docker compose run …` prefix for the interpreter). Tool portability:
+the canonical agent procedure is [`AGENTS.md`](../AGENTS.md) (tool-neutral);
+`.github/copilot-instructions.md` points GitHub Copilot at it; the SKILL.md
+files remain Claude Code's detailed source and the rubric the bundle already
+carries (`general_rules` + `task_notes`) is what any judge applies.
+
+Consequences that the design leans on:
+- The container and the host AI assistant **share the bind-mounted `.tmp/` +
+  `grades/`**, which is how the three-step `/grade` handoff works across the
+  boundary (`grade plan` in the container writes `ai_context.json`; the
+  assistant on the host writes `evaluation.json`; `grade report` in the
+  container reads it back). The bind-mount layout maps the host repo 1:1 onto
+  `/app`, so a containerized run writes the same files a local run does.
+- **Manifest paths are stored repo-root-relative** (`_rel_to_repo` /
+  `_resolve_manifest_path` in `grade.py`), not absolute. `grade plan` runs in
+  the container (CWD `/app`), but the host assistant must open the same
+  `ai_context.json`; an absolute `/app/.tmp/...` would be meaningless on the
+  host. Relative paths re-anchor correctly in both places (legacy absolute
+  paths still pass through, so old manifests keep working).
+- `task.json` is **committed** (env-neutral intent: `output_filename(s)`,
+  `triggered_task_name`, `requests`); its one env-specific field
+  (`solution_pipeline_path`) is rebuilt from `.env` + the description.md heading
+  by `_proposed_path` on the next `prep sync`. The genuinely env-specific caches
+  (`solution.json`, `solution.cache.json`, `expected/`, plus `grades/`, `ui/`,
+  `.tmp/`, `.env`) stay `.dockerignore`d / gitignored and arrive via bind mounts
+  or a live fetch.
+- Runs non-root (`uid 10001`) with UTF-8 forced in the environment, because the
+  non-`grade` entry points don't call the `sys.std*.reconfigure` shim that
+  `evaluator.grade.main` does and would otherwise crash on en-dashes under the
+  slim image's C locale.
+
+This dovetails with the headless/CI expansion point below: an API-based AI path
+could run inside the same image and read the same `ai_context.json`.
 
 ## Future expansion points
 
