@@ -1,0 +1,7 @@
+{
+  "slug": "task_04_born_on_friday",
+  "task_type": "file_writer",
+  "solution_pipeline_path": "Interworks-Partner/Training_Program_Demo/Solutions/Task 04 \u2013 Born on Friday",
+  "output_filename": "Born_on_Friday.xlsx",
+  "output_match_mode": "columns_only"
+}

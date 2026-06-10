@@ -1,0 +1,6 @@
+{
+  "slug": "task_03_join_employee_records",
+  "task_type": "file_writer",
+  "solution_pipeline_path": "Interworks-Partner/Training_Program_Demo/Solutions/Task 03 \u2013 Join Employee Records",
+  "output_filename": "Task3.csv"
+}

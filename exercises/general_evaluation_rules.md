@@ -97,21 +97,26 @@ verdict still FAIL).
 
 3. **[output-mismatch] (csv_writer) Output CSV must match exactly.**
    When an exercise produces a CSV via a binary-write snap, the
-   student's output must match the solution's. Compared header-aware
-   and as a row multiset (order-insensitive at this gate — pipeline-
-   level ordering choices are evaluated by the AI on the pipeline
-   structure). If this gate fails, the AI is invoked to judge the
-   pipeline structure and award partial points; the verdict stays
-   FAIL.
+   student's output must match the solution's. Compared by column-name
+   set and as a row multiset — **both column order and row order are
+   ignored**. The student must produce the same column names (same names,
+   same count) and the same rows; the *order* the columns appear in does
+   not matter (the gate realigns the student's rows to the solution's
+   column order by name before comparing), and neither does row order
+   (pipeline-level ordering choices are evaluated by the AI on the
+   pipeline structure). Only a missing column, an extra column, a
+   different column count, or differing row data fails the gate. If it
+   fails, the AI is invoked to judge the pipeline structure and award
+   partial points; the verdict stays FAIL.
    **Columns-only override.** A task whose output is inherently
    non-deterministic (e.g. a pipeline that calls an API returning random
    rows every run) can set `"output_match_mode": "columns_only"` in its
-   `task.json`. In that mode this gate compares only the **column header**
-   (exact, order-sensitive) and ignores the row data — so a structurally
-   correct submission still **passes** the gate. The header reader is
-   format-aware: real `.xlsx` output (SnapLogic's Excel Formatter) is
-   parsed for its first worksheet row, everything else as CSV. Default is
-   `"exact"`. See `task_04_born_on_friday`.
+   `task.json`. In that mode this gate compares only the **column-name
+   set** (same names in any order) and ignores the row data — so a
+   structurally correct submission still **passes** the gate. The header
+   reader is format-aware: real `.xlsx` output (SnapLogic's Excel
+   Formatter) is parsed for its first worksheet row, everything else as
+   CSV. Default is `"exact"`. See `task_04_born_on_friday`.
 
 4. **[MISSING] (triggered_task) Triggered Task must exist with the convention name.**
    For triggered-task exercises, a Triggered Task named exactly

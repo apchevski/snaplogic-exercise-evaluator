@@ -1,0 +1,10 @@
+{
+  "slug": "task_05_multiple_flows_one_pipeline",
+  "task_type": "file_writer",
+  "solution_pipeline_path": "Interworks-Partner/Training_Program_Demo/Solutions/Task 05 – Multiple Flows – One pipeline",
+  "output_filenames": [
+    "Trng_FilterEven.csv",
+    "Trng_IDbelow15.csv",
+    "Trng_IDabove15.csv"
+  ]
+}

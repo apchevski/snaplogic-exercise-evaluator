@@ -37,7 +37,7 @@ from typing import Any
 
 import httpx
 
-from .config import GRADES_DIR, TMP_DIR, load_settings
+from .config import GRADES_DIR, REPO_ROOT, TMP_DIR, load_settings
 from .evaluate import run_evaluation
 from .name_match import names_match
 from .pipeline_fetch import SolutionNotReadyError
@@ -60,6 +60,35 @@ def _student_report_dir(student: str) -> Path:
 
 def _manifest_path(student: str) -> Path:
     return _student_dir(student) / "manifest.json"
+
+
+def _rel_to_repo(p: Path) -> str:
+    """Render a path for the manifest, relative to the repo root (POSIX style).
+
+    The manifest is consumed in two environments: inside the Docker container
+    (working dir ``/app``) by `grade report`, and on the host by the AI tool
+    that writes each ``evaluation.json``. An absolute path written inside the
+    container (e.g. ``/app/.tmp/...``) is meaningless on the host, so we record
+    repo-root-relative paths (``.tmp/grades/...``) and re-anchor them on read
+    via :func:`_resolve_manifest_path`.
+    """
+    try:
+        return p.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        # Outside the repo tree (shouldn't happen for scratch paths) — fall back
+        # to the absolute path so the manifest still points somewhere valid.
+        return p.as_posix()
+
+
+def _resolve_manifest_path(stored: str) -> Path:
+    """Re-anchor a manifest path against the repo root, independent of CWD.
+
+    Accepts both the repo-root-relative form written by :func:`_rel_to_repo`
+    and any legacy absolute path (older manifests stored absolutes); absolute
+    paths are returned unchanged.
+    """
+    p = Path(stored)
+    return p if p.is_absolute() else (REPO_ROOT / p)
 
 
 def _solution_pipeline_name(solution_pipeline_path: str) -> str:
@@ -219,8 +248,8 @@ def cmd_plan(
                     "slug": slug,
                     "status": "ready_for_ai",
                     "student_pipeline_name": matched,
-                    "ai_context_path": str(per_task_ctx),
-                    "evaluation_path": str(per_task_eval),
+                    "ai_context_path": _rel_to_repo(per_task_ctx),
+                    "evaluation_path": _rel_to_repo(per_task_eval),
                 }
             )
         elif exit_code == 1 and per_task_eval.exists():
@@ -229,7 +258,7 @@ def cmd_plan(
                     "slug": slug,
                     "status": "fail",
                     "student_pipeline_name": matched,
-                    "evaluation_path": str(per_task_eval),
+                    "evaluation_path": _rel_to_repo(per_task_eval),
                 }
             )
         elif exit_code == 4 and per_task_eval.exists():
@@ -241,7 +270,7 @@ def cmd_plan(
                     "slug": slug,
                     "status": "missing",
                     "student_pipeline_name": matched,
-                    "evaluation_path": str(per_task_eval),
+                    "evaluation_path": _rel_to_repo(per_task_eval),
                     "reason": (
                         eval_data.get("failing_gate_detail")
                         or eval_data.get("summary")
@@ -411,7 +440,7 @@ def _render_entry_section(entry: dict[str, Any]) -> tuple[str, str, int | None]:
             "fail",
             0,
         )
-    eval_path = Path(entry["evaluation_path"])
+    eval_path = _resolve_manifest_path(entry["evaluation_path"])
     if not eval_path.exists():
         return (
             f"## {slug} — ✗ MISSING EVALUATION\n\n"
@@ -476,7 +505,7 @@ def _build_task_data(entry: dict[str, Any]) -> tuple[dict[str, Any], str]:
             "fail",
         )
 
-    eval_path = Path(entry["evaluation_path"])
+    eval_path = _resolve_manifest_path(entry["evaluation_path"])
     if not eval_path.exists():
         return (
             {
@@ -766,7 +795,7 @@ def cmd_report(
         elif status == "config_error":
             print(f"  {task_slug} -> CONFIG_ERROR")
         else:
-            eval_path = Path(entry["evaluation_path"])
+            eval_path = _resolve_manifest_path(entry["evaluation_path"])
             if eval_path.exists():
                 v = json.loads(eval_path.read_text(encoding="utf-8")).get("verdict", "?")
                 print(f"  {task_slug} -> {v}")
@@ -824,8 +853,10 @@ def cmd_report(
         "",
         "## Overall",
         "",
-        "<!-- TODO Claude: one-paragraph synthesis across all tasks. "
-        "Flag patterns (e.g. \"consistently swapping filter/sort order\"). "
+        "<!-- TODO Claude: SHORT (1-2 sentence) GENERAL synthesis of the whole "
+        "submission. Lead with pass/fail count + total points, then characterize "
+        "overall performance / recurring themes in general terms. NO specific "
+        "tasks/slugs. NO recommendations or suggestions for improvement. "
         "Replace this comment with the paragraph. -->",
     ]
 
@@ -853,7 +884,7 @@ def cmd_report(
         elif status == "config_error":
             print(f"  {slug} -> CONFIG_ERROR")
         else:
-            eval_path = Path(entry["evaluation_path"])
+            eval_path = _resolve_manifest_path(entry["evaluation_path"])
             if eval_path.exists():
                 v = json.loads(eval_path.read_text(encoding="utf-8")).get("verdict", "?")
                 print(f"  {slug} -> {v}")
@@ -914,6 +945,16 @@ def cmd_sync_overall(student: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Gate details and SnapLogic pipeline names carry non-ASCII text (e.g. an
+    # en-dash in a task name, or accented characters in sample output rows).
+    # The default Windows console is cp1252 and raises UnicodeEncodeError on
+    # those, which would abort an otherwise-healthy run mid-print. Force UTF-8
+    # with errors="replace" so progress output never crashes the orchestrator.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(
         prog="evaluator.grade",
         description="Orchestrate /grade: plan tasks, then render the report.",

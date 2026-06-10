@@ -1,0 +1,38 @@
+{
+  "slug": "task_02_calculator",
+  "task_type": "triggered_task",
+  "solution_pipeline_path": "Interworks-Partner/Training_Program_Demo/Solutions/Task 02 \u2013 Calculator",
+  "triggered_task_name": "Task 02 \u2013 Calculator Task",
+  "requests": [
+    {
+      "name": "addition",
+      "params": {
+        "mathOperation": "3+5"
+      }
+    },
+    {
+      "name": "subtraction",
+      "params": {
+        "mathOperation": "10-4"
+      }
+    },
+    {
+      "name": "multiplication",
+      "params": {
+        "mathOperation": "6*7"
+      }
+    },
+    {
+      "name": "division",
+      "params": {
+        "mathOperation": "20/5"
+      }
+    },
+    {
+      "name": "no_operator",
+      "params": {
+        "mathOperation": "abc"
+      }
+    }
+  ]
+}
