@@ -169,14 +169,19 @@ contradict the "no Anthropic API key, no per-evaluation cost" goal above, so it
 was deliberately left out (see the scope decision in `## Two-layer evaluation`).
 
 Docker is the **primary, fully-supported runtime** (chosen 2026-06-10): the
-`/prep` + `/grade` SKILL.md files invoke `docker compose run --rm -T evaluator
+`/prep` SKILL.md invokes `docker compose run --rm -T evaluator
 python -m evaluator.…` rather than a local venv, so a fresh machine needs only
-Docker + an agentic AI assistant. The venv remains a documented escape hatch
-(swap the `docker compose run …` prefix for the interpreter). Tool portability:
-the canonical agent procedure is [`AGENTS.md`](../AGENTS.md) (tool-neutral);
-`.github/copilot-instructions.md` points GitHub Copilot at it; the SKILL.md
-files remain Claude Code's detailed source and the rubric the bundle already
-carries (`general_rules` + `task_notes`) is what any judge applies.
+Docker. The venv remains a documented escape hatch (swap the
+`docker compose run …` prefix for the interpreter).
+
+**Pivot to cloud grading (decided 2026-06-11):** the local AI-judgment grading
+flow was removed — the `/grade` SKILL.md, `AGENTS.md`, and
+`.github/copilot-instructions.md` were deleted. Grading judgment moves to the
+Claude API (Sonnet 4.6) running in AWS, triggered by a Grade button on a web
+dashboard; the deterministic `evaluator/` layer and its rubric files
+(`general_rules` + per-task `notes.md`) are reused by the cloud worker
+unchanged in spirit. `/prep` stays a local admin task. See the implementation
+plan for the full target architecture.
 
 Consequences that the design leans on:
 - The container and the host AI assistant **share the bind-mounted `.tmp/` +

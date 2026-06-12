@@ -1,17 +1,25 @@
 # SnapLogic Exercise Evaluator
 
-Automated grading for SnapLogic training exercises. AI-driven judgment via a
-Claude Code skill — no Anthropic API key, no per-evaluation cost. Designed for
-exercises that admit many correct solutions, so judgment comes from a model
+Automated grading for SnapLogic training exercises. AI-driven judgment — designed
+for exercises that admit many correct solutions, so judgment comes from a model
 rather than a rubric.
+
+> **⚠️ Architecture transition (June 2026):** the project is moving to a fully
+> cloud-hosted grading flow — mentors click a **Grade** button on a web dashboard;
+> grading (deterministic hard gates + Claude API judgment, Sonnet 4.6) runs in
+> AWS, with nothing installed locally. The local `/grade` Claude Code skill,
+> `AGENTS.md`, and `.github/copilot-instructions.md` have been **removed** as part
+> of this pivot; sections below describing the local grading flow are historical
+> until the cloud implementation lands. `/prep` (exercise maintenance) remains a
+> local admin task.
 
 ## What it does
 
-Two slash commands in Claude Code:
+Exercise maintenance is a slash command in Claude Code; grading moves to the
+cloud (in progress):
 
 ```
 /prep                          # reconcile every exercise folder against SnapLogic
-/grade Gabriela Shurbeska      # grade one student against the registered exercises
 ```
 
 ## Verdicts and points
@@ -133,15 +141,12 @@ silently route to the wrong task.
 .
 ├── README.md
 ├── CHANGELOG.md
-├── AGENTS.md                   # tool-neutral guide for any AI assistant (Docker-native flow)
 ├── LICENSE
 ├── requirements.txt
 ├── Dockerfile                  # deterministic-evaluator image (multi-stage, non-root)
 ├── docker-compose.yml          # bind-mounts the repo, injects .env
 ├── .dockerignore
 ├── .env.example                # template; copy to .env and fill in
-├── .github/
-│   └── copilot-instructions.md # points GitHub Copilot agent mode at AGENTS.md
 ├── .claude/
 │   ├── CLAUDE.md               # operating rules (auto-loaded by Claude Code)
 │   ├── architecture.md         # design notes
@@ -150,7 +155,6 @@ silently route to the wrong task.
 │   ├── settings.json           # Claude Code project settings
 │   ├── conventions/            # one file per project-wide or skill-scoped rule
 │   └── skills/
-│       ├── grade/SKILL.md      # the /grade slash command
 │       └── prep/SKILL.md       # the /prep slash command
 ├── exercises/
 │   ├── general_evaluation_rules.md
@@ -262,31 +266,24 @@ Flags:
 
 The `/prep` and `/grade` orchestrators are exposed as their own subcommands:
 `python -m evaluator.prep {survey,sync}` and
-`python -m evaluator.grade {plan,report,sync-overall}`. The skills under
-`.claude/skills/` document the exact invocations. `sync-overall` is a small
-helper that copies the rendered `## Overall` paragraph from `report.md` into
-`overall_summary` inside `report.json`; the `/grade` skill calls it after
-filling in the Overall paragraph (full mode only).
+`python -m evaluator.grade {plan,report,sync-overall}`. `sync-overall` is a
+small helper that copies the rendered `## Overall` paragraph from `report.md`
+into `overall_summary` inside `report.json`. (The `/grade` skill that drove
+these commands has been removed — grading is moving to the cloud; the CLI
+entry points remain and will be reused by the cloud grading worker.)
 
 ## Running in Docker (no local Python)
 
-Docker is the **primary, fully self-contained way to run this project** — a new
-person needs only **Docker**, an **agentic AI assistant** (Claude Code or GitHub
-Copilot agent mode), and SnapLogic credentials. No Python install, no venv.
+Docker is the **primary, fully self-contained way to run the deterministic
+evaluator** — only **Docker** and SnapLogic credentials are needed. No Python
+install, no venv.
 
-The split is unchanged: the deterministic `evaluator/` engine runs **in the
-container**; the grading *judgment* is done by **your AI assistant on the host**
-(the project never uses an Anthropic/OpenAI key). They meet through
-bind-mounted folders — `docker-compose.yml` maps the repo into the container, so
-everything the engine writes (`exercises/…`, `.tmp/…`, `grades/…`,
-`ui/index.html`) lands directly in your workspace, and the `evaluation.json`
-your assistant writes is read back by the container.
-
-**The full agent-driven procedure lives in [`AGENTS.md`](AGENTS.md)** (tool-
-neutral). Claude Code users just run the `/prep` and `/grade` slash commands —
-**they now drive Docker directly** (no venv). GitHub Copilot agent mode reads
-[`.github/copilot-instructions.md`](.github/copilot-instructions.md), which
-points at `AGENTS.md`.
+The deterministic `evaluator/` engine runs **in the container**;
+`docker-compose.yml` maps the repo into the container, so everything the engine
+writes (`exercises/…`, `.tmp/…`, `grades/…`, `ui/index.html`) lands directly in
+your workspace. Claude Code's `/prep` slash command drives Docker directly.
+(The local AI-judgment grading flow and its `AGENTS.md` / Copilot guides have
+been removed — grading judgment is moving to the Claude API in AWS.)
 
 ### Prerequisites
 
