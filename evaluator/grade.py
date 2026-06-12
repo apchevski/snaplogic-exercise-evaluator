@@ -102,7 +102,15 @@ def _rebuild_ui_silently() -> None:
     coupling at module import time. UI build failures must never break a
     successful grading run — the dashboard is a convenience artifact, not a
     grading output.
+
+    Set EVALUATOR_DISABLE_UI_REBUILD=1 to skip entirely — the cloud worker
+    does this because the Lambda image filesystem is read-only and the React
+    SPA replaces the static dashboard there.
     """
+    import os
+
+    if os.environ.get("EVALUATOR_DISABLE_UI_REBUILD", "").strip():
+        return
     try:
         from .ui import cmd_build
 

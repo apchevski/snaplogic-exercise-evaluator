@@ -248,11 +248,11 @@ def _classify_no_task_json(
             solution_pipeline_path=proposed_path,
             proposed_writer_filenames=writers,
             reason=(
-                f"No task.json and the solution pipeline has 0 binary-write "
-                f"snaps — likely a triggered-task exercise. The /prep skill "
-                f"must read description.md + notes.md to decide the task "
-                f"type and write task.json (triggered_task_name + requests). "
-                f"Re-run sync after task.json exists."
+                "No task.json and the solution pipeline has 0 binary-write "
+                "snaps — likely a triggered-task exercise. The /prep skill "
+                "must read description.md + notes.md to decide the task "
+                "type and write task.json (triggered_task_name + requests). "
+                "Re-run sync after task.json exists."
             ),
         )
 
@@ -423,7 +423,6 @@ def _classify_triggered_task(
         )
 
     # Freshness check: signature + every expected/<name>.json must exist.
-    loc = PipelineLocation.from_path(task.solution_pipeline_path)
     missing: list[str] = []
     if not task.solution_json_path.exists():
         missing.append("solution.json")

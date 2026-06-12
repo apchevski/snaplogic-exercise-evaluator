@@ -1,0 +1,51 @@
+{
+  "$comment": "Structured-outputs schema for the AI judge's per-exercise response (Claude Messages API output_config.format). This is the model-facing subset of evaluation.json: verdict/summary/differences/bonus. points, failing_gate, failing_gate_detail, and hard_gates are computed/copied in Python (evaluator/ai_judge.py) — the model never sets them. Structured outputs forbid numeric min/max constraints, so points_deducted bounds are enforced in Python too.",
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail"],
+      "description": "'fail' if any hard gate in the provided bundle failed, otherwise 'pass'."
+    },
+    "summary": {
+      "type": "string",
+      "description": "1-3 factual sentences describing how the submission compares to the solution."
+    },
+    "differences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "area": {
+            "type": "string",
+            "description": "Short label for where the issue lives, e.g. 'Mapper configuration'."
+          },
+          "description": {
+            "type": "string",
+            "description": "What is different/wrong, naming every occurrence."
+          },
+          "points_deducted": {
+            "type": "integer",
+            "description": "The literal value stated by the governing rule (0 for mention-only notes). Never invented."
+          },
+          "rule_source": {
+            "type": "string",
+            "description": "Which rule the deduction comes from, e.g. 'general_rules: filter before sort' or 'notes.md: <rule>'. Use 'none' for mention-only observations with no governing rule."
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "Why the rule applies here."
+          }
+        },
+        "required": ["area", "description", "points_deducted", "rule_source", "reasoning"],
+        "additionalProperties": false
+      }
+    },
+    "bonus_question_answer": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "Summary + correctness assessment of the student's bonus answer, or null when the exercise has no bonus question."
+    }
+  },
+  "required": ["verdict", "summary", "differences", "bonus_question_answer"],
+  "additionalProperties": false
+}
