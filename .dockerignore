@@ -10,11 +10,9 @@
 .gitignore
 .gitattributes
 
-# Host-only AI-assistant config (the AI step runs on the host, not in the
-# container — none of this is read by the evaluator package).
+# Host-only AI-assistant config (not read by the evaluator package).
 .claude/
 .github/
-AGENTS.md
 
 # Python caches / virtualenvs
 __pycache__/
