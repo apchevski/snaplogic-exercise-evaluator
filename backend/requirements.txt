@@ -1,0 +1,6 @@
+# Runtime deps for the Lambda container image (api + worker share it).
+# The evaluator package's own deps (httpx, python-dotenv) come from the
+# root requirements.txt — both files are installed in Dockerfile.lambda.
+anthropic>=0.40.0
+aws-lambda-powertools>=3.0.0
+boto3>=1.34.0

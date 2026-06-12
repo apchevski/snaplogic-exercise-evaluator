@@ -20,7 +20,6 @@ import datetime as _dt
 import json
 import sys
 import webbrowser
-from pathlib import Path
 from typing import Any
 
 from .config import GRADES_DIR, REPO_ROOT

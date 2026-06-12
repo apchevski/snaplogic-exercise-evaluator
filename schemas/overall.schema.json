@@ -1,0 +1,12 @@
+{
+  "$comment": "Structured-outputs schema for the report-level Overall paragraph (one extra small Messages API call per full grading run).",
+  "type": "object",
+  "properties": {
+    "overall_summary": {
+      "type": "string",
+      "description": "1-2 sentences: pass/fail count + total points, then a general characterization. No task names, no recommendations."
+    }
+  },
+  "required": ["overall_summary"],
+  "additionalProperties": false
+}
