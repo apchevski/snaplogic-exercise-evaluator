@@ -39,3 +39,7 @@ ui/
 exercises/*/solution.json
 exercises/*/solution.cache.json
 exercises/*/expected/
+
+# Terraform local working dirs (provider binaries); lock files ARE committed
+**/.terraform/
+infra/envs/*/terraform.tfvars
