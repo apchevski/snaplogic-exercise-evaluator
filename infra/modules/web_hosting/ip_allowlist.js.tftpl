@@ -1,0 +1,49 @@
+// CloudFront Function (cloudfront-js-2.0): edge IP allowlist.
+// Rendered by Terraform templatefile(); var.allowed_cidrs lands below as JSON.
+// Empty allowlist = pass-through (the API Lambda still re-checks).
+
+var CIDRS = ${cidrs_json};
+
+function ipv4ToInt(ip) {
+    var parts = ip.split('.');
+    if (parts.length !== 4) return null;
+    var n = 0;
+    for (var i = 0; i < 4; i++) {
+        var o = Number(parts[i]);
+        if (!Number.isInteger(o) || o < 0 || o > 255) return null;
+        n = n * 256 + o;
+    }
+    return n;
+}
+
+function inCidr(ipInt, cidr) {
+    var slash = cidr.indexOf('/');
+    var base = slash >= 0 ? cidr.slice(0, slash) : cidr;
+    var bits = slash >= 0 ? Number(cidr.slice(slash + 1)) : 32;
+    var baseInt = ipv4ToInt(base);
+    if (baseInt === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+    if (bits === 0) return true;
+    var shift = Math.pow(2, 32 - bits);
+    return Math.floor(ipInt / shift) === Math.floor(baseInt / shift);
+}
+
+function handler(event) {
+    if (CIDRS.length === 0) {
+        return event.request;
+    }
+    var ip = event.viewer.ip;
+    var ipInt = ipv4ToInt(ip); // IPv6 viewers -> null -> denied
+    if (ipInt !== null) {
+        for (var i = 0; i < CIDRS.length; i++) {
+            if (inCidr(ipInt, CIDRS[i])) {
+                return event.request;
+            }
+        }
+    }
+    return {
+        statusCode: 403,
+        statusDescription: 'Forbidden',
+        headers: { 'content-type': { value: 'text/plain' } },
+        body: 'Access restricted to the office/VPN network.'
+    };
+}
