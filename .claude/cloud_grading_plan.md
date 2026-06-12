@@ -1,9 +1,19 @@
-# Cloud Grading Plan (v4) — APPROVED BLUEPRINT, NOT YET IMPLEMENTED
+# Cloud Grading Plan (v4) — APPROVED BLUEPRINT
 
 > Canonical implementation plan, finalized 2026-06-12. When the user says
 > "implement the cloud grading plan" (or similar), THIS is the document.
-> Implementation had not started as of 2026-06-12 — check git history /
-> CHANGELOG for progress before assuming any phase is done.
+>
+> **Progress (2026-06-12, branch `feature/cloud-grading`): phases 1–6 are
+> code-complete** — evaluator refactor (ai_judge/runner/store), backend
+> Lambdas + 33 passing $0 tests, cloud prep, all Terraform (validates
+> clean), the React SPA (builds clean), and the four GitHub workflows.
+> **Still outstanding:** the deploy/verification steps that need live AWS
+> (bootstrap apply, first image push, secret value, Cognito users, the
+> curl-verified auth matrix, prep byte-equivalence check, browser E2E),
+> **Phase 7** (judge-quality tuning against baseline reports — real Claude
+> spend, needs user approval), and **Phase 8** (delete ui/ + evaluator/ui.py,
+> retire local /prep — deliberately deferred until the cloud paths are
+> verified). See CHANGELOG [Unreleased] for the full inventory.
 
 # Cloud-Hosted Click-to-Prep / Click-to-Grade Platform (v4 — headless, Claude API, Cognito login)
 

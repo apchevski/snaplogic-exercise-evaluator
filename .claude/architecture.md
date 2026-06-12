@@ -26,35 +26,55 @@ final judgment has to come from a model rather than a hand-coded rubric.
    If any gate fails, the run aborts and writes a `verdict: "fail"`
    `evaluation.json` with the failing gate and detail. No AI step.
 
-2. **AI judgment** — a **Claude Code skill** (`.claude/skills/grade/SKILL.md`),
-   not an API call. When the user invokes `/grade <student>`, Claude (the
-   model running in their Pro session) reads
-   `.tmp/grades/<student>/<slug>/ai_context.json` for each exercise whose
-   hard gates passed and produces the verdict directly. No Anthropic API
-   key, no per-evaluation cost.
+2. **AI judgment** — a **headless Claude API call** (`evaluator/ai_judge.py`),
+   model `claude-sonnet-4-6` (locked decision). For each exercise whose
+   hard gates passed (or output-mismatch-failed), the runner sends the
+   `ai_context.json` bundle through the Messages API with structured
+   outputs (`schemas/evaluation.schema.json`) and writes the
+   `evaluation.json` contract. Points arithmetic and the verdict are
+   recomputed in Python — the model only proposes differences with
+   rule-sourced deduction values. The rules block is prompt-cached so a
+   full run pays for the rule text once.
 
 This split keeps the system simple AND auditable: the deterministic
 layer catches the unambiguous failures (cheap and explainable), the AI
 layer handles judgment calls (where rule-based code would have been
 brittle).
 
-## Why a skill, not an API call
+## From skill to headless API (history)
 
-The original design called Anthropic's API from Python. That requires
-an API key billed per-token, separate from the user's Claude Code Pro
-subscription. Pivoting the judgment step into a skill means:
+The first design called Anthropic's API from Python; the second pivoted
+judgment into a local Claude Code skill (`/grade`) so the user's Pro
+subscription covered evaluations with no API key. In June 2026 the
+project pivoted again — to **fully cloud-hosted grading** (see
+[cloud_grading_plan.md](cloud_grading_plan.md)): mentors click Grade in a
+web dashboard, a worker Lambda runs hard gates + the Claude API, nobody
+installs anything. The skill's rubric text lives on in
+`exercises/general_evaluation_rules.md`, per-task `notes.md`, and the
+judge's system prompt in `evaluator/ai_judge.py`; the data interface is
+unchanged (`ai_context.json` in, `evaluation.json` out), which is what
+made the third pivot a drop-in: `evaluator/runner.py` drives the same
+plan → judge → report loop the skill used to drive interactively.
 
-- The user's existing Pro subscription covers all evaluations.
-- Prompt iteration is editing markdown, not redeploying code.
-- The Python orchestrator becomes strictly deterministic — easier to
-  reason about, easier to test.
+## Cloud platform shape (June 2026)
 
-The trade-off: the system can't run headless (e.g., a nightly CI job
-evaluating 50 students). When/if that becomes necessary, the AI step
-can be re-implemented in Python alongside the skill. The data interface
-(`.tmp/grades/<student>/<slug>/ai_context.json` in,
-`.tmp/grades/<student>/<slug>/evaluation.json` out) is already designed
-to accept either implementation.
+- **Two Lambdas, one container image** (`Dockerfile.lambda`): the API
+  Lambda (Powertools router, JWT-authorized HTTP API) writes JOB items +
+  SQS messages; the worker Lambda consumes them (concurrency 1, DLQ with
+  maxReceiveCount 1 — a paid grade job is never auto-retried).
+- **Storage split**: authored exercise content ships in the image (git →
+  CI rebuild); generated artifacts (solution.json, expected/, reconciled
+  task.json) are gitignored and live in S3 under `exercises/<slug>/`,
+  written only by prep jobs. `evaluator/store.py` materializes the merged
+  tree under /tmp because the Lambda image filesystem is read-only
+  (`evaluator/config.py` honors `EVALUATOR_*_DIR` env overrides).
+- **Reports are immutable versions** in S3 (`students/<slug>/<ver>/`);
+  DynamoDB single table holds student cards, report history, job
+  lifecycle, conditional-put locks (TTL 30 min), and exercise prep state.
+- **Auth**: Cognito (admin-created users; groups `admin`/`mentor`) + API
+  Gateway JWT authorizer; the Lambda re-checks source IP and enforces the
+  role matrix (mentors get 403 on /v1/preps). IP allowlist also runs at
+  the edge via a CloudFront Function.
 
 ## Canonical pipeline form
 

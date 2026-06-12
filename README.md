@@ -4,23 +4,86 @@ Automated grading for SnapLogic training exercises. AI-driven judgment — desig
 for exercises that admit many correct solutions, so judgment comes from a model
 rather than a rubric.
 
-> **⚠️ Architecture transition (June 2026):** the project is moving to a fully
+> **⚠️ Architecture transition (June 2026):** the project has moved to a fully
 > cloud-hosted grading flow — mentors click a **Grade** button on a web dashboard;
 > grading (deterministic hard gates + Claude API judgment, Sonnet 4.6) runs in
-> AWS, with nothing installed locally. The local `/grade` Claude Code skill,
-> `AGENTS.md`, and `.github/copilot-instructions.md` have been **removed** as part
-> of this pivot; sections below describing the local grading flow are historical
-> until the cloud implementation lands. `/prep` (exercise maintenance) remains a
-> local admin task.
+> AWS, with nothing installed locally. The platform code (backend Lambdas,
+> Terraform, React SPA, CI/CD) is **implemented**; see
+> [Cloud grading platform](#cloud-grading-platform) for the deployment steps
+> that remain. The local `/grade` Claude Code skill was removed; `/prep`
+> (exercise maintenance) remains available locally as the dev fallback until
+> cloud prep is verified.
 
 ## What it does
 
-Exercise maintenance is a slash command in Claude Code; grading moves to the
-cloud (in progress):
+Mentors and admins log into a VPN-restricted web dashboard:
+
+- **Grade** (mentor or admin): click Grade on a student card (or type a new
+  student's project name). A job queues, a worker Lambda runs the
+  deterministic hard gates against SnapLogic, sends each surviving exercise
+  to Claude (Sonnet 4.6, ~$0.95 per full run), renders the report, and the
+  card refreshes live with points and per-task detail.
+- **Prep** (admin only): click Prep on an exercise to refresh its solution
+  cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
+
+Exercise *authoring* stays in git (description.md, notes.md, rules); the
+`/prep` Claude Code skill still works locally as a dev fallback:
 
 ```
 /prep                          # reconcile every exercise folder against SnapLogic
+python -m evaluator run <student>   # local twin of the cloud grade job
+                                    # (needs ANTHROPIC_API_KEY; costs real money)
 ```
+
+## Cloud grading platform
+
+```
+Browser (VPN/office IPs only)
+  ├─► CloudFront ── CF Function (IP allowlist) ──► S3 (React SPA, web/)
+  └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
+        ├─ GET  students / reports / exercises / job status   (any logged-in user)
+        ├─ POST /v1/gradings {student}                        (mentor or admin)
+        └─ POST /v1/preps {slug?}                             (admin only)
+                  │ JOB item (DynamoDB) + SQS message
+                  ▼
+SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-retry)
+          ├─ authored content from the image · generated artifacts from S3
+          ├─ SnapLogic REST (GET-only, creds from Secrets Manager)
+          ├─ grade: hard gates → Claude (Sonnet 4.6, structured outputs,
+          │         prompt-cached rules) → report.md/.json → S3 + DynamoDB
+          └─ prep:  evaluator.prep sync → artifacts to S3 ($0 AI)
+```
+
+| Piece | Where |
+|---|---|
+| Headless judge / runner / store | `evaluator/ai_judge.py`, `evaluator/runner.py`, `evaluator/store.py` |
+| API + worker Lambdas | `backend/src/` (tests in `backend/tests/`, all moto/stub — $0) |
+| Structured-outputs schemas | `schemas/` |
+| Lambda container image | `Dockerfile.lambda` (one image, two CMDs) |
+| Terraform (12 AWS services, ≈$0.50–0.70/mo) | `infra/` (bootstrap + envs/prod + modules) |
+| React SPA | `web/` (Vite + TS, Cognito Hosted UI + PKCE) |
+| CI/CD (GitHub OIDC, no stored keys) | `.github/workflows/` |
+
+**Roles** (Cognito groups; the API enforces, the UI only hides buttons):
+admins prep + grade + view; mentors grade + view. Users are invite-only
+(admin-created in the Cognito console — no self-signup).
+
+### Deploying (one-time, in order)
+
+1. `infra/bootstrap`: `terraform apply` once to create the TF state bucket.
+2. `infra/envs/prod`: copy `terraform.tfvars.example` → `terraform.tfvars`,
+   `terraform init -backend-config="bucket=<state bucket>"`, then apply.
+   The first apply creates data/secrets/ECR/Cognito/hosting; Lambdas need an
+   image, so build + push once by hand:
+   `docker build -f Dockerfile.lambda -t <ecr-url>:latest . && docker push …`,
+   then re-apply.
+3. Put the secret value (SnapLogic creds + Anthropic key) into Secrets
+   Manager — the exact CLI command is in `infra/modules/secrets/main.tf`.
+4. Create users in the Cognito console and add them to `admin` / `mentor`.
+5. Fill the GitHub repo variables/secrets named in `.github/workflows/*.yml`
+   from `terraform output`, push to `main`, and CI takes over (image →
+   Lambdas, SPA → S3 + CloudFront, infra plans/applies).
+6. Click **Prep** (admin) once so S3 has the generated artifacts, then grade.
 
 ## Verdicts and points
 
@@ -173,20 +236,32 @@ silently route to the wrong task.
 │       ├── solution.json
 │       ├── solution.cache.json
 │       └── expected/           # one <scenario>.json per request in task.json
-├── grades/                     # persistent per-student report.md + report.json (written by `/grade`)
+├── grades/                     # persistent per-student report.md + report.json (local runs; cloud keeps them in S3)
 ├── evaluator/
 │   ├── __init__.py
-│   ├── __main__.py             # `python -m evaluator ...`
-│   ├── config.py               # env loading
+│   ├── __main__.py             # `python -m evaluator ...` (incl. the `run` subcommand)
+│   ├── config.py               # env loading; EVALUATOR_*_DIR overrides for Lambda
 │   ├── snaplogic_client.py     # GET-only SnapLogic REST client
 │   ├── pipeline_fetch.py       # pipeline + SLDB file retrieval, topo sort, triggered-task probes
 │   ├── name_match.py           # dash-tolerant pipeline-name comparison
 │   ├── hard_gates.py           # name + output equality checks (CSV/XLSX or per-scenario JSON)
 │   ├── tasks.py                # task.json discovery + TaskConfig (file_writer | triggered_task)
 │   ├── evaluate.py             # per-task evaluator (no LLM call)
-│   ├── prep.py                 # /prep skill orchestrator + CLI
-│   └── grade.py                # /grade skill orchestrator + CLI
-└── .tmp/                       # scratch space during a grading run; cleaned out per student at the end of `/grade report`
+│   ├── prep.py                 # /prep skill orchestrator + CLI (also runs inside cloud prep jobs)
+│   ├── grade.py                # plan/report orchestrator + CLI
+│   ├── ai_judge.py             # headless Claude judge (Sonnet 4.6, structured outputs)
+│   ├── runner.py               # in-process grade run: gates → judge → report → Overall
+│   └── store.py                # LocalStore / S3Store artifact + report I/O
+├── backend/
+│   ├── src/                    # api.py (Powertools router) + worker.py (SQS consumer) + common.py
+│   ├── tests/                  # pytest: moto AWS + stubbed Claude — $0, run by CI
+│   └── requirements.txt
+├── schemas/                    # structured-outputs JSON schemas for the judge
+├── Dockerfile.lambda           # cloud image (api + worker share it; CMD differs)
+├── infra/                      # Terraform: bootstrap (state bucket) + envs/prod + modules/
+├── web/                        # React SPA (Vite + TS): login, dashboard, student detail, exercises
+├── .github/workflows/          # ci, deploy-backend, deploy-infra, deploy-web
+└── .tmp/                       # scratch space during a grading run; cleaned out per student
 ```
 
 ## Setup
