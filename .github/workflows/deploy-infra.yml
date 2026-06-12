@@ -1,0 +1,51 @@
+# Infra: terraform plan on PRs touching infra/, apply on main.
+# Backend config and variables come from repo variables/secrets:
+#   vars.TF_STATE_BUCKET, vars.AWS_REGION, vars.AWS_DEPLOY_ROLE_ARN
+#   secrets.TF_VARS — full terraform.tfvars content (bucket names, CIDRs,
+#   budget email, github_repo), kept out of the repo.
+name: deploy-infra
+
+on:
+  pull_request:
+    paths: ["infra/**"]
+  push:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/deploy-infra.yml"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_DIR: infra/envs/prod
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.12.1"
+
+      - name: Write terraform.tfvars
+        run: echo "${{ secrets.TF_VARS }}" > $TF_DIR/terraform.tfvars
+
+      - name: Init
+        run: terraform -chdir=$TF_DIR init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: Plan
+        run: terraform -chdir=$TF_DIR plan -input=false -no-color -out=tfplan
+
+      - name: Apply (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: terraform -chdir=$TF_DIR apply -input=false tfplan
