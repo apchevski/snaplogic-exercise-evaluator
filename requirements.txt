@@ -1,2 +1,6 @@
 httpx>=0.27.0
 python-dotenv>=1.0.1
+# Used by the headless judge (evaluator/ai_judge.py) for `python -m evaluator run`
+# and the cloud worker. Imported lazily, so the deterministic-only entry points
+# (prep, single-exercise evaluate) still work if it's absent.
+anthropic>=0.40.0

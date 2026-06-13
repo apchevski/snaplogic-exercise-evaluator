@@ -1,10 +1,10 @@
 # One-time, local-state bootstrap: creates the S3 bucket that holds the
-# Terraform state for envs/prod. Run once with `terraform init && terraform
+# Terraform state for environments/production. Run once with `terraform init && terraform
 # apply` from this directory, then never touch it again (state for this tiny
 # stack stays local / in git history of the tfvars you used).
 #
 # Locking uses S3-native lockfiles (Terraform >= 1.10), so no DynamoDB lock
-# table is needed — envs/prod/backend.tf sets `use_lockfile = true`.
+# table is needed — environments/production/backend.tf sets `use_lockfile = true`.
 
 terraform {
   required_version = ">= 1.10"
@@ -17,7 +17,7 @@ terraform {
 }
 
 variable "aws_region" {
-  description = "Region for the state bucket (match envs/prod)."
+  description = "Region for the state bucket (match environments/production)."
   type        = string
   default     = "eu-central-1"
 }

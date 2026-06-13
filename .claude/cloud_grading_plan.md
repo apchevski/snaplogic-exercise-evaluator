@@ -14,6 +14,11 @@
 > spend, needs user approval), and **Phase 8** (delete ui/ + evaluator/ui.py,
 > retire local /prep — deliberately deferred until the cloud paths are
 > verified). See CHANGELOG [Unreleased] for the full inventory.
+>
+> **Folder renames applied during implementation (the blueprint body below
+> still uses the original names):** `web/` → `frontend/` (matches `backend/`)
+> and `infra/envs/prod/` → `infra/environments/production/`. Everything else
+> matches the names written below.
 
 # Cloud-Hosted Click-to-Prep / Click-to-Grade Platform (v4 — headless, Claude API, Cognito login)
 

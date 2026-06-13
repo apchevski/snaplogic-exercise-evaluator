@@ -39,7 +39,7 @@ python -m evaluator run <student>   # local twin of the cloud grade job
 
 ```
 Browser (VPN/office IPs only)
-  ├─► CloudFront ── CF Function (IP allowlist) ──► S3 (React SPA, web/)
+  ├─► CloudFront ── CF Function (IP allowlist) ──► S3 (React SPA, frontend/)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
         ├─ GET  students / reports / exercises / job status   (any logged-in user)
         ├─ POST /v1/gradings {student}                        (mentor or admin)
@@ -60,8 +60,8 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
 | API + worker Lambdas | `backend/src/` (tests in `backend/tests/`, all moto/stub — $0) |
 | Structured-outputs schemas | `schemas/` |
 | Lambda container image | `Dockerfile.lambda` (one image, two CMDs) |
-| Terraform (12 AWS services, ≈$0.50–0.70/mo) | `infra/` (bootstrap + envs/prod + modules) |
-| React SPA | `web/` (Vite + TS, Cognito Hosted UI + PKCE) |
+| Terraform (12 AWS services, ≈$0.50–0.70/mo) | `infra/` (bootstrap + environments/production + modules) |
+| React SPA | `frontend/` (Vite + TS, Cognito Hosted UI + PKCE) |
 | CI/CD (GitHub OIDC, no stored keys) | `.github/workflows/` |
 
 **Roles** (Cognito groups; the API enforces, the UI only hides buttons):
@@ -71,7 +71,7 @@ admins prep + grade + view; mentors grade + view. Users are invite-only
 ### Deploying (one-time, in order)
 
 1. `infra/bootstrap`: `terraform apply` once to create the TF state bucket.
-2. `infra/envs/prod`: copy `terraform.tfvars.example` → `terraform.tfvars`,
+2. `infra/environments/production`: copy `terraform.tfvars.example` → `terraform.tfvars`,
    `terraform init -backend-config="bucket=<state bucket>"`, then apply.
    The first apply creates data/secrets/ECR/Cognito/hosting; Lambdas need an
    image, so build + push once by hand:
@@ -258,8 +258,8 @@ silently route to the wrong task.
 │   └── requirements.txt
 ├── schemas/                    # structured-outputs JSON schemas for the judge
 ├── Dockerfile.lambda           # cloud image (api + worker share it; CMD differs)
-├── infra/                      # Terraform: bootstrap (state bucket) + envs/prod + modules/
-├── web/                        # React SPA (Vite + TS): login, dashboard, student detail, exercises
+├── infra/                      # Terraform: bootstrap (state bucket) + environments/production + modules/
+├── frontend/                   # React SPA (Vite + TS): login, dashboard, student detail, exercises
 ├── .github/workflows/          # ci, deploy-backend, deploy-infra, deploy-web
 └── .tmp/                       # scratch space during a grading run; cleaned out per student
 ```
