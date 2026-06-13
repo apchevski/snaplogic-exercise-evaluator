@@ -34,7 +34,7 @@ exercises/*/expected/
 
 # Not part of the runtime image.
 backend/tests/
-web/
+frontend/
 infra/
 docker-compose.yml
 Dockerfile

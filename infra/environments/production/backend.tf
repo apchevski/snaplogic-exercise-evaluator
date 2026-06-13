@@ -5,7 +5,7 @@
 
 terraform {
   backend "s3" {
-    key          = "snaplogic-evaluator/prod/terraform.tfstate"
+    key          = "snaplogic-evaluator/production/terraform.tfstate"
     region       = "eu-central-1"
     use_lockfile = true # S3-native locking; no DynamoDB lock table needed
   }

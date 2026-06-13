@@ -20,7 +20,7 @@ permissions:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
-  TF_DIR: infra/envs/prod
+  TF_DIR: infra/environments/production
 
 jobs:
   terraform:

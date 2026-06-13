@@ -20,18 +20,18 @@ jobs:
       - run: ruff check evaluator backend
       - run: pytest backend/tests -q
 
-  web:
+  frontend:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: web
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run build
 
@@ -43,7 +43,7 @@ jobs:
         with:
           terraform_version: "1.12.1"
       - run: terraform fmt -check -recursive infra
-      - run: terraform -chdir=infra/envs/prod init -backend=false -input=false
-      - run: terraform -chdir=infra/envs/prod validate
+      - run: terraform -chdir=infra/environments/production init -backend=false -input=false
+      - run: terraform -chdir=infra/environments/production validate
       - run: terraform -chdir=infra/bootstrap init -backend=false -input=false
       - run: terraform -chdir=infra/bootstrap validate
