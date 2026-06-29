@@ -1,20 +1,17 @@
-# Keep the build context small, the image clean, and secrets out of layers.
+# .dockerignore for the unified Dockerfile (Lambda image).
+# Keeps committed task.json in the image — cloud prep needs the
+# hand-authored triggered_task registrations as its starting point.
 
-# Secrets / local env
 .env
 .env.local
 .env.*.local
 
-# Version control & CI
 .git/
 .gitignore
 .gitattributes
-
-# Host-only AI-assistant config (not read by the evaluator package).
 .claude/
 .github/
 
-# Python caches / virtualenvs
 __pycache__/
 *.py[cod]
 *$py.class
@@ -26,20 +23,22 @@ env/
 .mypy_cache/
 .ruff_cache/
 
-# Generated / mutable data — produced at run time onto bind mounts, never
-# baked into the image (would otherwise ship stale caches and reports).
+# Generated/mutable data — produced at run time (S3-materialized on Lambda).
 .tmp/
 grades/
 ui/
-exercises/*/task.json
 exercises/*/solution.json
 exercises/*/solution.cache.json
 exercises/*/expected/
 
-# Docker / IDE / docs that the runtime never needs
+# Not part of the runtime image.
+backend/tests/
+frontend/
+infra/
+docker-compose.yml
 Dockerfile
 .dockerignore
-docker-compose.yml
+requirements-dev.txt
 .vscode/
 .idea/
 *.swp

@@ -1,72 +1,51 @@
 # syntax=docker/dockerfile:1
 
-# ---------------------------------------------------------------------------
-# SnapLogic Exercise Evaluator — deterministic Python evaluator image.
+# Single source of truth: runs in AWS Lambda AND locally via docker-compose.
 #
-# This image packages ONLY the deterministic half of the project: the
-# `evaluator/` package (hard gates, /prep + /grade orchestrators, dashboard
-# build). The AI-judgment step of /grade runs inside an interactive Claude
-# Code session on the host — it is intentionally NOT in this image (the
-# project's design is "no Anthropic API key, no per-evaluation cost").
+# In AWS Lambda:
+#   - api Lambda:   CMD = backend.src.api.handler (set below)
+#   - worker Lambda: CMD = backend.src.worker.handler (overridden in infra module)
 #
-# The two halves hand off through bind-mounted folders (.tmp/, grades/) — see
-# docker-compose.yml and the README "Running in Docker" section.
-# ---------------------------------------------------------------------------
+# Locally via docker-compose:
+#   - api service:   runs the API Lambda via RIE on port 9000
+#   - worker service: runs the worker Lambda via RIE on port 9001
+#   - cli service:    entrypoint overridden to python; runs prep/run commands
+#
+# Contents: evaluator/ (hard gates + runners) + backend/ (API + worker handlers)
+# + schemas/ (structured outputs) + exercises/ (authored content: descriptions,
+# notes, task.json). Generated artifacts (solution.json, expected/, grades/)
+# are gitignored and fetched at runtime from S3 (cloud) or bind mounts (local).
+#
+# Lambda's filesystem is read-only after startup; EVALUATOR_*_DIR env vars
+# redirect writes to /tmp. See docker-compose.yml for local path overrides.
 
-# ---- Stage 1: build an isolated virtualenv with the runtime deps ----------
-FROM python:3.12-slim-bookworm AS builder
+FROM public.ecr.aws/lambda/python:3.13
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PATH="/opt/venv/bin:$PATH"
-
-WORKDIR /app
-
-RUN python -m venv /opt/venv
-
-# Install dependencies first so this layer is cached until requirements change.
-COPY requirements.txt ./
-RUN pip install -r requirements.txt
-
-# ---- Stage 2: lean runtime image -----------------------------------------
-FROM python:3.12-slim-bookworm AS runtime
-
-LABEL org.opencontainers.image.title="snaplogic-exercise-evaluator" \
-      org.opencontainers.image.description="Deterministic SnapLogic exercise evaluator: hard gates, /prep + /grade orchestrators, dashboard build." \
-      org.opencontainers.image.licenses="MIT"
-
-# UTF-8 everywhere: gate details and pipeline names carry en-dashes and
-# accented characters; the slim image's default C locale would otherwise
-# make non-grade entry points raise UnicodeEncodeError on print.
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONIOENCODING=utf-8 \
-    LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    PATH="/opt/venv/bin:$PATH"
+    # Lambda's read-only filesystem — evaluator.config and evaluator.store \
+    # honor these env overrides and write to /tmp instead. \
+    EVALUATOR_EXERCISES_DIR=/tmp/evaluator/exercises \
+    EVALUATOR_TMP_DIR=/tmp/evaluator/scratch \
+    EVALUATOR_GRADES_DIR=/tmp/evaluator/grades \
+    # Cloud-only: disable UI rebuild (the cloud worker doesn't render dashboards). \
+    # docker-compose.yml overrides this to "" for local cli service. \
+    EVALUATOR_DISABLE_UI_REBUILD=1
 
-WORKDIR /app
+# Install dependencies first; this layer caches until requirements change.
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/requirements.txt
+RUN pip install -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
-# Bring the pre-built virtualenv across from the builder stage.
-COPY --from=builder /opt/venv /opt/venv
+# Copy source + authored exercise content. Generated artifacts (solution.json,
+# solution.cache.json, expected/) are excluded by .dockerignore and fetched
+# at runtime (S3 in cloud, bind mounts locally).
+COPY evaluator/ ${LAMBDA_TASK_ROOT}/evaluator/
+COPY backend/ ${LAMBDA_TASK_ROOT}/backend/
+COPY schemas/ ${LAMBDA_TASK_ROOT}/schemas/
+COPY exercises/ ${LAMBDA_TASK_ROOT}/exercises/
 
-# Copy the evaluator package and the committed exercise *source* (description,
-# notes, input data, universal rules). Generated artifacts (task.json,
-# solution.json, expected/, grades/, ui/, .tmp/) are excluded by .dockerignore
-# and are produced at run time onto bind-mounted host folders.
-COPY evaluator/ ./evaluator/
-COPY exercises/ ./exercises/
-
-# Run as an unprivileged user; pre-create the writable output dirs it needs.
-# On Linux bind mounts inherit host ownership, so if writes are denied, run
-# with `--user "$(id -u):$(id -g)"` (see docker-compose.yml note).
-RUN useradd --create-home --uid 10001 evaluator \
-    && mkdir -p /app/grades /app/ui /app/.tmp \
-    && chown -R evaluator:evaluator /app
-USER evaluator
-
-# No long-running process — this is a CLI you invoke one command at a time.
-# The default just prints help; override the command to run a subcommand, e.g.
-#   docker run --rm --env-file .env <image> python -m evaluator.prep survey
-CMD ["python", "-m", "evaluator", "--help"]
+# Default entry point: the API Lambda handler.
+# Worker Lambda overrides this via Terraform's image_config.
+CMD ["backend.src.api.handler"]

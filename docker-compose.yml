@@ -1,39 +1,55 @@
-# Local workflow for the deterministic evaluator.
+# Local development — same Lambda image that runs in AWS
+# (public.ecr.aws/lambda/python:3.13), exercised locally via the built-in
+# Lambda Runtime Interface Emulator (RIE).
 #
-# This is a CLI tool, not a server — you invoke one command per run with
-# `docker compose run --rm evaluator <command>`. The bind mounts make the
-# container operate directly on your checked-out repo: /prep writes solution
-# caches back to exercises/, /grade plan writes scratch to .tmp/, and the
-# report/UI steps write to grades/ + ui/ — exactly like the non-Docker flow.
+# Three services, one image:
+#   api     — API Lambda on RIE port 9000
+#   worker  — Worker Lambda on RIE port 9001 (CMD override)
+#   cli     — evaluator CLI for prep / local-run (entrypoint override + bind mounts)
 #
-# The .tmp/ and grades/ mounts are what let the deterministic steps (this
-# container) hand off to the AI step (Claude Code on your host): `grade plan`
-# writes .tmp/grades/<student>/<task>/ai_context.json here, Claude reads it on
-# the host and writes evaluation.json back, then `grade report` reads those.
-#
-# Examples:
-#   docker compose run --rm evaluator python -m evaluator.prep survey
-#   docker compose run --rm evaluator python -m evaluator.prep sync --slug task_02_calculator
-#   docker compose run --rm evaluator python -m evaluator.grade plan "Gabriela Shurbeska"
-#   docker compose run --rm evaluator python -m evaluator.grade report "Gabriela Shurbeska"
-#   docker compose run --rm evaluator python -m evaluator.ui --no-open
+# Build:          docker compose build
+# API (up):       docker compose up api
+#   invoke:       curl -sX POST http://localhost:9000/2015-03-31/functions/function/invocations \
+#                   -H 'Content-Type: application/json' \
+#                   -d '{"version":"2.0","routeKey":"GET /v1/health","rawPath":"/v1/health","headers":{},"requestContext":{"http":{"method":"GET","path":"/v1/health"}},"isBase64Encoded":false}'
+# Worker invoke:  docker compose run --rm worker
+# CLI:            docker compose run --rm cli python -m evaluator.prep survey
 
 services:
-  evaluator:
+  api:
     build:
       context: .
       dockerfile: Dockerfile
     image: snaplogic-exercise-evaluator:latest
-    # SnapLogic credentials are injected as real env vars (config.py reads
-    # os.environ); the .env file itself is never copied into the image.
+    ports:
+      - "9000:8080"
     env_file:
       - .env
+    # Default CMD from Dockerfile: backend.src.api.handler
+
+  worker:
+    image: snaplogic-exercise-evaluator:latest
+    ports:
+      - "9001:8080"
+    env_file:
+      - .env
+    command: ["backend.src.worker.handler"]
+
+  cli:
+    image: snaplogic-exercise-evaluator:latest
+    entrypoint: ["python"]
+    command: ["-m", "evaluator", "--help"]
+    env_file:
+      - .env
+    environment:
+      # Override Lambda's /tmp paths so writes land on the bind-mounted repo dirs.
+      EVALUATOR_EXERCISES_DIR: /var/task/exercises
+      EVALUATOR_TMP_DIR: /var/task/.tmp
+      EVALUATOR_GRADES_DIR: /var/task/grades
+      # Clear the Lambda-only disable so `evaluator.ui` can rebuild the dashboard.
+      EVALUATOR_DISABLE_UI_REBUILD: ""
     volumes:
-      - ./exercises:/app/exercises   # prep writes solution.json / task.json / expected/
-      - ./grades:/app/grades         # persistent per-student report.md + report.json
-      - ./ui:/app/ui                 # generated dashboard (ui/index.html)
-      - ./.tmp:/app/.tmp             # scratch + the AI-step handoff bundle
-    # On native Linux, bind-mounted files are owned by your host user, so the
-    # image's uid 10001 may be denied writes. Uncomment to run as yourself:
-    # user: "${UID:-10001}:${GID:-10001}"
-    command: ["python", "-m", "evaluator", "--help"]
+      - ./exercises:/var/task/exercises   # prep writes solution.json / expected/
+      - ./grades:/var/task/grades         # persistent per-student reports
+      - ./frontend/dist:/var/task/frontend/dist  # generated dashboard
+      - ./.tmp:/var/task/.tmp             # scratch / local-run handoff bundle

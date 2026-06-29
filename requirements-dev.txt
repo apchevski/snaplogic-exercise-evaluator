@@ -1,6 +1,0 @@
-# Local dev + CI test environment ($0: Claude is mocked, AWS is moto).
--r requirements.txt
--r backend/requirements.txt
-pytest>=8.0
-moto[s3,dynamodb,sqs,secretsmanager]>=5.0
-ruff>=0.6

@@ -1,5 +1,3 @@
-# Production environment — the only environment (prod-only by design).
-#
 # Apply order across the build-out (modules already applied stay no-op):
 #   Phase 1: data, secrets, ecr            (no dependencies)
 #   Phase 2: worker, api                   (need the image pushed to ECR first
@@ -13,61 +11,32 @@
 #                                           closes the loop)
 #   Phase 6: github_oidc
 
-terraform {
-  required_version = ">= 1.10"
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
-provider "aws" {
-  region = var.aws_region
-  default_tags {
-    tags = local.tags
-  }
-}
-
-locals {
-  tags = {
-    Project = "snaplogic-exercise-evaluator"
-    Env     = "prod"
-  }
-  image_uri = "${module.ecr.repository_url}:${var.image_tag}"
-  # CloudFront URL feeds Cognito callbacks + API CORS. On the very first
-  # apply (before web_hosting exists in state) these resolve to the
-  # localhost defaults; the post-Phase-5 re-apply wires the real URL.
-  cloudfront_url = module.web_hosting.cloudfront_url
-}
-
 module "data" {
-  source           = "../../modules/data"
+  source           = "../../modules/data-storage"
   name_prefix      = var.name_prefix
-  data_bucket_name = var.data_bucket_name
+  data_bucket_name = local.data_bucket_name
   tags             = local.tags
 }
 
 module "secrets" {
-  source      = "../../modules/secrets"
+  source      = "../../modules/secrets-manager"
   name_prefix = var.name_prefix
   tags        = local.tags
 }
 
 module "ecr" {
-  source      = "../../modules/ecr"
+  source      = "../../modules/elastic-container-registry"
   name_prefix = var.name_prefix
   tags        = local.tags
 }
 
 module "worker" {
-  source      = "../../modules/worker"
+  source      = "../../modules/sqs-worker"
   name_prefix = var.name_prefix
   image_uri   = local.image_uri
   table_name  = module.data.table_name
   table_arn   = module.data.table_arn
-  bucket_name = module.data.bucket_name
+  bucket_name = local.data_bucket_name
   bucket_arn  = module.data.bucket_arn
   secret_arn  = module.secrets.secret_arn
   judge_model = var.judge_model
@@ -75,21 +44,21 @@ module "worker" {
 }
 
 module "cognito" {
-  source        = "../../modules/cognito"
+  source        = "../../modules/cognito-auth"
   name_prefix   = var.name_prefix
-  domain_prefix = var.cognito_domain_prefix
+  domain_prefix = local.cognito_domain_prefix
   callback_urls = concat(["${local.cloudfront_url}/"], var.extra_callback_urls)
   logout_urls   = concat(["${local.cloudfront_url}/"], var.extra_callback_urls)
   tags          = local.tags
 }
 
 module "api" {
-  source             = "../../modules/api"
+  source             = "../../modules/api-gateway"
   name_prefix        = var.name_prefix
   image_uri          = local.image_uri
   table_name         = module.data.table_name
   table_arn          = module.data.table_arn
-  bucket_name        = module.data.bucket_name
+  bucket_name        = local.data_bucket_name
   bucket_arn         = module.data.bucket_arn
   queue_url          = module.worker.queue_url
   queue_arn          = module.worker.queue_arn
@@ -101,21 +70,22 @@ module "api" {
 }
 
 module "web_hosting" {
-  source          = "../../modules/web_hosting"
+  source          = "../../modules/static-web-hosting"
   name_prefix     = var.name_prefix
-  spa_bucket_name = var.spa_bucket_name
+  spa_bucket_name = local.spa_bucket_name
   allowed_cidrs   = var.allowed_cidrs
   tags            = local.tags
 }
 
 module "budget" {
-  source      = "../../modules/budget"
-  limit_usd   = 10
+  source      = "../../modules/billing-budget"
+  name_prefix = var.name_prefix
+  limit_usd   = var.budget_limit_usd
   alert_email = var.budget_alert_email
 }
 
 module "github_oidc" {
-  source      = "../../modules/github_oidc"
+  source      = "../../modules/github-oidc"
   name_prefix = var.name_prefix
   github_repo = var.github_repo
   tags        = local.tags

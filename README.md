@@ -59,7 +59,7 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
 | Headless judge / runner / store | `evaluator/ai_judge.py`, `evaluator/runner.py`, `evaluator/store.py` |
 | API + worker Lambdas | `backend/src/` (tests in `backend/tests/`, all moto/stub — $0) |
 | Structured-outputs schemas | `schemas/` |
-| Lambda container image | `Dockerfile.lambda` (one image, two CMDs) |
+| Lambda container image | `Dockerfile` (one image, two CMDs) |
 | Terraform (12 AWS services, ≈$0.50–0.70/mo) | `infra/` (bootstrap + environments/production + modules) |
 | React SPA | `frontend/` (Vite + TS, Cognito Hosted UI + PKCE) |
 | CI/CD (GitHub OIDC, no stored keys) | `.github/workflows/` |
@@ -75,7 +75,7 @@ admins prep + grade + view; mentors grade + view. Users are invite-only
    `terraform init -backend-config="bucket=<state bucket>"`, then apply.
    The first apply creates data/secrets/ECR/Cognito/hosting; Lambdas need an
    image, so build + push once by hand:
-   `docker build -f Dockerfile.lambda -t <ecr-url>:latest . && docker push …`,
+   `docker build -f Dockerfile -t <ecr-url>:latest . && docker push …`,
    then re-apply.
 3. Put the secret value (SnapLogic creds + Anthropic key) into Secrets
    Manager — the exact CLI command is in `infra/modules/secrets/main.tf`.
@@ -206,9 +206,7 @@ silently route to the wrong task.
 ├── CHANGELOG.md
 ├── LICENSE
 ├── requirements.txt
-├── Dockerfile                  # deterministic-evaluator image (multi-stage, non-root)
-├── docker-compose.yml          # bind-mounts the repo, injects .env
-├── .dockerignore
+├── docker-compose.yml          # local dev: api/worker (Lambda RIE) + cli services
 ├── .env.example                # template; copy to .env and fill in
 ├── .claude/
 │   ├── CLAUDE.md               # operating rules (auto-loaded by Claude Code)
@@ -254,10 +252,9 @@ silently route to the wrong task.
 │   └── store.py                # LocalStore / S3Store artifact + report I/O
 ├── backend/
 │   ├── src/                    # api.py (Powertools router) + worker.py (SQS consumer) + common.py
-│   ├── tests/                  # pytest: moto AWS + stubbed Claude — $0, run by CI
-│   └── requirements.txt
+│   └── tests/                  # pytest: moto AWS + stubbed Claude — $0, run by CI
 ├── schemas/                    # structured-outputs JSON schemas for the judge
-├── Dockerfile.lambda           # cloud image (api + worker share it; CMD differs)
+├── Dockerfile                 # cloud image (api + worker share it; CMD differs)
 ├── infra/                      # Terraform: bootstrap (state bucket) + environments/production + modules/
 ├── frontend/                   # React SPA (Vite + TS): login, dashboard, student detail, exercises
 ├── .github/workflows/          # ci, deploy-backend, deploy-infra, deploy-web
@@ -349,95 +346,74 @@ entry points remain and will be reused by the cloud grading worker.)
 
 ## Running in Docker (no local Python)
 
-Docker is the **primary, fully self-contained way to run the deterministic
-evaluator** — only **Docker** and SnapLogic credentials are needed. No Python
-install, no venv.
+`docker-compose.yml` defines three services, all built from `Dockerfile` —
+the same image that runs in AWS:
 
-The deterministic `evaluator/` engine runs **in the container**;
-`docker-compose.yml` maps the repo into the container, so everything the engine
-writes (`exercises/…`, `.tmp/…`, `grades/…`, `ui/index.html`) lands directly in
-your workspace. Claude Code's `/prep` slash command drives Docker directly.
-(The local AI-judgment grading flow and its `AGENTS.md` / Copilot guides have
-been removed — grading judgment is moving to the Claude API in AWS.)
+| Service | What it does | Port |
+|---------|-------------|------|
+| `api` | API Lambda via RIE — HTTP API proxy events | 9000 |
+| `worker` | Worker Lambda via RIE — SQS-style invocations | 9001 |
+| `cli` | evaluator CLI — `prep` / `run`; bind-mounts repo dirs | — |
 
 ### Prerequisites
 
 - Docker (Desktop on Windows/macOS, Engine on Linux), running.
-- A filled-in `.env` at the repo root (see [Setup](#setup)). `docker compose`
-  injects it as real environment variables; the file is never copied into the
-  image.
-- The solution pipelines must exist in your SnapLogic org under the names in
-  each exercise's `description.md` H1 heading.
-- Build the image once: `docker compose build` (re-run only when `evaluator/`
-  changes).
+- A filled-in `.env` at the repo root (see [Setup](#setup)).
+- Build the image once: `docker compose build` (re-run when `evaluator/`,
+  `backend/`, `schemas/`, or `requirements.txt` changes).
 
-### What a new person does, start to finish
+### CLI (prep, local run)
 
-1. `git clone` the repo (the committed `task.json` files carry each exercise's
-   intent; `prep` rewrites their env-specific solution path for *your* org).
-2. Create `.env`; `docker compose build`.
-3. Tell your AI assistant **"prep all exercises"** → it runs `prep sync` in
-   Docker (fully deterministic — no judgment). Or run it yourself:
-   ```powershell
-   docker compose run --rm -T evaluator python -m evaluator.prep sync
-   ```
-4. Tell your assistant **"grade <student>"** → it runs the three-step flow below.
-5. Open `ui/index.html` in your browser.
-
-### The grade flow (container ↔ your AI assistant)
-
-A full grade is a three-step handoff, sharing the bind-mounted `.tmp/` + `grades/`:
-
-1. **Container** — `grade plan <student>` runs the hard gates and writes
-   `.tmp/grades/<student>/manifest.json` + an `ai_context.json` per gate-passing
-   exercise. The manifest stores **repo-root-relative** paths (e.g.
-   `.tmp/grades/<student>/<slug>/ai_context.json`) so the host AI tool and the
-   container both resolve them correctly.
-2. **Host (your AI assistant)** — reads each `ai_context.json`, applies the
-   rubric, and writes `evaluation.json` next to it.
-3. **Container** — `grade report <student>` aggregates the evaluations into
-   `grades/<student>/report.md` + `report.json`, rebuilds `ui/index.html`, and
-   clears the scratch.
-
-Raw command reference (run from the repo root; `-T` disables TTY for clean output):
+The `cli` service overrides the Lambda entrypoint to run Python directly.
+Bind mounts keep all writes in your workspace:
 
 ```powershell
-docker compose run --rm -T evaluator python -m evaluator.prep survey
-docker compose run --rm -T evaluator python -m evaluator.prep sync --slug task_02_calculator
-docker compose run --rm -T evaluator python -m evaluator.grade plan "Gabriela Shurbeska"
-docker compose run --rm -T evaluator python -m evaluator.grade report "Gabriela Shurbeska"
-docker compose run --rm -T evaluator python -m evaluator.ui --no-open   # container can't open a browser
+docker compose run --rm -T cli python -m evaluator.prep survey
+docker compose run --rm -T cli python -m evaluator.prep sync --slug task_02_calculator
+docker compose run --rm -T cli python -m evaluator run "Gabriela Shurbeska"  # costs real money
+docker compose run --rm -T cli python -m evaluator.ui --no-open
 ```
 
-> **Escape hatch (no Docker):** the flow is identical with a local interpreter —
-> substitute `.venv/Scripts/python.exe` (or `python`) for
-> `docker compose run --rm -T evaluator python` in any command above, after the
+> **Escape hatch (no Docker):** substitute `.venv/Scripts/python.exe` (or `python`)
+> for `docker compose run --rm -T cli python` in any command above, after the
 > venv [Setup](#setup).
 
-> **Linux note:** bind-mounted files are owned by your host user, so the image's
-> non-root `uid 10001` may be denied writes to `exercises/` / `grades/`.
-> Uncomment the `user:` line in `docker-compose.yml` (defaults to `${UID}:${GID}`),
-> or run with `--user "$(id -u):$(id -g)"`.
+### API / worker (local Lambda testing)
+
+The RIE is bundled in the base image — no extra setup:
+
+```powershell
+# Start the API Lambda
+docker compose up api
+
+# Invoke it (from another shell; PowerShell needs backtick line-continuation)
+curl -sX POST http://localhost:9000/2015-03-31/functions/function/invocations `
+  -H "Content-Type: application/json" `
+  -d '{"version":"2.0","routeKey":"GET /v1/health","rawPath":"/v1/health","headers":{},"requestContext":{"http":{"method":"GET","path":"/v1/health"}},"isBase64Encoded":false}'
+
+# Run the worker Lambda once
+docker compose run --rm worker
+```
 
 ## Grade dashboard (browser UI)
 
-`/grade` rebuilds `ui/index.html` silently at the end of every run (both full
+`/grade` rebuilds `frontend/dist/index.html` silently at the end of every run (both full
 and single-task mode), so the dashboard stays in sync with `grades/`
 automatically. Open the file once in your browser and refresh after each
 grade run — no extra command needed.
 
-To explicitly rebuild the page in Docker (headless — open `ui/index.html`
+To explicitly rebuild the page in Docker (headless — open `frontend/dist/index.html`
 yourself afterward):
 
 ```powershell
-docker compose run --rm -T evaluator python -m evaluator.ui --no-open
+docker compose run --rm -T cli python -m evaluator.ui --no-open
 ```
 
 (Or, with the venv escape hatch, `.\.venv\Scripts\python.exe -m evaluator.ui`
 also opens it in your default browser.)
 
 This walks every `grades/<student>/report.json` and generates a single
-self-contained `ui/index.html` with the data embedded inline (no HTTP server,
+self-contained `frontend/dist/index.html` with the data embedded inline (no HTTP server,
 no `fetch` calls). Features:
 
 - Search by student name; filter by project space.
@@ -451,7 +427,7 @@ no `fetch` calls). Features:
   (mention-only). Bonus-question answers are surfaced inline.
 
 Pass `--no-open` to build the page without opening it (this is what
-`/grade`'s auto-rebuild uses internally). The `ui/` folder is gitignored —
+`/grade`'s auto-rebuild uses internally). The `frontend/dist/` folder is gitignored —
 it's purely derived from `grades/`.
 
 Exit codes:

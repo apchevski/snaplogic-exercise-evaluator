@@ -1,8 +1,8 @@
 """Static-HTML grade dashboard generator.
 
 Reads every `grades/<student>/report.json`, embeds the data into a single
-self-contained `ui/index.html` (inline CSS + JS + JSON), and opens it in
-the default browser. The generated file works under file:// — no HTTP
+self-contained `frontend/dist/index.html` (inline CSS + JS + JSON), and opens
+it in the default browser. The generated file works under file:// — no HTTP
 server, no `fetch` calls, double-clickable.
 
     python -m evaluator.ui              # build + open in browser
@@ -24,7 +24,7 @@ from typing import Any
 
 from .config import GRADES_DIR, REPO_ROOT
 
-UI_DIR = REPO_ROOT / "ui"
+UI_DIR = REPO_ROOT / "frontend" / "dist"
 UI_INDEX = UI_DIR / "index.html"
 
 
@@ -672,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-open",
         action="store_true",
-        help="Write ui/index.html but do not open it in the browser.",
+        help="Write frontend/dist/index.html but do not open it in the browser.",
     )
     args = parser.parse_args(argv)
     return cmd_build(open_in_browser=not args.no_open)
