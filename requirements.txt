@@ -1,6 +1,13 @@
+# Runtime dependencies (Lambda + evaluator)
 httpx>=0.27.0
 python-dotenv>=1.0.1
-# Used by the headless judge (evaluator/ai_judge.py) for `python -m evaluator run`
-# and the cloud worker. Imported lazily, so the deterministic-only entry points
-# (prep, single-exercise evaluate) still work if it's absent.
 anthropic>=0.40.0
+
+# AWS Lambda runtime dependencies
+aws-lambda-powertools>=3.0.0
+boto3>=1.34.0
+
+# Development and testing dependencies
+pytest>=8.0
+moto[s3,dynamodb,sqs,secretsmanager]>=5.0
+ruff>=0.6

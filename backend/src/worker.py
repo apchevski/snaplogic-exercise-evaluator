@@ -208,7 +208,7 @@ def _process_job(job: dict[str, Any]) -> None:
     _update_job(job_id, status="running", started_at=utc_now_iso())
     try:
         # Lambda's image filesystem is read-only and the React SPA replaces
-        # the static dashboard, so never attempt the ui/index.html rebuild.
+        # the static dashboard, so never attempt the frontend/dist/index.html rebuild.
         os.environ.setdefault("EVALUATOR_DISABLE_UI_REBUILD", "1")
         _load_secrets_into_env()
         store = _make_store()

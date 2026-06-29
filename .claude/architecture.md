@@ -58,7 +58,7 @@ plan → judge → report loop the skill used to drive interactively.
 
 ## Cloud platform shape (June 2026)
 
-- **Two Lambdas, one container image** (`Dockerfile.lambda`): the API
+- **Two Lambdas, one container image** (`Dockerfile`): the API
   Lambda (Powertools router, JWT-authorized HTTP API) writes JOB items +
   SQS messages; the worker Lambda consumes them (concurrency 1, DLQ with
   maxReceiveCount 1 — a paid grade job is never auto-retried).

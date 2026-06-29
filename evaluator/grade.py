@@ -14,13 +14,13 @@ Two subcommands, both designed so the `/grade` skill prompt can stay small:
         `grades/<student>/report.json` (same data, machine-readable for a future
         UI). After writing both, deletes the `.tmp/grades/<student>/` scratch
         directory so only the persistent files survive. Then silently rebuilds
-        `ui/index.html` so the dashboard reflects the new student.
+        `frontend/dist/index.html` so the dashboard reflects the new student.
 
     python -m evaluator.grade sync-overall <student>
         Re-reads the rendered `## Overall` paragraph from report.md and writes
         it into `overall_summary` in report.json. Called by the /grade skill
         after Claude fills in the Overall paragraph in full grading mode.
-        Also rebuilds `ui/index.html` so the dashboard picks up the new
+        Also rebuilds `frontend/dist/index.html` so the dashboard picks up the new
         Overall summary.
 
 This module never calls an LLM. Judgment still lives in the `/grade` skill.
@@ -96,7 +96,7 @@ def _solution_pipeline_name(solution_pipeline_path: str) -> str:
 
 
 def _rebuild_ui_silently() -> None:
-    """Rebuild ui/index.html so the dashboard reflects the latest grades.
+    """Rebuild frontend/dist/index.html so the dashboard reflects the latest grades.
 
     Imported lazily to keep the grade CLI startup light and to avoid a hard
     coupling at module import time. UI build failures must never break a
@@ -118,7 +118,7 @@ def _rebuild_ui_silently() -> None:
     except Exception as e:  # pragma: no cover - best-effort side effect
         print(
             f"WARNING: UI rebuild failed ({e!r}); run "
-            f"`python -m evaluator.ui` manually to refresh ui/index.html.",
+            f"`python -m evaluator.ui` manually to refresh frontend/dist/index.html.",
             file=sys.stderr,
         )
 

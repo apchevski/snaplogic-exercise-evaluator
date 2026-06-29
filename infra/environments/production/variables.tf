@@ -3,24 +3,21 @@ variable "aws_region" {
   default = "eu-central-1"
 }
 
+variable "aws_profile" {
+  description = "AWS CLI profile to use for authentication."
+  type        = string
+  default     = "evaluator-profile"
+}
+
+variable "environment" {
+  description = "Environment name (used for tagging)."
+  type        = string
+  default     = "production"
+}
+
 variable "name_prefix" {
   type    = string
-  default = "snaplogic-evaluator"
-}
-
-variable "data_bucket_name" {
-  description = "Globally unique bucket for reports + exercise artifacts."
-  type        = string
-}
-
-variable "spa_bucket_name" {
-  description = "Globally unique bucket for the built SPA."
-  type        = string
-}
-
-variable "cognito_domain_prefix" {
-  description = "Globally unique Cognito hosted-UI domain prefix."
-  type        = string
+  default = "snaplogic-exercise-evaluator"
 }
 
 variable "image_tag" {
@@ -37,7 +34,7 @@ variable "judge_model" {
 variable "allowed_cidrs" {
   description = "Office/VPN CIDRs allowed through CloudFront + the API Lambda."
   type        = list(string)
-  default     = []
+  default     = ["80.77.146.146"]
 }
 
 variable "extra_callback_urls" {
@@ -52,11 +49,19 @@ variable "extra_cors_origins" {
   default     = ["http://localhost:5173"]
 }
 
+variable "budget_limit_usd" {
+  description = "Monthly cost budget; email alert fires at 80% actual / 100% forecasted."
+  type        = number
+  default     = 10
+}
+
 variable "budget_alert_email" {
-  type = string
+  type    = string
+  default = "antonioapcevski@gmail.com"
 }
 
 variable "github_repo" {
   description = "owner/repo for the GitHub Actions OIDC trust."
   type        = string
+  default     = "apchevski/snaplogic-exercise-evaluator"
 }

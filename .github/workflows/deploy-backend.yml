@@ -13,8 +13,8 @@ on:
       - "exercises/**"
       - "schemas/**"
       - "requirements.txt"
-      - "Dockerfile.lambda"
-      - "Dockerfile.lambda.dockerignore"
+      - "Dockerfile"
+      - ".dockerignore"
       - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
 
@@ -47,7 +47,7 @@ jobs:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
           IMAGE="$REGISTRY/$ECR_REPOSITORY"
-          docker build -f Dockerfile.lambda -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+          docker build -f Dockerfile -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
 

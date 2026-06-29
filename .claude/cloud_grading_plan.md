@@ -14,11 +14,6 @@
 > spend, needs user approval), and **Phase 8** (delete ui/ + evaluator/ui.py,
 > retire local /prep — deliberately deferred until the cloud paths are
 > verified). See CHANGELOG [Unreleased] for the full inventory.
->
-> **Folder renames applied during implementation (the blueprint body below
-> still uses the original names):** `web/` → `frontend/` (matches `backend/`)
-> and `infra/envs/prod/` → `infra/environments/production/`. Everything else
-> matches the names written below.
 
 # Cloud-Hosted Click-to-Prep / Click-to-Grade Platform (v4 — headless, Claude API, Cognito login)
 
@@ -82,9 +77,9 @@ backend/src/api.py        # NEW — Powertools router: IP check, JWT role enforc
 backend/src/worker.py     # NEW — SQS handler dispatching job_type: grade | prep
 backend/tests/            # NEW — pytest: moto (AWS) + mocked anthropic client
 schemas/evaluation.schema.json  # NEW — structured-outputs schema
-Dockerfile.lambda         # NEW — cloud image (evaluator/ + backend/ + authored exercises/ + schemas/)
-web/                      # NEW — Vite + React + TS SPA with Cognito login
-infra/                    # NEW — Terraform: envs/prod + modules (incl. cognito)
+Dockerfile                # NEW — cloud image (evaluator/ + backend/ + authored exercises/ + schemas/)
+frontend/                 # NEW — Vite + React + TS SPA with Cognito login
+infra/                    # NEW — Terraform: environments/production + modules (incl. cognito)
 .github/workflows/        # NEW — ci, deploy-infra, deploy-backend, deploy-web
 ```
 
@@ -106,7 +101,7 @@ Reuses `evaluator/prep.py` sync logic; reads authored files from the image, writ
 
 GSI `gsi1` (entity, slug) for list queries. Reports in S3 `students/<slug>/<version>/`; exercise artifacts in S3 `exercises/<slug>/`. History kept — re-grades create new versions.
 
-## Frontend (`web/`)
+## Frontend (`frontend/`)
 
 - **/login** — Cognito Hosted UI redirect (PKCE); tokens in memory/session storage; everything else route-guarded.
 - **/ Dashboard** — student cards (port of the old static `ui/index.html` design — it is the spec), **Grade** button per card + "Grade new student" input; live status pill polling `GET /v1/gradings/{id}` (queued → grading → done/failed + cost).
@@ -129,13 +124,13 @@ GSI `gsi1` (entity, slug) for list queries. Reports in S3 `students/<slug>/<vers
 ## CI/CD (GitHub Actions, OIDC)
 
 - **ci.yml**: pytest (anthropic mocked, moto — $0), ruff, vite build, terraform fmt/validate.
-- **deploy-backend.yml**: changes to `evaluator/ backend/ exercises/ schemas/ Dockerfile.lambda` → build image → ECR → update both Lambdas. Authored exercise edits ship by git push; admin clicks Prep afterward to refresh artifacts.
+- **deploy-backend.yml**: changes to `evaluator/ backend/ exercises/ schemas/ Dockerfile` → build image → ECR → update both Lambdas. Authored exercise edits ship by git push; admin clicks Prep afterward to refresh artifacts.
 - **deploy-infra.yml** (plan on PR, apply on main) · **deploy-web.yml** (vite build with pool/client IDs + API URL from repo variables → s3 sync → invalidation).
 
 ## Phases (build everything first; judge-quality tuning is the final loop — user's explicit choice)
 
 1. **Terraform foundation (1.5–2 d).** State bootstrap, then the dependency-free modules: data (DynamoDB + S3), secrets, ECR.
-2. **Evaluator refactor + backend + deploy (3–4 d).** `ai_judge.py` + `runner.py` + `store.py` + `backend/` + `Dockerfile.lambda`; **unit tests with a mocked Claude client** (schema validity, points arithmetic, job lifecycle — $0, catches plumbing bugs before any paid call); push image manually to ECR → apply worker + api modules; **$0 import of existing `grades/*/report.json`**; one curl-triggered single-task run to prove the pipe (≈ $0.10).
+2. **Evaluator refactor + backend + deploy (3–4 d).** `ai_judge.py` + `runner.py` + `store.py` + `backend/` + `Dockerfile`; **unit tests with a mocked Claude client** (schema validity, points arithmetic, job lifecycle — $0, catches plumbing bugs before any paid call); push image manually to ECR → apply worker + api modules; **$0 import of existing `grades/*/report.json`**; one curl-triggered single-task run to prove the pipe (≈ $0.10).
 3. **Cognito (1–1.5 d).** Pool/groups/client (placeholder localhost callback for token testing); JWT authorizer on; verify auth matrix via curl (no token → 401, mentor → /preps 403).
 4. **Cloud prep (1.5–2 d).** Prep job type + `/v1/preps` + survey state in DynamoDB; verify Prep → S3 artifacts byte-equivalent to local `/prep` output. $0 AI.
 5. **Web app (4–5 d).** Login + route guards + Dashboard + StudentDetail + Exercises page + role-gated Prep/Grade buttons + polling; wire real CloudFront URL into Cognito callbacks + CORS. Browser E2E both roles; 403 off-VPN.

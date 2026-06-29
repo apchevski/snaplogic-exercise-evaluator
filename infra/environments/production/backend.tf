@@ -1,12 +1,10 @@
-# Remote state in the bucket created by infra/bootstrap. `bucket` cannot be a
-# variable — fill it in (or pass -backend-config) after running bootstrap:
-#
-#   terraform init -backend-config="bucket=<your-tf-state-bucket>"
-
 terraform {
   backend "s3" {
-    key          = "snaplogic-evaluator/production/terraform.tfstate"
+    bucket       = "snaplogic-exercise-evaluator-states" # Same as the value inside state_bucket_name variable in bootstrap/variables.tf
+    key          = "production.tfstate"
     region       = "eu-central-1"
-    use_lockfile = true # S3-native locking; no DynamoDB lock table needed
+    profile      = "evaluator-profile" # Same as the value inside aws_profile variable
+    use_lockfile = true                # S3-native locking; no DynamoDB lock table needed
+    encrypt      = true
   }
 }
