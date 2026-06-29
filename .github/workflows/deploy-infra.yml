@@ -1,8 +1,12 @@
 # Infra: terraform plan on PRs touching infra/, apply on main.
-# Backend config and variables come from repo variables/secrets:
-#   vars.TF_STATE_BUCKET, vars.AWS_REGION, vars.AWS_DEPLOY_ROLE_ARN
-#   secrets.TF_VARS — full terraform.tfvars content (bucket names, CIDRs,
-#   budget email, github_repo), kept out of the repo.
+# Non-secret config (AWS_REGION, AWS_DEPLOY_ROLE_ARN) is loaded from
+# .github/deploy.vars — the same single source the deploy-backend/frontend
+# workflows use, so there is NO manual "Actions → Variables" step in GitHub.
+# Backend bucket/key/region are pinned in infra/.../backend.tf; the `profile`
+# set there and in providers.tf is for local runs, so it is overridden to empty
+# in CI (-backend-config="profile=" / -var=aws_profile=) and terraform uses the
+# OIDC credentials. All terraform variables have committed defaults, so no
+# terraform.tfvars is needed.
 name: deploy-infra
 
 on:
@@ -19,7 +23,6 @@ permissions:
   pull-requests: write
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
   TF_DIR: infra/environments/production
 
 jobs:
@@ -28,23 +31,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Load deploy config
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/deploy.vars >> "$GITHUB_ENV"
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.12.1"
 
-      - name: Write terraform.tfvars
-        run: echo "${{ secrets.TF_VARS }}" > $TF_DIR/terraform.tfvars
-
       - name: Init
-        run: terraform -chdir=$TF_DIR init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+        run: terraform -chdir=$TF_DIR init -input=false -backend-config="profile="
 
       - name: Plan
-        run: terraform -chdir=$TF_DIR plan -input=false -no-color -out=tfplan
+        run: terraform -chdir=$TF_DIR plan -input=false -no-color -out=tfplan -var=aws_profile=
 
       - name: Apply (main only)
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
