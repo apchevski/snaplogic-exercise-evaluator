@@ -1,7 +1,3 @@
-# Backend deploy: rebuild the Lambda image when anything baked into it
-# changes, push to ECR, repoint both Lambdas. Authored exercise edits ship
-# here automatically; an admin clicks Prep afterwards to refresh the
-# generated artifacts in S3.
 name: deploy-backend
 
 on:
@@ -22,21 +18,18 @@ permissions:
   id-token: write # OIDC — no stored AWS keys
   contents: read
 
-env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }} # e.g. snaplogic-evaluator-lambda
-  API_FUNCTION: ${{ vars.API_FUNCTION }} # e.g. snaplogic-evaluator-api
-  WORKER_FUNCTION: ${{ vars.WORKER_FUNCTION }} # e.g. snaplogic-evaluator-worker
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Load deploy config
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/deploy.vars >> "$GITHUB_ENV"
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/amazon-ecr-login@v2

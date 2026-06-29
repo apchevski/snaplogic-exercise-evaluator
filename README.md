@@ -70,19 +70,22 @@ admins prep + grade + view; mentors grade + view. Users are invite-only
 
 ### Deploying (one-time, in order)
 
-1. `infra/bootstrap`: `terraform apply` once to create the TF state bucket.
-2. `infra/environments/production`: copy `terraform.tfvars.example` → `terraform.tfvars`,
-   `terraform init -backend-config="bucket=<state bucket>"`, then apply.
-   The first apply creates data/secrets/ECR/Cognito/hosting; Lambdas need an
-   image, so build + push once by hand:
-   `docker build -f Dockerfile -t <ecr-url>:latest . && docker push …`,
-   then re-apply.
+1. `infra/bootstrap`: `terraform init && terraform apply` once to create the TF
+   state bucket.
+2. `infra/environments/production`: `terraform init`, then apply ECR first
+   (`-target=module.data -target=module.secrets -target=module.ecr`). The
+   Lambdas are container images and need one to exist, so build + push once by
+   hand: `docker build -f Dockerfile -t <ecr-url>:latest . && docker push …`,
+   then run a full `terraform apply`.
 3. Put the secret value (SnapLogic creds + Anthropic key) into Secrets
-   Manager — the exact CLI command is in `infra/modules/secrets/main.tf`.
+   Manager — the exact CLI command is in `infra/modules/secrets-manager/main.tf`.
 4. Create users in the Cognito console and add them to `admin` / `mentor`.
-5. Fill the GitHub repo variables/secrets named in `.github/workflows/*.yml`
-   from `terraform output`, push to `main`, and CI takes over (image →
-   Lambdas, SPA → S3 + CloudFront, infra plans/applies).
+5. Fill the blank values in `.github/deploy.vars` from `terraform output` (the
+   deploy workflows load that file — no GitHub Variables to set by hand; there
+   are no CI secrets, auth is OIDC). Commit, then deploy: push to `main`
+   (auto-deploys via path filters) or run a workflow manually from the Actions
+   tab / `gh workflow run` against any branch. CI takes over (image → Lambdas,
+   SPA → S3 + CloudFront).
 6. Click **Prep** (admin) once so S3 has the generated artifacts, then grade.
 
 ## Verdicts and points
