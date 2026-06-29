@@ -1,0 +1,54 @@
+# Infra: terraform plan on PRs touching infra/, apply on main.
+# Non-secret config (AWS_REGION, AWS_DEPLOY_ROLE_ARN) is loaded from
+# .github/deploy.vars — the same single source the deploy-backend/frontend
+# workflows use, so there is NO manual "Actions → Variables" step in GitHub.
+# Backend bucket/key/region are pinned in infra/.../backend.tf; the `profile`
+# set there and in providers.tf is for local runs, so it is overridden to empty
+# in CI (-backend-config="profile=" / -var=aws_profile=) and terraform uses the
+# OIDC credentials. All terraform variables have committed defaults, so no
+# terraform.tfvars is needed.
+name: deploy-infra
+
+on:
+  pull_request:
+    paths: ["infra/**"]
+  push:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/deploy-infra.yml"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_DIR: infra/environments/production
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load deploy config
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/deploy.vars >> "$GITHUB_ENV"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.12.1"
+
+      - name: Init
+        run: terraform -chdir=$TF_DIR init -input=false -backend-config="profile="
+
+      - name: Plan
+        run: terraform -chdir=$TF_DIR plan -input=false -no-color -out=tfplan -var=aws_profile=
+
+      - name: Apply (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: terraform -chdir=$TF_DIR apply -input=false tfplan

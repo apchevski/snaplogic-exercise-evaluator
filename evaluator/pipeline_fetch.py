@@ -95,7 +95,7 @@ def fetch_pipeline(
     )
 
 
-def fetch_pipeline_csv_output(
+def fetch_pipeline_output_file(
     client: SnapLogicClient,
     loc: PipelineLocation,
     file_name: str,
@@ -139,23 +139,25 @@ def load_or_refresh_solution_pipeline(
     solution_json_path: Path,
     sidecar_path: Path,
     *,
-    expected_csv_path: Path,
-    output_csv_filename: str,
+    expected_dir: Path,
+    output_filenames: tuple[str, ...],
     force_refresh: bool = False,
 ) -> tuple[FetchedPipeline, bool]:
     """Load the cached solution pipeline JSON, refetching only when stale.
 
-    Returns (fetched, refreshed). When refreshed=True we also rewrote the
-    expected CSV — solution-pipeline changes typically imply output changes,
-    so the two caches are invalidated atomically.
+    Returns (fetched, refreshed). When refreshed=True we also rewrote every
+    expected output file — solution-pipeline changes typically imply output changes,
+    so the caches are invalidated atomically. A single-output exercise is
+    just a length-1 ``output_filenames``.
 
     Cache check (skipped if force_refresh):
       1. Probe `client.list_assets(...)` for the solution pipeline's entry.
       2. Extract a remote signature (timestamp field, fallback chain).
-      3. If `solution.json` + sidecar both exist and their (kind, value)
-         match the remote, load from disk and return (refreshed=False).
-      4. Otherwise fetch the full body, rewrite both files, rewrite the
-         expected CSV, return (refreshed=True).
+      3. If `solution.json` + sidecar + every expected output file exist and the
+         sidecar (kind, value) match the remote, load from disk and return
+         (refreshed=False).
+      4. Otherwise fetch the full body, rewrite both files, rewrite every
+         expected output file, return (refreshed=True).
     """
     if force_refresh:
         entry = client.find_pipeline_asset_entry(
@@ -163,7 +165,7 @@ def load_or_refresh_solution_pipeline(
         )
         return _do_refresh(
             client, loc, entry, solution_json_path, sidecar_path,
-            expected_csv_path, output_csv_filename,
+            expected_dir, output_filenames,
         )
 
     entry = client.find_pipeline_asset_entry(
@@ -171,11 +173,14 @@ def load_or_refresh_solution_pipeline(
     )
     remote_sig = _extract_remote_signature(entry)
 
+    expected_paths = [expected_dir / f for f in output_filenames]
+    all_expected_present = all(p.exists() for p in expected_paths)
+
     if (
         remote_sig is not None
         and solution_json_path.exists()
         and sidecar_path.exists()
-        and expected_csv_path.exists()
+        and all_expected_present
     ):
         try:
             sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
@@ -198,7 +203,7 @@ def load_or_refresh_solution_pipeline(
 
     return _do_refresh(
         client, loc, entry, solution_json_path, sidecar_path,
-        expected_csv_path, output_csv_filename,
+        expected_dir, output_filenames,
     )
 
 
@@ -207,15 +212,16 @@ def load_cached_solution_pipeline(
     loc: PipelineLocation,
     solution_json_path: Path,
     sidecar_path: Path,
-    expected_csv_path: Path,
+    expected_dir: Path,
+    output_filenames: tuple[str, ...],
 ) -> FetchedPipeline:
     """Strict read of the cached solution. No writes.
 
     Hits the remote ONCE to read the asset-list timestamp, then compares
     it against the sidecar signature. Raises SolutionNotReadyError if
-    any cached file is missing or the cache is stale. Callers that get
-    this exception should surface a `needs_prep` outcome and stop —
-    refreshing the cache is /prep's job.
+    any cached file is missing (including any expected output file) or the cache
+    is stale. Callers that get this exception should surface a `needs_prep`
+    outcome and stop — refreshing the cache is /prep's job.
     """
     if not solution_json_path.exists():
         raise SolutionNotReadyError(
@@ -227,11 +233,13 @@ def load_cached_solution_pipeline(
             "missing_sidecar",
             f"Cached sidecar not found at {sidecar_path}",
         )
-    if not expected_csv_path.exists():
-        raise SolutionNotReadyError(
-            "missing_expected_csv",
-            f"Cached expected CSV not found at {expected_csv_path}",
-        )
+    for filename in output_filenames:
+        expected_output_path = expected_dir / filename
+        if not expected_output_path.exists():
+            raise SolutionNotReadyError(
+                "missing_expected_output",
+                f"Cached expected output file not found at {expected_output_path}",
+            )
 
     try:
         entry = client.find_pipeline_asset_entry(
@@ -401,7 +409,7 @@ def load_or_refresh_solution_triggered_task(
 
     Reuses the same signature-based cache (solution.json + sidecar
     keyed off the pipeline asset's `time_updated`) but refreshes
-    `expected/<request_name>.json` instead of a single CSV. The
+    `expected/<request_name>.json` instead of output files. The
     Triggered Task is invoked once per request when a refresh fires;
     each response body is written to expected/ verbatim.
 
@@ -534,8 +542,8 @@ def _do_refresh(
     asset_entry: dict[str, Any],
     solution_json_path: Path,
     sidecar_path: Path,
-    expected_csv_path: Path,
-    output_csv_filename: str,
+    expected_dir: Path,
+    output_filenames: tuple[str, ...],
 ) -> tuple[FetchedPipeline, bool]:
     snode_id = asset_entry["snode_id"]
     definition = client.get_pipeline_definition(snode_id)
@@ -554,7 +562,8 @@ def _do_refresh(
     }
     sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
 
-    fetch_pipeline_csv_output(client, loc, output_csv_filename, expected_csv_path)
+    for filename in output_filenames:
+        fetch_pipeline_output_file(client, loc, filename, expected_dir / filename)
 
     return (
         FetchedPipeline(

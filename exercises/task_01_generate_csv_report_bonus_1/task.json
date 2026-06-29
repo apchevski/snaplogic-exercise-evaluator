@@ -1,0 +1,6 @@
+{
+  "slug": "task_01_generate_csv_report_bonus_1",
+  "task_type": "file_writer",
+  "solution_pipeline_path": "Interworks-Partner/Training_Program_Demo/Solutions/Task 01 \u2013 Generate CSV Report \u2013 Bonus 1",
+  "output_filename": "CA_Birthdays_Bonus_1.csv"
+}

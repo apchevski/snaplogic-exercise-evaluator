@@ -12,9 +12,9 @@ Target file name: Task3.csv.
 
 File Names for this task:
 
-“Leads.csv” - list of individuals and their contact information including their zip code.
+- “Leads.csv” - list of individuals and their contact information including their zip code.
 
-“CAIncomeByZip.csv” - provides income information by the California zip code.
+- “CAIncomeByZip.csv” - provides income information by the California zip code.
 
 ### Bonus Question:
 
@@ -22,8 +22,8 @@ Why does the pipeline not throw an error (pipeline fail) when a value in the fil
 
 Example:
 
-Correct Expression => $City=='Bitola'
+- Correct Expression => $City=='Bitola'
 
-Incorrect Expression => $City==’Bitolaa’
+- Incorrect Expression => $City==’Bitolaa’
 
-Provide the answer to the bonus question in the notes of the pipeline version
+**Provide the answer to the bonus question in the notes of the pipeline version**

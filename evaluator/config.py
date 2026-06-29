@@ -7,13 +7,28 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-EXERCISES_DIR = REPO_ROOT / "exercises"
-TMP_DIR = REPO_ROOT / ".tmp"
+
+
+def _env_path(var: str, default: Path) -> Path:
+    """Resolve a directory from an env var, falling back to the repo layout.
+
+    On AWS Lambda the image filesystem is read-only, so the worker points
+    these at /tmp (e.g. EVALUATOR_EXERCISES_DIR=/tmp/evaluator/exercises)
+    and `evaluator.store` materializes content there before a run. Local
+    runs leave the env vars unset and keep the historical repo-relative
+    layout.
+    """
+    raw = os.environ.get(var, "").strip()
+    return Path(raw) if raw else default
+
+
+EXERCISES_DIR = _env_path("EVALUATOR_EXERCISES_DIR", REPO_ROOT / "exercises")
+TMP_DIR = _env_path("EVALUATOR_TMP_DIR", REPO_ROOT / ".tmp")
 # Persistent grading output — only report.md per student lives here.
 # Intermediate artifacts (manifest.json, ai_context.json, evaluation.json,
-# student CSV) live under .tmp/grades/<student>/ during a run and are
+# student output files) live under .tmp/grades/<student>/ during a run and are
 # deleted at the end of `evaluator.grade report`.
-GRADES_DIR = REPO_ROOT / "grades"
+GRADES_DIR = _env_path("EVALUATOR_GRADES_DIR", REPO_ROOT / "grades")
 
 
 @dataclass(frozen=True)

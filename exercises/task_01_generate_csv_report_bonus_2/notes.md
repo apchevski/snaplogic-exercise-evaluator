@@ -14,18 +14,17 @@ rules still apply — only the points below are specific to this bonus.
 
 ## Things that matter (new for Bonus 2)
 
-- **Output must contain a Domain column.**
-  Already enforced by the CSV output hard gate, but worth flagging at
-  the pipeline level: if the Mapper does not produce a Domain field
-  alongside the existing last name / first name / birthday columns,
-  flag as **major**.
+- **Output must contain a Domain column. `-2 points`.**
+  Already enforced by the CSV output hard gate as a FAIL, but if the
+  output happens to match without a Domain mapping (unlikely),
+  deduct **`-2`**.
 
-- **Domain value must include the `@` character.**
+- **Domain value must include the `@` character. `-2 points`.**
   Per the exercise text: for `andrej.bogdanovski@iwconnect.com` the
   expected Domain value is `@iwconnect.com`, **not** `iwconnect.com`.
   If the student strips the `@` and outputs only the bare domain,
-  flag as **major**. (The CSV hard gate will already catch the
-  mismatch — name the cause in the pipeline review.)
+  deduct **`-2`** (the CSV hard gate will normally catch this as a
+  FAIL; the deduction applies only if the gate passed).
 
   Acceptable expression styles include
   `$Email.substring($Email.indexOf("@"))`,
@@ -33,13 +32,13 @@ rules still apply — only the points below are specific to this bonus.
   the `@`-prefixed domain.
 
 - **Domain must be added to the existing Mapper carried over from
-  Bonus 1.** The Bonus 1 pipeline already has a Mapper shaping the
-  output rows; the Domain field belongs as another mapping inside
-  that same snap, not in a brand-new Mapper. (This is a task-specific
-  application of the universal "no extra Mapper snaps" and
-  "Mapper Pass through" rules.) Flag as **minor** if the student
-  introduced a separate Mapper for Domain instead of extending the
-  existing one.
+  Bonus 1. `-1 point`.** The Bonus 1 pipeline already has a Mapper
+  shaping the output rows; the Domain field belongs as another
+  mapping inside that same snap, not in a brand-new Mapper. (This is
+  a task-specific application of the universal "no extra Mapper
+  snaps" and "Mapper Pass through" rules — apply this rule once,
+  not both.) Deduct **`-1`** if the student introduced a separate
+  Mapper for Domain instead of extending the existing one.
 
 ## Things that don't matter (new for Bonus 2)
 

@@ -15,7 +15,8 @@ final judgment has to come from a model rather than a hand-coded rubric.
      dash) compare as equal — see
      [pipeline-name-dash-tolerant](conventions/pipeline-name-dash-tolerant.md).
    - For csv_writer: the student's CSV output must match the solution's
-     (header + row multiset).
+     (column-name set + row multiset; both column order and row order are
+     ignored — reordered columns are realigned by name before comparing).
    - For triggered_task: (a) a Triggered Task named exactly
      `<pipeline name> Task` (the convention is strict — see
      [triggered-task-naming-strict](conventions/triggered-task-naming-strict.md))
@@ -25,35 +26,55 @@ final judgment has to come from a model rather than a hand-coded rubric.
    If any gate fails, the run aborts and writes a `verdict: "fail"`
    `evaluation.json` with the failing gate and detail. No AI step.
 
-2. **AI judgment** — a **Claude Code skill** (`.claude/skills/grade/SKILL.md`),
-   not an API call. When the user invokes `/grade <student>`, Claude (the
-   model running in their Pro session) reads
-   `.tmp/grades/<student>/<slug>/ai_context.json` for each exercise whose
-   hard gates passed and produces the verdict directly. No Anthropic API
-   key, no per-evaluation cost.
+2. **AI judgment** — a **headless Claude API call** (`evaluator/ai_judge.py`),
+   model `claude-sonnet-4-6` (locked decision). For each exercise whose
+   hard gates passed (or output-mismatch-failed), the runner sends the
+   `ai_context.json` bundle through the Messages API with structured
+   outputs (`schemas/evaluation.schema.json`) and writes the
+   `evaluation.json` contract. Points arithmetic and the verdict are
+   recomputed in Python — the model only proposes differences with
+   rule-sourced deduction values. The rules block is prompt-cached so a
+   full run pays for the rule text once.
 
 This split keeps the system simple AND auditable: the deterministic
 layer catches the unambiguous failures (cheap and explainable), the AI
 layer handles judgment calls (where rule-based code would have been
 brittle).
 
-## Why a skill, not an API call
+## From skill to headless API (history)
 
-The original design called Anthropic's API from Python. That requires
-an API key billed per-token, separate from the user's Claude Code Pro
-subscription. Pivoting the judgment step into a skill means:
+The first design called Anthropic's API from Python; the second pivoted
+judgment into a local Claude Code skill (`/grade`) so the user's Pro
+subscription covered evaluations with no API key. In June 2026 the
+project pivoted again — to **fully cloud-hosted grading** (see
+[cloud_grading_plan.md](cloud_grading_plan.md)): mentors click Grade in a
+web dashboard, a worker Lambda runs hard gates + the Claude API, nobody
+installs anything. The skill's rubric text lives on in
+`exercises/general_evaluation_rules.md`, per-task `notes.md`, and the
+judge's system prompt in `evaluator/ai_judge.py`; the data interface is
+unchanged (`ai_context.json` in, `evaluation.json` out), which is what
+made the third pivot a drop-in: `evaluator/runner.py` drives the same
+plan → judge → report loop the skill used to drive interactively.
 
-- The user's existing Pro subscription covers all evaluations.
-- Prompt iteration is editing markdown, not redeploying code.
-- The Python orchestrator becomes strictly deterministic — easier to
-  reason about, easier to test.
+## Cloud platform shape (June 2026)
 
-The trade-off: the system can't run headless (e.g., a nightly CI job
-evaluating 50 students). When/if that becomes necessary, the AI step
-can be re-implemented in Python alongside the skill. The data interface
-(`.tmp/grades/<student>/<slug>/ai_context.json` in,
-`.tmp/grades/<student>/<slug>/evaluation.json` out) is already designed
-to accept either implementation.
+- **Two Lambdas, one container image** (`Dockerfile`): the API
+  Lambda (Powertools router, JWT-authorized HTTP API) writes JOB items +
+  SQS messages; the worker Lambda consumes them (concurrency 1, DLQ with
+  maxReceiveCount 1 — a paid grade job is never auto-retried).
+- **Storage split**: authored exercise content ships in the image (git →
+  CI rebuild); generated artifacts (solution.json, expected/, reconciled
+  task.json) are gitignored and live in S3 under `exercises/<slug>/`,
+  written only by prep jobs. `evaluator/store.py` materializes the merged
+  tree under /tmp because the Lambda image filesystem is read-only
+  (`evaluator/config.py` honors `EVALUATOR_*_DIR` env overrides).
+- **Reports are immutable versions** in S3 (`students/<slug>/<ver>/`);
+  DynamoDB single table holds student cards, report history, job
+  lifecycle, conditional-put locks (TTL 30 min), and exercise prep state.
+- **Auth**: Cognito (admin-created users; groups `admin`/`mentor`) + API
+  Gateway JWT authorizer; the Lambda re-checks source IP and enforces the
+  role matrix (mentors get 403 on /v1/preps). IP allowlist also runs at
+  the edge via a CloudFront Function.
 
 ## Canonical pipeline form
 
@@ -158,6 +179,57 @@ Outputs:
   - `<slug>/ai_context.json` — bundle the skill consumes when hard gates pass.
   - `<slug>/evaluation.json` — per-exercise verdict produced by the skill.
   - `<slug>/student/` — fetched student pipeline JSON + student CSV.
+
+## Containerization
+
+`Dockerfile` + `docker-compose.yml` package **only the deterministic layer**
+(the `evaluator/` package). The AI-judgment layer stays on the host inside the
+operator's own AI assistant — baking an AI CLI + API key into the image would
+contradict the "no Anthropic API key, no per-evaluation cost" goal above, so it
+was deliberately left out (see the scope decision in `## Two-layer evaluation`).
+
+Docker is the **primary, fully-supported runtime** (chosen 2026-06-10): the
+`/prep` SKILL.md invokes `docker compose run --rm -T evaluator
+python -m evaluator.…` rather than a local venv, so a fresh machine needs only
+Docker. The venv remains a documented escape hatch (swap the
+`docker compose run …` prefix for the interpreter).
+
+**Pivot to cloud grading (decided 2026-06-11):** the local AI-judgment grading
+flow was removed — the `/grade` SKILL.md, `AGENTS.md`, and
+`.github/copilot-instructions.md` were deleted. Grading judgment moves to the
+Claude API (Sonnet 4.6) running in AWS, triggered by a Grade button on a web
+dashboard; the deterministic `evaluator/` layer and its rubric files
+(`general_rules` + per-task `notes.md`) are reused by the cloud worker
+unchanged in spirit. `/prep` stays a local admin task. See the implementation
+plan for the full target architecture.
+
+Consequences that the design leans on:
+- The container and the host AI assistant **share the bind-mounted `.tmp/` +
+  `grades/`**, which is how the three-step `/grade` handoff works across the
+  boundary (`grade plan` in the container writes `ai_context.json`; the
+  assistant on the host writes `evaluation.json`; `grade report` in the
+  container reads it back). The bind-mount layout maps the host repo 1:1 onto
+  `/app`, so a containerized run writes the same files a local run does.
+- **Manifest paths are stored repo-root-relative** (`_rel_to_repo` /
+  `_resolve_manifest_path` in `grade.py`), not absolute. `grade plan` runs in
+  the container (CWD `/app`), but the host assistant must open the same
+  `ai_context.json`; an absolute `/app/.tmp/...` would be meaningless on the
+  host. Relative paths re-anchor correctly in both places (legacy absolute
+  paths still pass through, so old manifests keep working).
+- `task.json` is **committed** (env-neutral intent: `output_filename(s)`,
+  `triggered_task_name`, `requests`); its one env-specific field
+  (`solution_pipeline_path`) is rebuilt from `.env` + the description.md heading
+  by `_proposed_path` on the next `prep sync`. The genuinely env-specific caches
+  (`solution.json`, `solution.cache.json`, `expected/`, plus `grades/`, `ui/`,
+  `.tmp/`, `.env`) stay `.dockerignore`d / gitignored and arrive via bind mounts
+  or a live fetch.
+- Runs non-root (`uid 10001`) with UTF-8 forced in the environment, because the
+  non-`grade` entry points don't call the `sys.std*.reconfigure` shim that
+  `evaluator.grade.main` does and would otherwise crash on en-dashes under the
+  slim image's C locale.
+
+This dovetails with the headless/CI expansion point below: an API-based AI path
+could run inside the same image and read the same `ai_context.json`.
 
 ## Future expansion points
 
