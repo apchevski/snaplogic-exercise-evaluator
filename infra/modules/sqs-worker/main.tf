@@ -128,6 +128,14 @@ resource "aws_lambda_function" "worker" {
 
   depends_on = [aws_cloudwatch_log_group.worker]
   tags       = var.tags
+
+  # deploy-backend.yml owns code deploys: it repoints the live function to an
+  # immutable commit-SHA tag via `update-function-code`, while Terraform holds
+  # the desired image at `:latest`. Ignore image_uri so the two pipelines stop
+  # fighting and infra plans don't perpetually show this drift.
+  lifecycle {
+    ignore_changes = [image_uri]
+  }
 }
 
 resource "aws_lambda_event_source_mapping" "jobs" {
