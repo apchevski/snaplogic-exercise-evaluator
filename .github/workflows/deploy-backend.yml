@@ -1,6 +1,26 @@
+# Backend: test → build → deploy (mirrors deploy-frontend's job split). `test`
+# (ruff + pytest, $0 — Claude stubbed, AWS mocked with moto) is the pre-merge
+# gate and runs on every PR/push. `build` (image → ECR) and `deploy` (repoint
+# both Lambdas) are separate jobs, both main-only. Unlike the frontend's local
+# vite build, the backend "build" pushes to ECR — a cloud write — so it does NOT
+# run on PRs (that would push a throwaway image per PR and churn the keep-last-N
+# ECR lifecycle, and fork PRs get no OIDC creds anyway); `test` is the PR gate.
+# The image isn't passed between jobs the way the frontend's dist/ is — it lives
+# in ECR, and both jobs derive the same URI from ecr-login + the commit SHA.
+# Non-secret config comes from .github/deploy.vars; auth is GitHub OIDC.
 name: deploy-backend
 
 on:
+  pull_request:
+    paths:
+      - "evaluator/**"
+      - "backend/**"
+      - "exercises/**"
+      - "schemas/**"
+      - "requirements.txt"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/deploy-backend.yml"
   push:
     branches: [main]
     paths:
@@ -19,7 +39,21 @@ permissions:
   contents: read
 
 jobs:
-  build-and-deploy:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: ruff check evaluator backend
+      - run: pytest backend/tests -q
+
+  build:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +77,24 @@ jobs:
           docker build -f Dockerfile -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load deploy config
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/deploy.vars >> "$GITHUB_ENV"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
 
       - name: Update both Lambdas
         env:

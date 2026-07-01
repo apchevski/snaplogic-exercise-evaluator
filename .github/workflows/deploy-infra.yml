@@ -1,4 +1,14 @@
-# Infra: terraform plan on PRs touching infra/, apply on main.
+# Infra: validate → plan → apply.
+#   validate — offline (no AWS): fmt across all of infra/ + `validate` on both
+#              roots (production and bootstrap). Gates the plan.
+#   plan     — always runs after validate; saves the plan (tfplan) as an
+#              artifact and prints it to the run summary for review.
+#   apply    — main only; gated by the `production` GitHub Environment (add a
+#              required reviewer there so it pauses for approval), then applies
+#              the EXACT reviewed plan. Because it applies a saved plan,
+#              terraform refuses it if remote state drifted after the plan was
+#              made — just re-run the workflow if that happens.
+#
 # Non-secret config (AWS_REGION, AWS_DEPLOY_ROLE_ARN) is loaded from
 # .github/deploy.vars — the same single source the deploy-backend/frontend
 # workflows use, so there is NO manual "Actions → Variables" step in GitHub.
@@ -26,7 +36,30 @@ env:
   TF_DIR: infra/environments/production
 
 jobs:
-  terraform:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.12.1"
+
+      - name: Format check
+        run: terraform fmt -check -recursive infra
+
+      - name: Validate production
+        run: |
+          terraform -chdir=$TF_DIR init -backend=false -input=false
+          terraform -chdir=$TF_DIR validate
+
+      - name: Validate bootstrap
+        run: |
+          terraform -chdir=infra/bootstrap init -backend=false -input=false
+          terraform -chdir=infra/bootstrap validate
+
+  plan:
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +82,50 @@ jobs:
       - name: Plan
         run: terraform -chdir=$TF_DIR plan -input=false -no-color -out=tfplan -var=aws_profile=
 
-      - name: Apply (main only)
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      - name: Plan summary
+        run: |
+          {
+            echo '```terraform'
+            terraform -chdir=$TF_DIR show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_DIR }}/tfplan
+          retention-days: 1
+          if-no-files-found: error
+
+  apply:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load deploy config
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/deploy.vars >> "$GITHUB_ENV"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.12.1"
+
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_DIR }}
+
+      - name: Init
+        run: terraform -chdir=$TF_DIR init -input=false -backend-config="profile="
+
+      - name: Apply
         run: terraform -chdir=$TF_DIR apply -input=false tfplan

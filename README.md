@@ -61,7 +61,7 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
 | Structured-outputs schemas | `schemas/` |
 | Lambda container image | `Dockerfile` (one image, two CMDs) |
 | Terraform (12 AWS services, ≈$0.50–0.70/mo) | `infra/` (bootstrap + environments/production + modules) |
-| React SPA | `frontend/` (Vite + TS, Cognito Hosted UI + PKCE) |
+| React SPA | `frontend/` (Vite + TS, Cognito Hosted UI + PKCE; unit tests via `npm test` — vitest) |
 | CI/CD (GitHub OIDC, no stored keys) | `.github/workflows/` |
 
 **Roles** (Cognito groups; the API enforces, the UI only hides buttons):
@@ -87,6 +87,17 @@ admins prep + grade + view; mentors grade + view. Users are invite-only
    tab / `gh workflow run` against any branch. CI takes over (image → Lambdas,
    SPA → S3 + CloudFront).
 6. Click **Prep** (admin) once so S3 has the generated artifacts, then grade.
+
+**One-time GitHub setup for gated infra applies:** `deploy-infra` runs
+`terraform plan` on every PR/push and uploads the plan, but the `apply` job is
+pinned to a `production` GitHub **Environment**. Create it once under
+**Settings → Environments → New environment → `production`** and add yourself
+under **Required reviewers** (leave *Prevent self-review* unchecked so a solo
+operator can approve their own run). After that, every push to `main` that
+touches `infra/**` plans automatically and then **pauses for approval** — open
+the run, read the plan in the job summary, and click **Approve** to apply the
+exact plan you reviewed (or **Reject** to cancel). If remote state drifted
+between plan and approval, terraform refuses the stale plan — just re-run.
 
 ## Verdicts and points
 
@@ -255,12 +266,12 @@ silently route to the wrong task.
 │   └── store.py                # LocalStore / S3Store artifact + report I/O
 ├── backend/
 │   ├── src/                    # api.py (Powertools router) + worker.py (SQS consumer) + common.py
-│   └── tests/                  # pytest: moto AWS + stubbed Claude — $0, run by CI
+│   └── tests/                  # pytest: moto AWS + stubbed Claude — $0, run on every PR (deploy-backend `test` job)
 ├── schemas/                    # structured-outputs JSON schemas for the judge
 ├── Dockerfile                 # cloud image (api + worker share it; CMD differs)
 ├── infra/                      # Terraform: bootstrap (state bucket) + environments/production + modules/
 ├── frontend/                   # React SPA (Vite + TS): login, dashboard, student detail, exercises
-├── .github/workflows/          # ci, deploy-backend, deploy-infra, deploy-web
+├── .github/workflows/          # deploy-backend (test→build→deploy), deploy-frontend (test→build→deploy), deploy-infra (validate→plan→apply); gates run on PRs, deploy on main
 └── .tmp/                       # scratch space during a grading run; cleaned out per student
 ```
 
