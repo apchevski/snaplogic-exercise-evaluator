@@ -61,7 +61,7 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
 | Structured-outputs schemas | `schemas/` |
 | Lambda container image | `Dockerfile` (one image, two CMDs) |
 | Terraform (12 AWS services, ≈$0.50–0.70/mo) | `infra/` (bootstrap + environments/production + modules) |
-| React SPA | `frontend/` (Vite + TS, Cognito Hosted UI + PKCE) |
+| React SPA | `frontend/` (Vite + TS, Cognito Hosted UI + PKCE; unit tests via `npm test` — vitest) |
 | CI/CD (GitHub OIDC, no stored keys) | `.github/workflows/` |
 
 **Roles** (Cognito groups; the API enforces, the UI only hides buttons):
@@ -271,7 +271,7 @@ silently route to the wrong task.
 ├── Dockerfile                 # cloud image (api + worker share it; CMD differs)
 ├── infra/                      # Terraform: bootstrap (state bucket) + environments/production + modules/
 ├── frontend/                   # React SPA (Vite + TS): login, dashboard, student detail, exercises
-├── .github/workflows/          # deploy-backend, deploy-frontend, deploy-infra (each tests/builds on PRs, deploys on main)
+├── .github/workflows/          # deploy-backend (test→build→deploy), deploy-frontend (test→build→deploy), deploy-infra (validate→plan→apply); gates run on PRs, deploy on main
 └── .tmp/                       # scratch space during a grading run; cleaned out per student
 ```
 

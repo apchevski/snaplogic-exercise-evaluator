@@ -1,4 +1,14 @@
-# Infra: terraform plan on PRs/pushes touching infra/; a gated apply on main.
+# Infra: validate → plan → apply.
+#   validate — offline (no AWS): fmt across all of infra/ + `validate` on both
+#              roots (production and bootstrap). Gates the plan.
+#   plan     — always runs after validate; saves the plan (tfplan) as an
+#              artifact and prints it to the run summary for review.
+#   apply    — main only; gated by the `production` GitHub Environment (add a
+#              required reviewer there so it pauses for approval), then applies
+#              the EXACT reviewed plan. Because it applies a saved plan,
+#              terraform refuses it if remote state drifted after the plan was
+#              made — just re-run the workflow if that happens.
+#
 # Non-secret config (AWS_REGION, AWS_DEPLOY_ROLE_ARN) is loaded from
 # .github/deploy.vars — the same single source the deploy-backend/frontend
 # workflows use, so there is NO manual "Actions → Variables" step in GitHub.
@@ -7,15 +17,6 @@
 # in CI (-backend-config="profile=" / -var=aws_profile=) and terraform uses the
 # OIDC credentials. All terraform variables have committed defaults, so no
 # terraform.tfvars is needed.
-#
-# Two jobs:
-#   plan  — always runs; saves the plan (tfplan) as an artifact and prints it to
-#           the run summary so it can be reviewed.
-#   apply — main only; gated by the `production` GitHub Environment (add a
-#           required reviewer there so it pauses for approval), then applies the
-#           EXACT reviewed plan. Because it applies a saved plan, terraform will
-#           refuse it if remote state drifted after the plan was made — just
-#           re-run the workflow if that happens.
 name: deploy-infra
 
 on:
@@ -35,7 +36,30 @@ env:
   TF_DIR: infra/environments/production
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.12.1"
+
+      - name: Format check
+        run: terraform fmt -check -recursive infra
+
+      - name: Validate production
+        run: |
+          terraform -chdir=$TF_DIR init -backend=false -input=false
+          terraform -chdir=$TF_DIR validate
+
+      - name: Validate bootstrap
+        run: |
+          terraform -chdir=infra/bootstrap init -backend=false -input=false
+          terraform -chdir=infra/bootstrap validate
+
   plan:
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,17 +75,6 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.12.1"
-
-      # Offline checks (no AWS needed) folded in from the old ci.yml: formatting
-      # across all of infra/, plus validate on the bootstrap root the plan below
-      # doesn't cover (the production root is validated implicitly by plan).
-      - name: Format check
-        run: terraform fmt -check -recursive infra
-
-      - name: Validate bootstrap
-        run: |
-          terraform -chdir=infra/bootstrap init -backend=false -input=false
-          terraform -chdir=infra/bootstrap validate
 
       - name: Init
         run: terraform -chdir=$TF_DIR init -input=false -backend-config="profile="
