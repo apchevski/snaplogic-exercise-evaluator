@@ -88,6 +88,17 @@ admins prep + grade + view; mentors grade + view. Users are invite-only
    SPA → S3 + CloudFront).
 6. Click **Prep** (admin) once so S3 has the generated artifacts, then grade.
 
+**One-time GitHub setup for gated infra applies:** `deploy-infra` runs
+`terraform plan` on every PR/push and uploads the plan, but the `apply` job is
+pinned to a `production` GitHub **Environment**. Create it once under
+**Settings → Environments → New environment → `production`** and add yourself
+under **Required reviewers** (leave *Prevent self-review* unchecked so a solo
+operator can approve their own run). After that, every push to `main` that
+touches `infra/**` plans automatically and then **pauses for approval** — open
+the run, read the plan in the job summary, and click **Approve** to apply the
+exact plan you reviewed (or **Reject** to cancel). If remote state drifted
+between plan and approval, terraform refuses the stale plan — just re-run.
+
 ## Verdicts and points
 
 Every exercise resolves to exactly one of three verdicts, with a 0–10
@@ -255,12 +266,12 @@ silently route to the wrong task.
 │   └── store.py                # LocalStore / S3Store artifact + report I/O
 ├── backend/
 │   ├── src/                    # api.py (Powertools router) + worker.py (SQS consumer) + common.py
-│   └── tests/                  # pytest: moto AWS + stubbed Claude — $0, run by CI
+│   └── tests/                  # pytest: moto AWS + stubbed Claude — $0, run on every PR (deploy-backend `test` job)
 ├── schemas/                    # structured-outputs JSON schemas for the judge
 ├── Dockerfile                 # cloud image (api + worker share it; CMD differs)
 ├── infra/                      # Terraform: bootstrap (state bucket) + environments/production + modules/
 ├── frontend/                   # React SPA (Vite + TS): login, dashboard, student detail, exercises
-├── .github/workflows/          # ci, deploy-backend, deploy-infra, deploy-web
+├── .github/workflows/          # deploy-backend, deploy-frontend, deploy-infra (each tests/builds on PRs, deploys on main)
 └── .tmp/                       # scratch space during a grading run; cleaned out per student
 ```
 

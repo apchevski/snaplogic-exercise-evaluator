@@ -1,6 +1,21 @@
+# Backend: test on every PR/push; build the image and repoint both Lambdas only
+# on main. The `test` job (ruff + pytest, $0 — Claude stubbed, AWS mocked with
+# moto) is the pre-merge gate; `build-and-deploy` needs it and is main-only, so
+# a red test can never ship. Non-secret config comes from .github/deploy.vars
+# (loaded into $GITHUB_ENV); auth is GitHub OIDC — no stored AWS keys.
 name: deploy-backend
 
 on:
+  pull_request:
+    paths:
+      - "evaluator/**"
+      - "backend/**"
+      - "exercises/**"
+      - "schemas/**"
+      - "requirements.txt"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/deploy-backend.yml"
   push:
     branches: [main]
     paths:
@@ -19,7 +34,21 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: ruff check evaluator backend
+      - run: pytest backend/tests -q
+
   build-and-deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

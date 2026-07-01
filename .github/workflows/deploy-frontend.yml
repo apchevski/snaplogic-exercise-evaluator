@@ -1,6 +1,14 @@
+# Frontend: build on every PR/push (the build IS the pre-merge test — there is
+# no separate unit suite), deploy only on main. The `build` job has NO AWS
+# access; it just compiles the SPA (VITE_* config baked in from
+# .github/deploy.vars) and uploads dist/ as an artifact. `deploy` needs it, is
+# main-only, and only syncs the already-built artifact — so a build that fails
+# to compile can never reach S3. Auth is GitHub OIDC — no stored AWS keys.
 name: deploy-frontend
 
 on:
+  pull_request:
+    paths: ["frontend/**", ".github/workflows/deploy-frontend.yml"]
   push:
     branches: [main]
     paths: ["frontend/**", ".github/workflows/deploy-frontend.yml"]
@@ -11,14 +19,14 @@ permissions:
   contents: read
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Load deploy config
         working-directory: ${{ github.workspace }}
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/deploy.vars >> "$GITHUB_ENV"
@@ -34,10 +42,38 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: frontend/dist
+          retention-days: 1
+          if-no-files-found: error
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load deploy config
+        working-directory: ${{ github.workspace }}
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/deploy.vars >> "$GITHUB_ENV"
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: frontend/dist
 
       - name: Sync to S3 + invalidate CloudFront
         run: |
