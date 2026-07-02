@@ -3,7 +3,7 @@ import type { Job } from "../types";
 const LABELS: Record<Job["status"], string> = {
   queued: "Queued",
   running: "Grading…",
-  succeeded: "Done",
+  succeeded: "Completed",
   failed: "Failed",
 };
 

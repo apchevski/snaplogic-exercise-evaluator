@@ -16,13 +16,15 @@ rather than a rubric.
 
 ## What it does
 
-Mentors and admins log into a VPN-restricted web dashboard:
+Mentors and admins log into a VPN-restricted web dashboard (styled after the
+classic SnapLogic Dashboard: navy panel headers, sortable/paginated data
+tables, tabbed sub-nav):
 
-- **Grade** (mentor or admin): click Grade on a student card (or type a new
+- **Grade** (mentor or admin): click Grade on a student's row (or type a new
   student's project name). A job queues, a worker Lambda runs the
   deterministic hard gates against SnapLogic, sends each surviving exercise
   to Claude (Sonnet 4.6, ~$0.95 per full run), renders the report, and the
-  card refreshes live with points and per-task detail.
+  row refreshes live with points and per-task detail.
 - **Prep** (admin only): click Prep on an exercise to refresh its solution
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
 
