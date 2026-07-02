@@ -34,7 +34,7 @@ variable "judge_model" {
 variable "allowed_cidrs" {
   description = "Office/VPN CIDRs allowed through CloudFront + the API Lambda."
   type        = list(string)
-  default     = ["80.77.146.146","92.53.17.136"]
+  default     = ["80.77.146.146", "92.53.17.136"]
 }
 
 variable "extra_callback_urls" {
