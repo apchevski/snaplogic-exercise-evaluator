@@ -38,7 +38,7 @@ export function TaskCard({ task }: { task: TaskResult }) {
   const totalCost = deductions.reduce((s, d) => s + Number(d.points_deducted || 0), 0);
 
   return (
-    <div className="task">
+    <div className={`task v-${verdict}`}>
       <header>
         <span className={`verdict-badge ${verdict}`}>{verdict.replace(/_/g, " ")}</span>
         <h3>{task.slug}</h3>

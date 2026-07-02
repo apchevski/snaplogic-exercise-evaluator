@@ -1,16 +1,93 @@
+import { useState } from "react";
 import { useAuth } from "react-oidc-context";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 
 import { signOut, useGroups } from "./auth";
 import Dashboard from "./pages/Dashboard";
 import Exercises from "./pages/Exercises";
 import StudentDetail from "./pages/StudentDetail";
 
+function BrandMark() {
+  return (
+    <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+      <rect x="1" y="1" width="22" height="22" rx="5" fill="#1c4e80" />
+      <circle cx="8" cy="8" r="1.7" fill="#ffffff" />
+      <circle cx="16" cy="8" r="1.7" fill="#ffffff" />
+      <circle cx="8" cy="16" r="1.7" fill="#ffffff" />
+      <circle cx="16" cy="16" r="1.7" fill="#ffffff" />
+      <circle cx="12" cy="12" r="1.7" fill="#9fc3e8" />
+    </svg>
+  );
+}
+
+function Brand() {
+  return (
+    <div className="brand">
+      <BrandMark />
+      <span className="brand-word">SnapLogic</span>
+      <span className="brand-sub">Exercise Evaluator</span>
+    </div>
+  );
+}
+
+function initialsFor(email: string): string {
+  const parts = email.split("@")[0].split(/[^a-zA-Z0-9]+/).filter(Boolean);
+  const letters = parts.slice(0, 2).map((p) => p[0]);
+  return (letters.join("") || "U").toUpperCase();
+}
+
+function UserMenu() {
+  const auth = useAuth();
+  const groups = useGroups();
+  const email = auth.user?.profile?.email ?? "";
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="user-cluster">
+      <button
+        className="user-button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span className="avatar">{initialsFor(email)}</span>
+        <span className="user-email">{email}</span>
+        <span className="caret" aria-hidden="true">
+          ▼
+        </span>
+      </button>
+      {open && (
+        <>
+          <div className="menu-backdrop" onClick={() => setOpen(false)} />
+          <div className="user-menu" role="menu">
+            {groups.length > 0 && (
+              <div className="user-menu-roles">
+                {groups.map((g) => (
+                  <span className="role-chip" key={g}>
+                    {g}
+                  </span>
+                ))}
+              </div>
+            )}
+            <button
+              className="user-menu-item"
+              role="menuitem"
+              onClick={() => signOut(() => auth.removeUser())}
+            >
+              Sign out
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Login({ onLogin, error }: { onLogin: () => void; error?: string }) {
   return (
     <div className="login-page">
       <div className="login-card">
-        <h1>SnapLogic Exercise Grades</h1>
+        <Brand />
+        <h1>Exercise Grades</h1>
         <p>Sign in with your mentor or admin account to continue.</p>
         {error && <div className="error-banner">{error}</div>}
         <button className="btn primary" onClick={onLogin}>
@@ -22,36 +99,25 @@ function Login({ onLogin, error }: { onLogin: () => void; error?: string }) {
 }
 
 function Shell() {
-  const auth = useAuth();
-  const groups = useGroups();
-  const email = auth.user?.profile?.email ?? "";
+  const { pathname } = useLocation();
+  const studentsActive = pathname === "/" || pathname.startsWith("/students");
   return (
     <>
-      <header className="site-header">
-        <h1>SnapLogic Exercise Grades</h1>
-        <nav>
-          <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
-            Dashboard
-          </NavLink>
-          <NavLink
-            to="/exercises"
-            className={({ isActive }) => (isActive ? "active" : "")}
-          >
-            Exercises
-          </NavLink>
-          <span className="who">
-            {email}
-            {groups.map((g) => (
-              <span className="role-chip" key={g}>
-                {g}
-              </span>
-            ))}
-          </span>
-          <button className="btn" onClick={() => signOut(() => auth.removeUser())}>
-            Sign out
-          </button>
-        </nav>
+      <header className="topbar">
+        <Brand />
+        <UserMenu />
       </header>
+      <nav className="subnav">
+        <NavLink to="/" className={studentsActive ? "active" : ""}>
+          Students
+        </NavLink>
+        <NavLink
+          to="/exercises"
+          className={({ isActive }) => (isActive ? "active" : "")}
+        >
+          Exercises
+        </NavLink>
+      </nav>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/students/:slug" element={<StudentDetail />} />
@@ -69,7 +135,8 @@ export default function App() {
     return (
       <div className="login-page">
         <div className="login-card">
-          <h1>SnapLogic Exercise Grades</h1>
+          <Brand />
+          <h1>Exercise Grades</h1>
           <p>Signing in…</p>
         </div>
       </div>
