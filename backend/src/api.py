@@ -274,7 +274,10 @@ def _sync_resource_to_s3(path: Path, key: str) -> None:
         if head.get("ETag", "").strip('"') == md5:
             return
     except ClientError as e:
-        if e.response["Error"]["Code"] not in ("404", "NoSuchKey", "NotFound"):
+        # "403": S3 masks HeadObject-on-missing-key as Forbidden when the
+        # caller lacks s3:ListBucket. Upload anyway — worst case we re-put
+        # identical bytes; raising here turns IAM drift into a 500.
+        if e.response["Error"]["Code"] not in ("403", "404", "NoSuchKey", "NotFound"):
             raise
     s3.put_object(Bucket=data_bucket(), Key=key, Body=body)
 

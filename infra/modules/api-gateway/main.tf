@@ -44,6 +44,19 @@ data "aws_iam_policy_document" "api" {
     actions   = ["s3:PutObject"]
     resources = ["${var.bucket_arn}/exercise-resources/*"]
   }
+  # Without ListBucket, S3 answers HeadObject on a missing key with 403
+  # instead of 404, which broke the first download of every resource file.
+  # Prefix-scoped so the API still can't enumerate worker-owned prefixes.
+  statement {
+    sid       = "S3HeadExerciseResources"
+    actions   = ["s3:ListBucket"]
+    resources = [var.bucket_arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["exercise-resources/*"]
+    }
+  }
   statement {
     sid       = "QueueSend"
     actions   = ["sqs:SendMessage"]

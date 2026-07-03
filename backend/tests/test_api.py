@@ -256,6 +256,32 @@ def test_download_resource_refreshes_stale_s3_copy(aws, evaluator_dirs):
     assert obj["Body"].read() == b"new-content"
 
 
+def test_download_resource_tolerates_head_403(aws, evaluator_dirs, monkeypatch):
+    """Without s3:ListBucket, S3 masks HeadObject-on-missing-key as 403; the
+    mirror must fall through to the upload instead of surfacing a 500."""
+    from botocore.exceptions import ClientError
+
+    _make_exercise_with_resource(evaluator_dirs, "api_res_403", content=b"data-403")
+    real = api.s3_client()
+
+    class HeadForbiddenS3:
+        def head_object(self, **kwargs):
+            raise ClientError(
+                {"Error": {"Code": "403", "Message": "Forbidden"}}, "HeadObject"
+            )
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+    monkeypatch.setattr(api, "s3_client", lambda: HeadForbiddenS3())
+    resp = _call(api_event("GET", "/v1/exercises/api_res_403/resources/Input.zip"))
+    assert resp["statusCode"] == 200
+    obj = aws["s3"].get_object(
+        Bucket=os.environ["DATA_BUCKET"], Key="exercise-resources/api_res_403/Input.zip"
+    )
+    assert obj["Body"].read() == b"data-403"
+
+
 def test_download_unknown_resource_404(aws, evaluator_dirs):
     _make_exercise_with_resource(evaluator_dirs, "api_res_404")
     resp = _call(api_event("GET", "/v1/exercises/api_res_404/resources/nope.csv"))
