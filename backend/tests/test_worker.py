@@ -17,6 +17,7 @@ class StubStore:
         self.uploaded_artifacts = []
         self.materialized = False
         self.materialized_reports = []
+        self.seeded = []
 
     def materialize_exercises(self):
         self.materialized = True
@@ -34,6 +35,10 @@ class StubStore:
     def upload_exercise_artifacts(self, slug):
         self.uploaded_artifacts.append(slug)
         return [f"exercises/{slug}/solution.json"]
+
+    def seed_authored_files(self, slug):
+        self.seeded.append(slug)
+        return []
 
 
 def _fake_run_result(student: str):
@@ -267,6 +272,139 @@ def test_prep_job_success(aws, monkeypatch, evaluator_dirs):
     )["Item"]
     assert ex["prep_status"] == "ready"
     assert ex["title"] == "Worker Prep"
+
+
+def _stub_prep_pipeline(monkeypatch, sync_hook=None):
+    """Stub the deterministic prep machinery (no SnapLogic, no network)."""
+    import evaluator.config as config_mod
+    import evaluator.prep as prep_mod
+    import evaluator.snaplogic_client as sl_mod
+
+    def fake_sync(slug, ofile):
+        if sync_hook:
+            sync_hook(slug)
+        return 0
+
+    monkeypatch.setattr(prep_mod, "cmd_sync", fake_sync)
+    monkeypatch.setattr(
+        prep_mod,
+        "_classify_folder",
+        lambda folder, client, settings: SimpleNamespace(
+            status="ready", reason="fresh", task_type=None
+        ),
+    )
+    monkeypatch.setattr(
+        config_mod,
+        "load_settings",
+        lambda: SimpleNamespace(
+            org_name="Org", project_space_name="Solutions", project_name="Training"
+        ),
+    )
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return None
+
+    monkeypatch.setattr(sl_mod, "SnapLogicClient", lambda settings: FakeClient())
+
+
+def test_prep_synthesizes_task_json_from_config_and_preserves_row(
+    aws, monkeypatch, evaluator_dirs
+):
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+
+    folder = evaluator_dirs["exercises"] / "worker_cfg_slug"
+    folder.mkdir(exist_ok=True)
+    (folder / "description.md").write_text("# Task 77 – Config", encoding="utf-8")
+    # Stale task.json from a previous overlay — the stored config must win.
+    (folder / "task.json").write_text('{"task_type": "stale"}', encoding="utf-8")
+
+    dynamo_table().put_item(
+        Item={
+            "pk": "EXERCISE#worker_cfg_slug",
+            "sk": "META",
+            "entity": "exercise",
+            "slug": "worker_cfg_slug",
+            "authored_in": "s3",
+            "created_by": "admin@x.io",
+            "task_config": {
+                "task_type": "triggered_task",
+                "triggered_task_name": "Task 77 – Config Task",
+                "requests": [{"name": "addition", "params": {"mathOperation": "3+5"}}],
+            },
+        }
+    )
+
+    seen_at_sync = {}
+
+    def capture(slug):
+        seen_at_sync["task_json"] = json.loads(
+            (folder / "task.json").read_text(encoding="utf-8")
+        )
+
+    _stub_prep_pipeline(monkeypatch, sync_hook=capture)
+
+    job = _seed_job(
+        "job-prep-cfg", "prep", "worker_cfg_slug", exercise_slug="worker_cfg_slug"
+    )
+    worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
+
+    assert _get_job("job-prep-cfg")["status"] == "succeeded"
+    # Synthesized before sync ran, from config + env-derived pipeline path.
+    tj = seen_at_sync["task_json"]
+    assert tj["task_type"] == "triggered_task"
+    assert tj["solution_pipeline_path"] == "Org/Solutions/Training/Task 77 – Config"
+    assert tj["triggered_task_name"] == "Task 77 – Config Task"
+    assert tj["requests"] == [{"name": "addition", "params": {"mathOperation": "3+5"}}]
+    # Authored files got their additive S3 seed pass.
+    assert store.seeded == ["worker_cfg_slug"]
+
+    # The survey rewrite preserved the authored row fields.
+    ex = dynamo_table().get_item(
+        Key={"pk": "EXERCISE#worker_cfg_slug", "sk": "META"}
+    )["Item"]
+    assert ex["prep_status"] == "ready"
+    assert ex["created_by"] == "admin@x.io"
+    assert ex["authored_in"] == "s3"
+    assert ex["task_config"]["triggered_task_name"] == "Task 77 – Config Task"
+
+
+def test_archived_exercise_pruned_from_working_tree(aws, monkeypatch, evaluator_dirs):
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+    import evaluator.runner as runner_mod
+
+    monkeypatch.setattr(
+        runner_mod, "run_grade", lambda student, **kw: _fake_run_result(student)
+    )
+
+    folder = evaluator_dirs["exercises"] / "worker_arch_slug"
+    folder.mkdir(exist_ok=True)
+    (folder / "description.md").write_text("# Archived Task", encoding="utf-8")
+    dynamo_table().put_item(
+        Item={
+            "pk": "EXERCISE#worker_arch_slug",
+            "sk": "META",
+            "entity": "exercise",
+            "slug": "worker_arch_slug",
+            "archived": True,
+        }
+    )
+
+    job = _seed_job(
+        "job-grade-arch", "grade", "arch-student",
+        student="Arch Student", student_slug="arch-student",
+    )
+    worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
+
+    assert _get_job("job-grade-arch")["status"] == "succeeded"
+    # Pruned from the merged tree (so it can't be graded/counted) …
+    assert not folder.exists()
+    # … but nothing in S3 was touched (StubStore has no delete surface at all).
 
 
 def test_unknown_job_type_fails_cleanly(aws, monkeypatch):

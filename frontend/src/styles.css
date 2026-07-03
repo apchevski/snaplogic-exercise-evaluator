@@ -408,6 +408,63 @@ tr.expand-row:hover td { background: #f8f9fb; }
 }
 .warn-chip { margin-left: 6px; color: #8a6116; cursor: help; }
 
+/* ---------- add-exercise modal ---------- */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(23, 43, 64, 0.45);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 48px 16px; overflow-y: auto;
+}
+.modal {
+  background: white; border: 1px solid var(--sl-border); border-radius: 3px;
+  border-top: 3px solid var(--sl-navy);
+  box-shadow: 0 8px 28px rgba(23, 43, 64, 0.3);
+  width: 680px; max-width: 100%; margin: 0;
+}
+.modal > header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--sl-row-border);
+}
+.modal > header h2 { margin: 0; font-size: 15px; color: #22394f; }
+.modal-close {
+  background: none; border: none; cursor: pointer; padding: 2px 6px;
+  font-size: 15px; color: var(--sl-muted); border-radius: 3px;
+}
+.modal-close:hover:not(:disabled) { background: #f1f4f6; color: #38414b; }
+.modal-close:disabled { opacity: 0.4; cursor: not-allowed; }
+.modal-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 13px; }
+.modal-body .error-banner { margin-bottom: 0; }
+.modal-field label { display: block; font-size: 12.5px; font-weight: 600; color: #4a5560; margin-bottom: 4px; }
+.modal-field input[type="text"],
+.modal-field textarea {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--sl-input-border);
+  border-radius: 3px; font-size: 13px; color: inherit;
+}
+.modal-field textarea {
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  min-height: 140px; resize: vertical;
+}
+.modal-field .hint { color: var(--sl-muted); font-size: 11.5px; margin-top: 3px; }
+.modal-field input[type="file"] { font-size: 12.5px; color: #4a5560; display: block; }
+.modal > footer {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 12px 16px; border-top: 1px solid var(--sl-row-border);
+}
+.modal-busy { margin-right: auto; color: var(--sl-blue); font-size: 12.5px; font-weight: 600; }
+.modal-field select {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--sl-input-border);
+  border-radius: 3px; font-size: 13px; background: white; color: inherit;
+}
+.scenario-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.scenario-row input:first-child { flex: 0 0 200px; font-family: var(--mono); font-size: 12px; }
+.scenario-row input:nth-child(2) { flex: 1; font-family: var(--mono); font-size: 12px; }
+.resource-chip.chip-removed { text-decoration: line-through; color: #a33230; border-color: #eec1c0; background: #fdf4f4; }
+
+/* archived exercises: kept forever, just excluded from prep/grade */
+.prep-status.archived { background: #eceff1; color: #5b6771; border: 1px dashed #b3bcc5; }
+tr.row-archived td { opacity: 0.62; }
+tr.row-archived td:last-child { opacity: 1; }
+
 .login-page {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
   flex-direction: column; gap: 1rem; background: var(--sl-page-bg);

@@ -1,0 +1,48 @@
+# Nightly disaster-recovery snapshot of the authored+generated exercise
+# content. S3 is the SOURCE OF TRUTH for exercises (authored in the web UI);
+# this export is strictly one-way (S3 → repo) — nothing ever reads
+# exercises-backup/ except a human running a restore. Git history keeps every
+# prior state of the snapshot, complementing the bucket's own versioning.
+#
+# Restore runbook: aws s3 sync exercises-backup/ "s3://$DATA_BUCKET/exercises/"
+name: backup-exercises
+
+on:
+  schedule:
+    - cron: "17 2 * * *" # nightly, 02:17 UTC
+  workflow_dispatch:
+
+permissions:
+  id-token: write # AWS OIDC
+  contents: write # commit the snapshot
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load deploy config
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/deploy.vars >> "$GITHUB_ENV"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Export exercises from S3
+        # --delete makes the snapshot an exact mirror of the current S3
+        # state; anything removed there stays recoverable via git history.
+        run: aws s3 sync "s3://$DATA_BUCKET/exercises/" exercises-backup/ --delete
+
+      - name: Commit snapshot if changed
+        run: |
+          git add -A exercises-backup
+          if git diff --cached --quiet; then
+            echo "No changes — snapshot already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: nightly exercises backup snapshot"
+          git push

@@ -19,9 +19,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import traceback
 from functools import lru_cache
 from typing import Any
+
+from boto3.dynamodb.conditions import Key
 
 from .common import (
     data_bucket,
@@ -84,6 +87,88 @@ def _update_job(job_id: str, **attrs: Any) -> None:
 
 def _release_lock(job_type: str, target: str) -> None:
     dynamo_table().delete_item(Key={"pk": lock_key(job_type, target), "sk": "META"})
+
+
+# ---------- exercise rows (authored state lives in DynamoDB) ----------
+
+#: EXERCISE-row attributes the prep survey must carry forward — they're
+#: authored via the API (create/edit dialog), and the survey's put_item
+#: would otherwise wipe them.
+_PRESERVED_EXERCISE_FIELDS = (
+    "task_config",
+    "task_config_updated_at",
+    "archived",
+    "authored_in",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+)
+
+
+def _exercise_rows() -> dict[str, dict[str, Any]]:
+    resp = dynamo_table().query(
+        IndexName="gsi1", KeyConditionExpression=Key("entity").eq("exercise")
+    )
+    return {str(i.get("slug")): from_dynamo(i) for i in resp.get("Items", [])}
+
+
+def _prune_archived_exercises(rows: dict[str, dict[str, Any]]) -> list[str]:
+    """Drop archived exercises from the merged /tmp tree (S3 is untouched).
+
+    Runs after materialize for BOTH job types: prep skips them, and grading
+    no longer counts them toward the points denominator.
+    """
+    from evaluator.config import EXERCISES_DIR
+
+    pruned = []
+    for slug, row in rows.items():
+        if row.get("archived") and (EXERCISES_DIR / slug).is_dir():
+            shutil.rmtree(EXERCISES_DIR / slug)
+            pruned.append(slug)
+    return pruned
+
+
+def _synthesize_task_json(folder: str, cfg: dict[str, Any]) -> None:
+    """Write task.json into the merged tree from the exercise's task_config.
+
+    The config (authored in the UI dialog) is env-neutral; the one
+    env-specific field, solution_pipeline_path, is derived here from the
+    SnapLogic settings + the description.md H1 — the same rule prep's
+    reconciler uses. Overwrites whatever task.json the overlay produced:
+    the stored config is canonical, and prep re-uploads the result to S3.
+    """
+    from evaluator.config import EXERCISES_DIR, load_settings
+    from evaluator.tasks import read_pipeline_name_from_description
+
+    pipeline_name = read_pipeline_name_from_description(folder)
+    if not pipeline_name:
+        return  # prep's classify step will surface missing_description
+    settings = load_settings()
+    data: dict[str, Any] = {
+        "task_type": cfg["task_type"],
+        "solution_pipeline_path": (
+            f"{settings.org_name}/{settings.project_space_name}/"
+            f"{settings.project_name}/{pipeline_name}"
+        ),
+    }
+    if cfg["task_type"] == "file_writer":
+        names = [str(n) for n in cfg["output_filenames"]]
+        if len(names) == 1:
+            data["output_filename"] = names[0]
+        else:
+            data["output_filenames"] = names
+        if cfg.get("output_match_mode", "exact") != "exact":
+            data["output_match_mode"] = cfg["output_match_mode"]
+    else:  # triggered_task
+        data["triggered_task_name"] = cfg["triggered_task_name"]
+        data["requests"] = [
+            {"name": r["name"], "params": dict(r.get("params") or {})}
+            for r in cfg["requests"]
+        ]
+    path = EXERCISES_DIR / folder / "task.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 # ---------- grade ----------
@@ -173,18 +258,28 @@ def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
 # ---------- prep ----------
 
 
-def _run_prep_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
+def _run_prep_job(
+    job: dict[str, Any], store: Any, rows: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     from evaluator import prep as prep_mod
     from evaluator.config import load_settings
     from evaluator.snaplogic_client import SnapLogicClient
     from evaluator.tasks import list_exercise_folders, read_pipeline_name_from_description
 
     slug = job.get("exercise_slug") or None
+    folders = [slug] if slug else list_exercise_folders()
+
+    # UI-authored type config is canonical: synthesize task.json from it
+    # before sync so the reconciler refreshes solution + expected/ off it.
+    for folder in folders:
+        cfg = (rows.get(folder) or {}).get("task_config")
+        if cfg:
+            _synthesize_task_json(folder, cfg)
+
     rc = prep_mod.cmd_sync(slug, None)
     if rc != 0:
         raise RuntimeError(f"prep sync exited with code {rc}; see the run log.")
 
-    folders = [slug] if slug else list_exercise_folders()
     settings = load_settings()
     now = utc_now_iso()
     survey: list[dict[str, Any]] = []
@@ -192,9 +287,17 @@ def _run_prep_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
         for folder in folders:
             report = prep_mod._classify_folder(folder, client, settings)
             uploaded = store.upload_exercise_artifacts(folder)
+            # Migration path: image-shipped authored files (git fallback /
+            # pre-pivot exercises) graduate to S3 here, additively.
+            seeded = store.seed_authored_files(folder)
+            existing = rows.get(folder) or {}
+            preserved = {
+                k: existing[k] for k in _PRESERVED_EXERCISE_FIELDS if k in existing
+            }
             dynamo_table().put_item(
                 Item=to_dynamo(
                     {
+                        **preserved,
                         "pk": f"EXERCISE#{folder}",
                         "sk": "META",
                         "entity": "exercise",
@@ -210,7 +313,12 @@ def _run_prep_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
                 )
             )
             survey.append(
-                {"slug": folder, "status": report.status, "artifacts": len(uploaded)}
+                {
+                    "slug": folder,
+                    "status": report.status,
+                    "artifacts": len(uploaded),
+                    "seeded": len(seeded),
+                }
             )
     return {"exercises": survey}
 
@@ -230,10 +338,15 @@ def _process_job(job: dict[str, Any]) -> None:
         _load_secrets_into_env()
         store = _make_store()
         store.materialize_exercises()
+        # Archived exercises stay in S3 (nothing is ever deleted there) but
+        # are dropped from the working tree, so prep skips them and grading
+        # stops counting them toward the points denominator.
+        rows = _exercise_rows()
+        _prune_archived_exercises(rows)
         if job_type == "grade":
             result = _run_grade_job(job, store)
         elif job_type == "prep":
-            result = _run_prep_job(job, store)
+            result = _run_prep_job(job, store, rows)
         else:
             raise ValueError(f"Unknown job_type {job_type!r}.")
         _update_job(

@@ -2,7 +2,16 @@
 // Gateway JWT authorizer validates it; backend/src/api.py reads the email
 // and cognito:groups claims from it).
 
-import type { Exercise, Job, Report, StudentMeta } from "./types";
+import type {
+  CreateExercisePayload,
+  CreateExerciseResult,
+  Exercise,
+  ExerciseDetail,
+  Job,
+  Report,
+  StudentMeta,
+  UpdateExercisePayload,
+} from "./types";
 
 const API_URL: string = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 
@@ -16,7 +25,7 @@ export class ApiError extends Error {
 
 async function request<T>(
   token: string,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PUT",
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -64,6 +73,29 @@ export const api = {
       `/v1/exercises/${encodeURIComponent(slug)}/resources/${encodeURIComponent(filename)}`,
     ),
 
+  // Admin only. Returns presigned S3 PUT URLs for the declared input files;
+  // upload them with uploadToPresignedUrl afterwards.
+  createExercise: (token: string, payload: CreateExercisePayload) =>
+    request<CreateExerciseResult>(token, "POST", "/v1/exercises", payload),
+
+  // Full authored content (description/notes/config) — powers the edit dialog.
+  getExercise: (token: string, slug: string) =>
+    request<{ exercise: ExerciseDetail }>(
+      token,
+      "GET",
+      `/v1/exercises/${encodeURIComponent(slug)}`,
+    ),
+
+  // Admin only. Partial update; also returns presigned PUT URLs for any
+  // newly declared input files.
+  updateExercise: (token: string, slug: string, payload: UpdateExercisePayload) =>
+    request<CreateExerciseResult>(
+      token,
+      "PUT",
+      `/v1/exercises/${encodeURIComponent(slug)}`,
+      payload,
+    ),
+
   startGrading: (token: string, student: string, task?: string) =>
     request<{ id: string }>(token, "POST", "/v1/gradings", {
       student,
@@ -79,6 +111,15 @@ export const api = {
   getPrep: (token: string, id: string) =>
     request<Job>(token, "GET", `/v1/preps/${encodeURIComponent(id)}`),
 };
+
+/** Upload one file straight to S3 — the presigned URL carries the auth,
+ * so no Authorization header (and no API URL prefix) here. */
+export async function uploadToPresignedUrl(url: string, file: File): Promise<void> {
+  const resp = await fetch(url, { method: "PUT", body: file });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, `Uploading ${file.name} failed (${resp.statusText}).`);
+  }
+}
 
 /** Poll a job until it reaches a terminal state. */
 export async function pollJob(

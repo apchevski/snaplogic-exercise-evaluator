@@ -35,6 +35,10 @@ from .config import EXERCISES_DIR, GRADES_DIR, REPO_ROOT, TMP_DIR
 GENERATED_ARTIFACT_FILES = ("task.json", "solution.json", "solution.cache.json")
 
 
+#: Authored (non-generated) files of an exercise folder, besides resources/.
+AUTHORED_FILES = ("description.md", "notes.md")
+
+
 class LocalStore:
     """Dev store: the repo working tree IS the store."""
 
@@ -45,6 +49,9 @@ class LocalStore:
         return None  # grades/<student>/ already lives in the working tree
 
     def upload_exercise_artifacts(self, slug: str) -> list[str]:
+        return []
+
+    def seed_authored_files(self, slug: str) -> list[str]:
         return []
 
     def upload_report(self, student: str, student_slug: str, version: str) -> dict[str, str]:
@@ -145,6 +152,42 @@ class S3Store:
                     self._s3.upload_file(str(path), self.bucket, key)
                     uploaded.append(key)
         return uploaded
+
+    def seed_authored_files(self, slug: str) -> list[str]:
+        """Additively mirror one slug's authored files into S3.
+
+        S3 is the canonical authored store; exercises that still originate
+        in the image (git fallback / pre-migration) get their description.md,
+        notes.md and resources/* uploaded on their next prep. Never
+        overwrites an existing S3 key — a UI edit must not be clobbered by a
+        stale image copy — and never deletes anything.
+        """
+        from botocore.exceptions import ClientError
+
+        slug_dir = EXERCISES_DIR / slug
+        candidates: list[tuple[Path, str]] = [
+            (slug_dir / name, f"{self.exercises_prefix}{slug}/{name}")
+            for name in AUTHORED_FILES
+        ]
+        resources_dir = slug_dir / "resources"
+        if resources_dir.is_dir():
+            candidates += [
+                (p, f"{self.exercises_prefix}{slug}/resources/{p.name}")
+                for p in sorted(resources_dir.iterdir())
+                if p.is_file()
+            ]
+        seeded: list[str] = []
+        for path, key in candidates:
+            if not path.is_file():
+                continue
+            try:
+                self._s3.head_object(Bucket=self.bucket, Key=key)
+                continue  # already authored in S3 — S3 copy wins
+            except ClientError:
+                pass
+            self._s3.upload_file(str(path), self.bucket, key)
+            seeded.append(key)
+        return seeded
 
     # ----- outbound: grading reports -----
 

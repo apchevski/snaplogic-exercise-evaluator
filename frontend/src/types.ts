@@ -92,5 +92,64 @@ export interface Exercise {
   last_prepped_at?: string;
   max_points?: number;
   missing_from_image?: boolean;
+  archived?: boolean;
   resources?: ExerciseResource[];
+}
+
+export interface TriggeredRequest {
+  name: string;
+  params: Record<string, string>;
+}
+
+/** Structured replacement for the hand-written task.json. Absent/null =
+ * "auto": prep derives everything for a single-output file-writer. */
+export type TaskConfig =
+  | {
+      task_type: "file_writer";
+      output_filenames: string[];
+      output_match_mode?: "exact" | "columns_only";
+    }
+  | {
+      task_type: "triggered_task";
+      triggered_task_name: string;
+      requests: TriggeredRequest[];
+    };
+
+export interface ExerciseDetail {
+  slug: string;
+  title?: string;
+  description_md?: string | null;
+  notes_md?: string | null;
+  task_config?: TaskConfig | null;
+  resources?: ExerciseResource[];
+  archived?: boolean;
+  prep_status?: string;
+}
+
+export interface CreateExercisePayload {
+  slug: string;
+  description_md: string;
+  notes_md?: string;
+  task_config?: TaskConfig;
+  resources?: { filename: string }[];
+}
+
+export interface UpdateExercisePayload {
+  description_md?: string;
+  notes_md?: string;
+  task_config?: TaskConfig | null;
+  resources?: { filename: string }[];
+  remove_resources?: string[];
+  archived?: boolean;
+}
+
+export interface ExerciseUpload {
+  filename: string;
+  url: string; // presigned S3 PUT, browser uploads directly
+  expires_in: number;
+}
+
+export interface CreateExerciseResult {
+  exercise: Exercise;
+  uploads: ExerciseUpload[];
 }

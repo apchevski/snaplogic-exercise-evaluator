@@ -62,12 +62,31 @@ plan → judge → report loop the skill used to drive interactively.
   Lambda (Powertools router, JWT-authorized HTTP API) writes JOB items +
   SQS messages; the worker Lambda consumes them (concurrency 1, DLQ with
   maxReceiveCount 1 — a paid grade job is never auto-retried).
-- **Storage split**: authored exercise content ships in the image (git →
-  CI rebuild); generated artifacts (solution.json, expected/, reconciled
-  task.json) are gitignored and live in S3 under `exercises/<slug>/`,
-  written only by prep jobs. `evaluator/store.py` materializes the merged
-  tree under /tmp because the Lambda image filesystem is read-only
-  (`evaluator/config.py` honors `EVALUATOR_*_DIR` env overrides).
+- **Storage (July 2026 pivot): S3 is the source of truth for exercise
+  content.** Everything of an exercise lives in S3 under
+  `exercises/<slug>/` — authored files (`description.md`, `notes.md`,
+  `resources/*`, written by the API's create/edit routes) and generated
+  artifacts (`task.json`, `solution.json`, `expected/`, written only by
+  prep jobs; the API's PutObject IAM is scoped to exactly the authored
+  filename patterns, DeleteObject to `resources/*` only). Type-specific
+  config that used to be a hand-written task.json is structured data on
+  the EXERCISE DynamoDB row (`task_config`); the worker synthesizes
+  task.json from it before every prep sync. The repo's `exercises/`
+  folders are a **create-only seed**: prep jobs additively migrate their
+  authored files to S3 (`S3Store.seed_authored_files`, never overwrites,
+  never deletes) and the S3 copy wins everywhere afterwards — both in the
+  materialize overlay and in the Exercises listing. `evaluator/store.py`
+  still materializes the merged tree under /tmp (image → S3 overlay)
+  because the Lambda image filesystem is read-only. The API detects
+  authored slugs by the presence of `exercises/<slug>/description.md` in
+  S3 (prep never uploads one). Input files travel browser ↔ S3 via
+  presigned URLs (bucket CORS allows PUT from the SPA origins).
+  **Archive is the only delete**: a soft flag on the row; the worker
+  prunes archived folders from its working tree after materialize (out of
+  prep, grading, and the points denominator) while S3 keeps everything.
+  Durability: bucket versioning (noncurrent 90 days) + table PITR +
+  `prevent_destroy` on both, plus the nightly one-way
+  `backup-exercises.yml` snapshot into `exercises-backup/` in the repo.
 - **Student input files** (`exercises/<slug>/resources/` — see
   `conventions/exercise-resources-folder.md`) are authored content, but
   they're too big to stream through a Lambda response (base64 + the 6 MB
@@ -158,7 +177,18 @@ Each exercise lives at `exercises/<slug>/` with:
   notes.md to derive task.json's `triggered_task_name` and `requests`.
 
 The Python loader (`evaluator/tasks.py`) globs `exercises/*/task.json`.
-Adding a new exercise = drop a folder. No code changes.
+The evaluator layer is unchanged by the cloud pivot — it just reads the
+materialized tree.
+
+**Authoring happens in the web UI** (Add New Exercise / Edit, admin
+only): description.md + notes.md text, input-file uploads, and a task
+type selector whose structured config (`task_config` on the EXERCISE
+row) replaces the hand-written task.json — the worker synthesizes
+task.json from it at prep time ("auto" = single-output file_writer,
+where prep detects the lone writer as always). Dropping a folder in git
+still works as a **create-only fallback**: the next prep seeds its
+authored files into S3, after which the UI owns the content (git edits
+no longer propagate — S3 wins).
 
 ## CLI surface
 

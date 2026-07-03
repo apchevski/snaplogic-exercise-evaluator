@@ -63,6 +63,36 @@ def test_upload_exercise_artifacts(aws, evaluator_dirs, tmp_path):
     assert {o["Key"] for o in listed["Contents"]} == set(keys)
 
 
+def test_seed_authored_files_is_additive_only(aws, evaluator_dirs, tmp_path):
+    slug = "store_slug_seed"
+    slug_dir = EXERCISES_DIR / slug
+    (slug_dir / "resources").mkdir(parents=True, exist_ok=True)
+    (slug_dir / "description.md").write_text("# Seed (image copy)", encoding="utf-8")
+    (slug_dir / "notes.md").write_text("image notes", encoding="utf-8")
+    (slug_dir / "resources" / "Input.zip").write_bytes(b"zip")
+    (slug_dir / "task.json").write_text("{}", encoding="utf-8")  # generated: never seeded
+
+    # description.md already authored in S3 (e.g. edited from the UI) —
+    # the stale image copy must NOT clobber it.
+    aws["s3"].put_object(
+        Bucket=_bucket(),
+        Key=f"exercises/{slug}/description.md",
+        Body=b"# Seed (edited in the UI)",
+    )
+
+    store = S3Store(_bucket(), image_exercises_dir=tmp_path / "nonexistent")
+    seeded = store.seed_authored_files(slug)
+
+    assert sorted(seeded) == [
+        f"exercises/{slug}/notes.md",
+        f"exercises/{slug}/resources/Input.zip",
+    ]
+    desc = aws["s3"].get_object(Bucket=_bucket(), Key=f"exercises/{slug}/description.md")
+    assert desc["Body"].read() == b"# Seed (edited in the UI)"
+    # Idempotent: a second pass uploads nothing.
+    assert store.seed_authored_files(slug) == []
+
+
 def test_materialize_report_downloads_previous_version(aws, evaluator_dirs, tmp_path):
     s3 = aws["s3"]
     s3.put_object(

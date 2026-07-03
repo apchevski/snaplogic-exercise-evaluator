@@ -324,3 +324,382 @@ def test_download_resource_rejects_path_traversal(aws, evaluator_dirs):
     assert exercise_resource_path("api_res_trav", "../task.json") is None
     assert exercise_resource_path("api_res_trav", "") is None
     assert exercise_resource_path("../api_res_trav", "Input.zip") is None
+
+
+# ---------- creating exercises from the UI (S3-authored) ----------
+
+
+def _create_exercise(slug: str, *, description=None, notes=None, resources=None):
+    body = {
+        "slug": slug,
+        "description_md": description
+        if description is not None
+        else f"# Task 99 – {slug}\n\n### Objective:\n\nBuild it.\n",
+    }
+    if notes is not None:
+        body["notes_md"] = notes
+    if resources is not None:
+        body["resources"] = resources
+    return _call(api_event("POST", "/v1/exercises", groups=("admin",), body=body))
+
+
+def test_mentor_cannot_create_exercise_403(aws):
+    resp = _call(
+        api_event("POST", "/v1/exercises", groups=("mentor",), body={"slug": "x"})
+    )
+    assert resp["statusCode"] == 403
+
+
+def test_create_exercise_writes_s3_dynamo_and_presigns_uploads(aws, evaluator_dirs):
+    resp = _create_exercise(
+        "api_ui_create",
+        description="# Task 42 – UI Made\n\nDo the thing.\n",
+        notes="Judge gently.",
+        resources=[{"filename": "Input.zip"}],
+    )
+    assert resp["statusCode"] == 201
+    data = _body(resp)
+    assert data["exercise"]["title"] == "Task 42 – UI Made"
+    assert data["uploads"][0]["filename"] == "Input.zip"
+    assert "exercises/api_ui_create/resources/Input.zip" in data["uploads"][0]["url"]
+
+    bucket = os.environ["DATA_BUCKET"]
+    desc = aws["s3"].get_object(Bucket=bucket, Key="exercises/api_ui_create/description.md")
+    assert b"Do the thing." in desc["Body"].read()
+    notes = aws["s3"].get_object(Bucket=bucket, Key="exercises/api_ui_create/notes.md")
+    assert notes["Body"].read() == b"Judge gently."
+
+    item = dynamo_table().get_item(
+        Key={"pk": "EXERCISE#api_ui_create", "sk": "META"}
+    )["Item"]
+    assert item["prep_status"] == "never_prepped"
+    assert item["authored_in"] == "s3"
+    assert item["created_by"] == "mentor@example.com"
+
+
+def test_create_exercise_validation_400(aws, evaluator_dirs):
+    assert _create_exercise("Bad Slug!")["statusCode"] == 400
+    assert _create_exercise("api_ui_val", description="   ")["statusCode"] == 400
+    assert _create_exercise("api_ui_val", description="no heading here")["statusCode"] == 400
+    assert (
+        _create_exercise("api_ui_val", resources=[{"filename": "../evil.zip"}])["statusCode"]
+        == 400
+    )
+    assert (
+        _create_exercise(
+            "api_ui_val", resources=[{"filename": "a.zip"}, {"filename": "a.zip"}]
+        )["statusCode"]
+        == 400
+    )
+
+
+def test_create_exercise_duplicate_slug_409(aws, evaluator_dirs):
+    (evaluator_dirs["exercises"] / "api_ui_dup_image").mkdir(exist_ok=True)
+    assert _create_exercise("api_ui_dup_image")["statusCode"] == 409
+
+    assert _create_exercise("api_ui_dup_s3")["statusCode"] == 201
+    assert _create_exercise("api_ui_dup_s3")["statusCode"] == 409
+
+
+def test_list_exercises_includes_s3_authored(aws, evaluator_dirs):
+    _create_exercise("api_ui_list", description="# Task 43 – From The UI\n\nSteps.\n")
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="exercises/api_ui_list/resources/Data.csv",
+        Body=b"a,b\n1,2\n",
+    )
+    # Prep-generated artifacts in the same prefix must not create phantom rows.
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="exercises/api_ui_ghost/solution.json",
+        Body=b"{}",
+    )
+    resp = _call(api_event("GET", "/v1/exercises"))
+    exercises = {e["slug"]: e for e in _body(resp)["exercises"]}
+    entry = exercises["api_ui_list"]
+    assert entry["title"] == "Task 43 – From The UI"
+    assert "Steps." in entry["description"]
+    assert entry["resources"] == [{"filename": "Data.csv", "size_bytes": 8}]
+    assert "missing_from_image" not in entry
+    assert "api_ui_ghost" not in exercises
+
+
+def test_download_s3_authored_resource(aws, evaluator_dirs):
+    _create_exercise("api_ui_dl")
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="exercises/api_ui_dl/resources/Input.zip",
+        Body=b"zip-bytes",
+    )
+    resp = _call(api_event("GET", "/v1/exercises/api_ui_dl/resources/Input.zip"))
+    assert resp["statusCode"] == 200
+    assert "exercises/api_ui_dl/resources/Input.zip" in _body(resp)["url"]
+
+    resp = _call(api_event("GET", "/v1/exercises/api_ui_dl/resources/nope.csv"))
+    assert resp["statusCode"] == 404
+
+
+def test_list_exercises_merges_s3_authored_into_bare_image_folder(aws, evaluator_dirs):
+    """UI-authored exercise whose task.json was later committed to git: the
+    image folder holds only task.json, description/resources stay in S3."""
+    _create_exercise("api_ui_hybrid", description="# Task 44 – Hybrid\n\nDetails.\n")
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="exercises/api_ui_hybrid/resources/Input.zip",
+        Body=b"12345",
+    )
+    folder = evaluator_dirs["exercises"] / "api_ui_hybrid"
+    folder.mkdir(exist_ok=True)
+    (folder / "task.json").write_text("{}", encoding="utf-8")
+
+    resp = _call(api_event("GET", "/v1/exercises"))
+    exercises = {e["slug"]: e for e in _body(resp)["exercises"]}
+    entry = exercises["api_ui_hybrid"]
+    assert entry["title"] == "Task 44 – Hybrid"
+    assert "Details." in entry["description"]
+    assert entry["resources"] == [{"filename": "Input.zip", "size_bytes": 5}]
+
+    dl = _call(api_event("GET", "/v1/exercises/api_ui_hybrid/resources/Input.zip"))
+    assert dl["statusCode"] == 200
+    assert "exercises/api_ui_hybrid/resources/Input.zip" in _body(dl)["url"]
+
+
+def test_prep_and_grade_accept_s3_authored_slug(aws, evaluator_dirs):
+    _create_exercise("api_ui_prep")
+    resp = _call(
+        api_event("POST", "/v1/preps", groups=("admin",), body={"slug": "api_ui_prep"})
+    )
+    assert resp["statusCode"] == 202
+    resp = _call(
+        api_event(
+            "POST", "/v1/gradings", body={"student": "S3 Authored", "task": "api_ui_prep"}
+        )
+    )
+    assert resp["statusCode"] == 202
+
+
+# ---------- structured task config ----------
+
+
+def test_create_exercise_stores_task_config(aws, evaluator_dirs):
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/exercises",
+            groups=("admin",),
+            body={
+                "slug": "api_cfg_create",
+                "description_md": "# Task 50 – Configured\n\nGo.\n",
+                "task_config": {
+                    "task_type": "triggered_task",
+                    "triggered_task_name": "Task 50 – Configured Task",
+                    "requests": [
+                        {"name": "addition", "params": {"mathOperation": "3+5"}},
+                        {"name": "subtraction", "params": {"mathOperation": "10-4"}},
+                    ],
+                },
+            },
+        )
+    )
+    assert resp["statusCode"] == 201
+    item = dynamo_table().get_item(Key={"pk": "EXERCISE#api_cfg_create", "sk": "META"})[
+        "Item"
+    ]
+    assert item["task_config"]["task_type"] == "triggered_task"
+    assert [r["name"] for r in item["task_config"]["requests"]] == [
+        "addition",
+        "subtraction",
+    ]
+
+
+def test_create_exercise_task_config_validation_400(aws, evaluator_dirs):
+    def create(cfg):
+        return _call(
+            api_event(
+                "POST",
+                "/v1/exercises",
+                groups=("admin",),
+                body={
+                    "slug": "api_cfg_bad",
+                    "description_md": "# Task 51 – Bad Config",
+                    "task_config": cfg,
+                },
+            )
+        )["statusCode"]
+
+    assert create({"task_type": "mystery"}) == 400
+    assert create({"task_type": "file_writer"}) == 400  # no output_filenames
+    assert create({"task_type": "file_writer", "output_filenames": ["../x.csv"]}) == 400
+    assert (
+        create(
+            {"task_type": "file_writer", "output_filenames": ["a.csv"], "output_match_mode": "fuzzy"}
+        )
+        == 400
+    )
+    assert create({"task_type": "triggered_task", "triggered_task_name": "T"}) == 400
+    assert (
+        create(
+            {
+                "task_type": "triggered_task",
+                "triggered_task_name": "T",
+                "requests": [{"name": "Bad Name!", "params": {}}],
+            }
+        )
+        == 400
+    )
+
+
+# ---------- GET /v1/exercises/{slug} + PUT (edit / archive) ----------
+
+
+def test_get_single_exercise_returns_authored_content(aws, evaluator_dirs):
+    _create_exercise(
+        "api_get_one",
+        description="# Task 60 – Detail\n\nBody.\n",
+        notes="Hints here.",
+    )
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="exercises/api_get_one/resources/Data.csv",
+        Body=b"a\n1\n",
+    )
+    resp = _call(api_event("GET", "/v1/exercises/api_get_one"))
+    assert resp["statusCode"] == 200
+    ex = _body(resp)["exercise"]
+    assert ex["title"] == "Task 60 – Detail"
+    assert "Body." in ex["description_md"]
+    assert ex["notes_md"] == "Hints here."
+    assert ex["resources"] == [{"filename": "Data.csv", "size_bytes": 4}]
+
+    assert _call(api_event("GET", "/v1/exercises/no_such_slug"))["statusCode"] == 404
+
+
+def test_mentor_cannot_edit_exercise_403(aws, evaluator_dirs):
+    resp = _call(
+        api_event("PUT", "/v1/exercises/anything", groups=("mentor",), body={})
+    )
+    assert resp["statusCode"] == 403
+
+
+def test_put_exercise_updates_content_config_and_resources(aws, evaluator_dirs):
+    _create_exercise("api_put_edit", description="# Task 61 – Before\n\nOld.\n")
+    bucket = os.environ["DATA_BUCKET"]
+    aws["s3"].put_object(
+        Bucket=bucket, Key="exercises/api_put_edit/resources/Old.zip", Body=b"old"
+    )
+
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/exercises/api_put_edit",
+            groups=("admin",),
+            body={
+                "description_md": "# Task 61 – After\n\nNew.\n",
+                "notes_md": "New notes.",
+                "task_config": {
+                    "task_type": "file_writer",
+                    "output_filenames": ["R1.csv", "R2.csv"],
+                },
+                "resources": [{"filename": "New.zip"}],
+                "remove_resources": ["Old.zip"],
+            },
+        )
+    )
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    assert data["exercise"]["title"] == "Task 61 – After"
+    assert data["exercise"]["task_config"]["output_filenames"] == ["R1.csv", "R2.csv"]
+    assert "exercises/api_put_edit/resources/New.zip" in data["uploads"][0]["url"]
+
+    desc = aws["s3"].get_object(Bucket=bucket, Key="exercises/api_put_edit/description.md")
+    assert b"New." in desc["Body"].read()
+    notes = aws["s3"].get_object(Bucket=bucket, Key="exercises/api_put_edit/notes.md")
+    assert notes["Body"].read() == b"New notes."
+    listed = aws["s3"].list_objects_v2(
+        Bucket=bucket, Prefix="exercises/api_put_edit/resources/"
+    )
+    assert listed.get("KeyCount", 0) == 0  # Old.zip removed, New.zip not uploaded yet
+
+    # Clearing the config (back to auto) removes the attribute.
+    resp = _call(
+        api_event(
+            "PUT", "/v1/exercises/api_put_edit", groups=("admin",),
+            body={"task_config": None},
+        )
+    )
+    assert resp["statusCode"] == 200
+    item = dynamo_table().get_item(Key={"pk": "EXERCISE#api_put_edit", "sk": "META"})[
+        "Item"
+    ]
+    assert "task_config" not in item
+    assert item["title"] == "Task 61 – After"
+
+    assert (
+        _call(api_event("PUT", "/v1/exercises/no_such_slug", groups=("admin",), body={}))[
+            "statusCode"
+        ]
+        == 404
+    )
+
+
+def test_archived_exercise_blocks_prep_and_single_task_grade(aws, evaluator_dirs):
+    _create_exercise("api_arch_guard")
+    resp = _call(
+        api_event(
+            "PUT", "/v1/exercises/api_arch_guard", groups=("admin",),
+            body={"archived": True},
+        )
+    )
+    assert resp["statusCode"] == 200
+
+    resp = _call(
+        api_event(
+            "POST", "/v1/preps", groups=("admin",), body={"slug": "api_arch_guard"}
+        )
+    )
+    assert resp["statusCode"] == 400
+    assert "archived" in _body(resp)["message"]
+    resp = _call(
+        api_event(
+            "POST", "/v1/gradings", body={"student": "Arch", "task": "api_arch_guard"}
+        )
+    )
+    assert resp["statusCode"] == 400
+
+    # The listing still shows it, flagged.
+    exercises = {
+        e["slug"]: e
+        for e in _body(_call(api_event("GET", "/v1/exercises")))["exercises"]
+    }
+    assert exercises["api_arch_guard"]["archived"] is True
+
+    # Unarchive restores prep.
+    _call(
+        api_event(
+            "PUT", "/v1/exercises/api_arch_guard", groups=("admin",),
+            body={"archived": False},
+        )
+    )
+    resp = _call(
+        api_event(
+            "POST", "/v1/preps", groups=("admin",), body={"slug": "api_arch_guard"}
+        )
+    )
+    assert resp["statusCode"] == 202
+
+
+def test_list_exercises_s3_description_wins_over_image_copy(aws, evaluator_dirs):
+    """After a UI edit the S3 copy is canonical — a stale image copy of the
+    same folder must not shadow it."""
+    folder = evaluator_dirs["exercises"] / "api_s3_wins"
+    folder.mkdir(exist_ok=True)
+    (folder / "description.md").write_text("# Task 62 – Stale Image\n", encoding="utf-8")
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="exercises/api_s3_wins/description.md",
+        Body="# Task 62 – Edited In UI\n\nFresh.\n".encode("utf-8"),
+    )
+    resp = _call(api_event("GET", "/v1/exercises"))
+    exercises = {e["slug"]: e for e in _body(resp)["exercises"]}
+    assert exercises["api_s3_wins"]["title"] == "Task 62 – Edited In UI"
+    assert "Fresh." in exercises["api_s3_wins"]["description"]

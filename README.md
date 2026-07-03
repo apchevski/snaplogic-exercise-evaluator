@@ -55,11 +55,12 @@ Browser (VPN/office IPs only)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
         ├─ GET  students / reports / exercises / job status   (any logged-in user)
         ├─ POST /v1/gradings {student, task?}                 (mentor or admin)
-        └─ POST /v1/preps {slug?}                             (admin only)
+        ├─ POST /v1/preps {slug?}                             (admin only)
+        └─ POST/PUT /v1/exercises — create / edit / archive   (admin only)
                   │ JOB item (DynamoDB) + SQS message
                   ▼
 SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-retry)
-          ├─ authored content from the image · generated artifacts from S3
+          ├─ authored + generated exercise content from S3 (image = seed only)
           ├─ SnapLogic REST (GET-only, creds from Secrets Manager)
           ├─ grade: hard gates → Claude (Sonnet 4.6, structured outputs,
           │         prompt-cached rules) → report.md/.json → S3 + DynamoDB
@@ -98,7 +99,10 @@ admins prep + grade + view; mentors grade + view. Users are invite-only
    (auto-deploys via path filters) or run a workflow manually from the Actions
    tab / `gh workflow run` against any branch. CI takes over (image → Lambdas,
    SPA → S3 + CloudFront).
-6. Click **Prep** (admin) once so S3 has the generated artifacts, then grade.
+6. Click **Prep All Exercises** (admin) once. Besides generating artifacts,
+   this seeds every image-shipped exercise's authored files
+   (description/notes/resources) into S3 — the canonical exercise store —
+   after which the UI owns exercise content end to end.
 
 **One-time GitHub setup for gated infra applies:** `deploy-infra` runs
 `terraform plan` on every PR/push and uploads the plan, but the `apply` job is
@@ -462,7 +466,57 @@ Exit codes:
 - `2` — bad CLI args / missing required env var / unknown task slug
 - `4` — deliverable not submitted (`output_present` 404 OR `triggered_task_exists` missing) — orchestrator treats as MISSING
 
-## Adding a new exercise
+## Managing exercises
+
+**S3 is the source of truth for exercise content.** Exercises are created,
+edited and archived from the web UI; the `exercises/` folders in this repo
+are a *seed* — anything shipped there graduates into S3 on its next prep
+(additively; an S3 copy is never overwritten by the image), and from then on
+the UI owns it. Durability comes from the AWS side, not from git: bucket
+versioning + DynamoDB point-in-time recovery + `prevent_destroy` guards, plus
+a nightly one-way snapshot into `exercises-backup/` in this repo
+(`backup-exercises.yml`; restore = `aws s3 sync exercises-backup/
+s3://<data-bucket>/exercises/`). Never author into `exercises-backup/` — it's
+an export, not an input.
+
+### Creating and editing (web UI, admin only)
+
+Click **Add New Exercise** (next to *Prep All Exercises*), or **Edit** on any
+row. The dialog takes:
+
+- **description.md** (required) — the **first H1 heading** is the canonical
+  pipeline name; the folder name is auto-suggested from it on create.
+- **notes.md** (optional) — instructor hints fed to the AI judge.
+- **Task type** — this replaces the hand-written `task.json`:
+  - *File writer, single output* (the default "auto"): nothing to fill in;
+    prep detects the pipeline's lone writer snap and generates everything.
+  - *File writer, multiple/custom outputs*: list the output filenames and
+    pick the comparison mode (`exact` vs `columns_only` for
+    non-deterministic outputs).
+  - *Triggered task*: the Triggered Task name (defaults to
+    `<pipeline name> Task`, the strict convention) and one row per request
+    scenario — a snake_case name plus `param=value; param2=value2` pairs.
+  The config is stored as structured data; the worker synthesizes
+  `task.json` from it (plus the env-derived pipeline path) at prep time.
+- **Input files** (optional) — uploaded browser → S3 via presigned URLs;
+  students download them from the Exercises page. In edit mode, click an
+  existing file to mark it for deletion.
+
+Markdown lands in S3 under `exercises/<slug>/`; the worker overlays that
+prefix onto its working tree before every job, so a UI-authored exercise is
+indistinguishable from a seeded one. Finish by clicking **Prep** on the row.
+
+**Archive** (admin, per row) soft-deletes an exercise: it stops being
+prepped, graded and counted toward student totals, and shows greyed-out with
+an `archived` badge. Nothing is removed from S3 — **Unarchive** restores it
+fully. There is deliberately no hard delete.
+
+### Fallback: authoring in git
+
+If the UI is unavailable you can still drop a folder in the repo — the
+pre-pivot flow. On its next prep the folder's authored files are seeded into
+S3 and the UI takes over; **content edits in git do NOT propagate after
+that** (the S3 copy wins), so treat git authoring as create-only.
 
 1. Create `exercises/<slug>/description.md` — the student-facing prompt. The
    **first H1 heading** is the canonical pipeline name (e.g.
