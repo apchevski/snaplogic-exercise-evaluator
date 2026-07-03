@@ -16,9 +16,13 @@ class StubStore:
         self.uploaded_reports = []
         self.uploaded_artifacts = []
         self.materialized = False
+        self.materialized_reports = []
 
     def materialize_exercises(self):
         self.materialized = True
+
+    def materialize_report(self, student, report_keys):
+        self.materialized_reports.append((student, report_keys))
 
     def upload_report(self, student, student_slug, version):
         self.uploaded_reports.append((student, student_slug, version))
@@ -120,6 +124,75 @@ def test_grade_job_success(aws, monkeypatch):
     assert "Item" not in dynamo_table().get_item(
         Key={"pk": lock_key("grade", "jane-doe"), "sk": "META"}
     )
+    # full runs never pull a previous report
+    assert store.materialized_reports == []
+
+
+def test_single_task_grade_pulls_previous_report(aws, monkeypatch):
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+    import evaluator.runner as runner_mod
+
+    seen_kwargs = {}
+
+    def fake_run(student, **kw):
+        seen_kwargs.update(kw)
+        return _fake_run_result(student)
+
+    monkeypatch.setattr(runner_mod, "run_grade", fake_run)
+
+    # A previous full grading left report pointers on the STUDENT card.
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#jane-doe",
+            "sk": "META",
+            "entity": "student",
+            "slug": "jane-doe",
+            "display_name": "Jane Doe",
+            "report_md_key": "students/jane-doe/v1/report.md",
+            "report_json_key": "students/jane-doe/v1/report.json",
+        }
+    )
+
+    job = _seed_job(
+        "job-grade-single", "grade", "jane-doe",
+        student="Jane Doe", student_slug="jane-doe", task="task_02_currency",
+    )
+    worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
+
+    assert _get_job("job-grade-single")["status"] == "succeeded"
+    assert seen_kwargs["task_slug"] == "task_02_currency"
+    assert store.materialized_reports == [
+        (
+            "Jane Doe",
+            {
+                "report_md_key": "students/jane-doe/v1/report.md",
+                "report_json_key": "students/jane-doe/v1/report.json",
+            },
+        )
+    ]
+
+
+def test_single_task_grade_without_previous_meta_still_runs(aws, monkeypatch):
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+    import evaluator.runner as runner_mod
+
+    monkeypatch.setattr(
+        runner_mod, "run_grade", lambda student, **kw: _fake_run_result(student)
+    )
+
+    job = _seed_job(
+        "job-grade-first-single", "grade", "new-kid",
+        student="New Kid", student_slug="new-kid", task="task_01_orders",
+    )
+    worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
+
+    assert _get_job("job-grade-first-single")["status"] == "succeeded"
+    # No STUDENT card yet — materialize gets empty keys and downloads nothing.
+    assert store.materialized_reports == [
+        ("New Kid", {"report_md_key": None, "report_json_key": None})
+    ]
 
 
 def test_grade_job_failure_marks_failed_and_releases_lock(aws, monkeypatch):

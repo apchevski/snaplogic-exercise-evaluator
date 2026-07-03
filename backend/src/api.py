@@ -332,11 +332,19 @@ def post_grading() -> Response:
     student = str(body.get("student") or "").strip()
     if not student:
         raise BadRequestError("Body must include a non-empty 'student'.")
+    task = (str(body.get("task")).strip() or None) if body.get("task") else None
+    if task:
+        from evaluator.tasks import list_exercise_folders
+
+        if task not in list_exercise_folders():
+            raise BadRequestError(
+                f"Unknown exercise folder {task!r}. Omit 'task' to grade everything."
+            )
     payload = {
         "student": student,
         "student_slug": slugify(student),
         "space": (str(body.get("space")).strip() or None) if body.get("space") else None,
-        "task": (str(body.get("task")).strip() or None) if body.get("task") else None,
+        "task": task,
     }
     job = _create_job("grade", slugify(student), payload, _email(claims))
     return Response(
