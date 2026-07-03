@@ -77,9 +77,23 @@ export default function StudentDetail() {
   const tier = tierForRatio(earned, possible);
   const pct = possible > 0 ? Math.round((earned / possible) * 100) : null;
 
+  // Unprepped exercises are surfaced as a warning instead of task cards —
+  // they were skipped by grading, so there is no verdict to show.
+  const unprepped = report?.tasks.filter((t) => t.status === "needs_prep") ?? [];
+  const needsPrepCount = unprepped.length || (counts?.needs_prep ?? 0);
+  const gradedTasks = report?.tasks.filter((t) => t.status !== "needs_prep") ?? [];
+
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
+      {needsPrepCount > 0 && (
+        <div className="warn-banner">
+          ⚠ {needsPrepCount} exercise{needsPrepCount === 1 ? " was" : "s were"} skipped
+          because {needsPrepCount === 1 ? "its" : "their"} grading artifacts are not
+          prepped{unprepped.length > 0 && <>: {unprepped.map((t) => t.slug).join(", ")}</>}.
+          Prep {needsPrepCount === 1 ? "it" : "them"} on the Exercises page, then regrade.
+        </div>
+      )}
       <Link className="back-link" to="/">
         ← Back to dashboard
       </Link>
@@ -108,7 +122,6 @@ export default function StudentDetail() {
               <span className="badge pass">{counts.pass} pass</span>
               <span className="badge fail">{counts.fail} fail</span>
               <span className="badge missing">{counts.missing} missing</span>
-              <span className="badge needs-prep">{counts.needs_prep} needs prep</span>
             </div>
           )}
           {(report?.overall_summary ?? student?.overall_summary) && (
@@ -125,7 +138,7 @@ export default function StudentDetail() {
         <div className="panel-body">
           {report ? (
             <div className="tasks">
-              {report.tasks.map((t) => (
+              {gradedTasks.map((t) => (
                 <TaskCard
                   key={t.slug}
                   task={t}

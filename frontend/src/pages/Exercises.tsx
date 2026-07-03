@@ -16,14 +16,12 @@ import type { Exercise, Job } from "../types";
 
 const COMPARE: Record<string, (a: Exercise, b: Exercise) => number> = {
   exercise: (a, b) => (a.title ?? a.slug).localeCompare(b.title ?? b.slug),
-  slug: (a, b) => a.slug.localeCompare(b.slug),
   type: (a, b) => (a.task_type ?? "").localeCompare(b.task_type ?? ""),
   status: (a, b) => a.prep_status.localeCompare(b.prep_status),
   prepped: (a, b) => (a.last_prepped_at ?? "").localeCompare(b.last_prepped_at ?? ""),
 };
 const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   exercise: "asc",
-  slug: "asc",
   type: "asc",
   status: "asc",
   prepped: "desc",
@@ -171,7 +169,7 @@ export default function Exercises() {
 
   const onSort = (key: string) => setSort((s) => nextSort(s, key, DEFAULT_DIR[key] ?? "asc"));
   const sc = (key: string) => (sort.key === key ? "sorted" : "");
-  const colCount = isAdmin ? 7 : 6;
+  const colCount = isAdmin ? 6 : 5;
 
   return (
     <main className="page">
@@ -184,7 +182,7 @@ export default function Exercises() {
             <SearchBox
               value={search}
               onChange={setSearch}
-              placeholder="Search by exercise title or slug"
+              placeholder="Search by exercise title"
             />
             <span className="toolbar-spacer" />
             {isAdmin && (
@@ -230,7 +228,6 @@ export default function Exercises() {
             <thead>
               <tr>
                 <SortableTh label="Exercise" sortKey="exercise" sort={sort} onSort={onSort} />
-                <SortableTh label="Slug" sortKey="slug" sort={sort} onSort={onSort} />
                 <SortableTh label="Task Type" sortKey="type" sort={sort} onSort={onSort} />
                 <th className="plain">Files</th>
                 <SortableTh label="Prep Status" sortKey="status" sort={sort} onSort={onSort} />
@@ -263,7 +260,6 @@ export default function Exercises() {
                           (ex.title ?? ex.slug)
                         )}
                       </td>
-                      <td className={`${sc("slug")} cell-mono`}>{ex.slug}</td>
                       <td className={`${sc("type")} cell-muted`}>{ex.task_type ?? "—"}</td>
                       <td>
                         {ex.resources && ex.resources.length > 0 ? (
