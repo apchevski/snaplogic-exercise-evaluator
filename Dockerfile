@@ -16,23 +16,19 @@
 # notes, task.json). Generated artifacts (solution.json, expected/, grades/)
 # are gitignored and fetched at runtime from S3 (cloud) or bind mounts (local).
 #
-# Lambda's filesystem is read-only after startup; EVALUATOR_*_DIR env vars
-# redirect writes to /tmp. See docker-compose.yml for local path overrides.
+# The image sets NO EVALUATOR_* vars: evaluator.config's package-relative
+# defaults resolve to the baked-in copies (correct for read-only consumers
+# like the api Lambda, which only lists/reads authored exercises). Runtimes
+# that WRITE declare their own /tmp (Lambda's only writable dir) redirects:
+# infra/modules/sqs-worker for the cloud worker, docker-compose.yml for the
+# local worker/cli services.
 
 FROM public.ecr.aws/lambda/python:3.13
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONIOENCODING=utf-8 \
-    # Lambda's read-only filesystem — evaluator.config and evaluator.store \
-    # honor these env overrides and write to /tmp instead. \
-    EVALUATOR_EXERCISES_DIR=/tmp/evaluator/exercises \
-    EVALUATOR_TMP_DIR=/tmp/evaluator/scratch \
-    EVALUATOR_GRADES_DIR=/tmp/evaluator/grades \
-    # Cloud-only: disable UI rebuild (the cloud worker doesn't render dashboards). \
-    # docker-compose.yml overrides this to "" for local cli service. \
-    EVALUATOR_DISABLE_UI_REBUILD=1
+    PYTHONIOENCODING=utf-8
 
 # Install dependencies first; this layer caches until requirements change.
 COPY requirements.txt ${LAMBDA_TASK_ROOT}/requirements.txt
