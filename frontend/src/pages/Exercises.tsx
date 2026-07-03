@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { api, pollJob } from "../api";
 import { useIsAdmin, useToken } from "../auth";
@@ -29,6 +29,41 @@ const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   prepped: "desc",
 };
 
+/** "4017654" → "3.8 MB" — chip labels stay short. */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Lightweight description.md renderer: the leading H1 is skipped (it
+ * duplicates the exercise title), `##`+ headings become sub-headings, and
+ * everything else keeps its line breaks (numbered steps, JSON snippets). */
+function DescriptionBody({ text }: { text: string }) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+  while (i < lines.length && lines[i].trim() === "") i++;
+  if (lines[i]?.startsWith("# ")) i++;
+  const blocks: ReactNode[] = [];
+  let buf: string[] = [];
+  const flush = () => {
+    const chunk = buf.join("\n").trim();
+    if (chunk) blocks.push(<p key={blocks.length}>{chunk}</p>);
+    buf = [];
+  };
+  for (; i < lines.length; i++) {
+    const heading = /^#{2,}\s+(.*)$/.exec(lines[i].trim());
+    if (heading) {
+      flush();
+      blocks.push(<h4 key={blocks.length}>{heading[1]}</h4>);
+    } else {
+      buf.push(lines[i]);
+    }
+  }
+  flush();
+  return <div className="task-description">{blocks}</div>;
+}
+
 export default function Exercises() {
   const token = useToken();
   const isAdmin = useIsAdmin();
@@ -40,6 +75,15 @@ export default function Exercises() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (slug: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
 
   const refresh = useCallback(async () => {
     try {
@@ -76,6 +120,36 @@ export default function Exercises() {
     [token, refresh],
   );
 
+  const [downloading, setDownloading] = useState<Set<string>>(new Set());
+
+  const downloadResource = useCallback(
+    async (slug: string, filename: string) => {
+      const key = `${slug}/${filename}`;
+      setDownloading((prev) => new Set(prev).add(key));
+      setError(null);
+      try {
+        const { url } = await api.getExerciseResourceUrl(token, slug, filename);
+        // Presigned S3 URL with Content-Disposition: attachment — navigating
+        // to it triggers the download without leaving the page.
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setDownloading((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
+    },
+    [token],
+  );
+
   const anyBusy = Object.values(jobs).some(
     (j) => j.status === "queued" || j.status === "running",
   );
@@ -97,14 +171,14 @@ export default function Exercises() {
 
   const onSort = (key: string) => setSort((s) => nextSort(s, key, DEFAULT_DIR[key] ?? "asc"));
   const sc = (key: string) => (sort.key === key ? "sorted" : "");
-  const colCount = isAdmin ? 6 : 5;
+  const colCount = isAdmin ? 7 : 6;
 
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
       <Panel
         title="Exercise Prep Status of All Projects"
-        hint="Every authored exercise and whether its grading artifacts are prepped and current."
+        hint="Every authored exercise and whether its grading artifacts are prepped and current. Click a task name to view its description; click a file to download its input data."
         toolbar={
           <>
             <SearchBox
@@ -158,44 +232,95 @@ export default function Exercises() {
                 <SortableTh label="Exercise" sortKey="exercise" sort={sort} onSort={onSort} />
                 <SortableTh label="Slug" sortKey="slug" sort={sort} onSort={onSort} />
                 <SortableTh label="Task Type" sortKey="type" sort={sort} onSort={onSort} />
+                <th className="plain">Files</th>
                 <SortableTh label="Prep Status" sortKey="status" sort={sort} onSort={onSort} />
                 <SortableTh label="Last Prepped" sortKey="prepped" sort={sort} onSort={onSort} />
                 {isAdmin && <th className="plain">Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {pageItems.map((ex) => (
-                <tr key={ex.slug}>
-                  <td className={sc("exercise")}>{ex.title ?? ex.slug}</td>
-                  <td className={`${sc("slug")} cell-mono`}>{ex.slug}</td>
-                  <td className={`${sc("type")} cell-muted`}>{ex.task_type ?? "—"}</td>
-                  <td className={sc("status")}>
-                    <span className={`prep-status ${ex.prep_status}`}>
-                      {ex.prep_status.replace(/_/g, " ")}
-                    </span>{" "}
-                    {ex.missing_from_image && (
-                      <span className="prep-status config_error">missing from image</span>
+              {pageItems.map((ex) => {
+                const isOpen = expanded.has(ex.slug);
+                return (
+                  <Fragment key={ex.slug}>
+                    <tr>
+                      <td className={sc("exercise")}>
+                        {ex.description ? (
+                          <button
+                            className="title-toggle"
+                            onClick={() => toggleExpanded(ex.slug)}
+                            aria-expanded={isOpen}
+                            aria-label={
+                              isOpen ? "Hide task description" : "Show task description"
+                            }
+                          >
+                            <span className="caret" aria-hidden="true">
+                              {isOpen ? "▾" : "▸"}
+                            </span>
+                            {ex.title ?? ex.slug}
+                          </button>
+                        ) : (
+                          (ex.title ?? ex.slug)
+                        )}
+                      </td>
+                      <td className={`${sc("slug")} cell-mono`}>{ex.slug}</td>
+                      <td className={`${sc("type")} cell-muted`}>{ex.task_type ?? "—"}</td>
+                      <td>
+                        {ex.resources && ex.resources.length > 0 ? (
+                          <span className="resource-list">
+                            {ex.resources.map((r) => (
+                              <button
+                                key={r.filename}
+                                className="resource-chip"
+                                onClick={() => void downloadResource(ex.slug, r.filename)}
+                                disabled={downloading.has(`${ex.slug}/${r.filename}`)}
+                                title={`Download ${r.filename} (${formatSize(r.size_bytes)})`}
+                              >
+                                <span aria-hidden="true">⬇</span> {r.filename}
+                                <span className="resource-size">{formatSize(r.size_bytes)}</span>
+                              </button>
+                            ))}
+                          </span>
+                        ) : (
+                          <span className="cell-muted">—</span>
+                        )}
+                      </td>
+                      <td className={sc("status")}>
+                        <span className={`prep-status ${ex.prep_status}`}>
+                          {ex.prep_status.replace(/_/g, " ")}
+                        </span>{" "}
+                        {ex.missing_from_image && (
+                          <span className="prep-status config_error">missing from image</span>
+                        )}
+                      </td>
+                      <td className={`${sc("prepped")} cell-muted`}>
+                        {ex.last_prepped_at ?? "never"}
+                      </td>
+                      {isAdmin && (
+                        <td>
+                          <span className="actions-cell">
+                            <button
+                              className="btn small"
+                              onClick={() => void startPrep(ex.slug)}
+                              disabled={anyBusy}
+                            >
+                              Prep
+                            </button>
+                            {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="prep" />}
+                          </span>
+                        </td>
+                      )}
+                    </tr>
+                    {isOpen && ex.description && (
+                      <tr className="expand-row">
+                        <td colSpan={colCount}>
+                          <DescriptionBody text={ex.description} />
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td className={`${sc("prepped")} cell-muted`}>
-                    {ex.last_prepped_at ?? "never"}
-                  </td>
-                  {isAdmin && (
-                    <td>
-                      <span className="actions-cell">
-                        <button
-                          className="btn small"
-                          onClick={() => void startPrep(ex.slug)}
-                          disabled={anyBusy}
-                        >
-                          Prep
-                        </button>
-                        {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="prep" />}
-                      </span>
-                    </td>
-                  )}
-                </tr>
-              ))}
+                  </Fragment>
+                );
+              })}
               {!loading && visible.length === 0 && (
                 <tr>
                   <td colSpan={colCount} className="empty-cell">

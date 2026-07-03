@@ -158,10 +158,36 @@ def test_get_student_with_latest_report(aws):
     assert data["report"]["points_earned"] == 52
 
 
+def test_get_student_reads_legacy_report_json_attribute(aws):
+    # Students graded before the store labels were fixed carry the report S3
+    # key under "report_json" instead of "report_json_key".
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="students/old-grad/v1/report.json",
+        Body=json.dumps({"points_earned": 40}).encode(),
+    )
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#old-grad",
+            "sk": "META",
+            "entity": "student",
+            "slug": "old-grad",
+            "display_name": "Old Grad",
+            "report_json": "students/old-grad/v1/report.json",
+        }
+    )
+    resp = _call(api_event("GET", "/v1/students/old-grad"))
+    assert resp["statusCode"] == 200
+    assert _body(resp)["report"]["points_earned"] == 40
+
+
 def test_list_exercises_merges_image_and_dynamo(aws, evaluator_dirs):
     folder = evaluator_dirs["exercises"] / "api_ex_merge"
     folder.mkdir(exist_ok=True)
-    (folder / "description.md").write_text("# Task Merge", encoding="utf-8")
+    (folder / "description.md").write_text(
+        "# Task Merge\n\n### Objective:\n\nBuild the merge pipeline.\n",
+        encoding="utf-8",
+    )
     dynamo_table().put_item(
         Item={
             "pk": "EXERCISE#api_ex_merge",
@@ -176,3 +202,74 @@ def test_list_exercises_merges_image_and_dynamo(aws, evaluator_dirs):
     exercises = {e["slug"]: e for e in _body(resp)["exercises"]}
     assert exercises["api_ex_merge"]["prep_status"] == "ready"
     assert exercises["api_ex_merge"]["title"] == "Task Merge"
+    assert "Build the merge pipeline." in exercises["api_ex_merge"]["description"]
+
+
+# ---------- exercise resources (student input files) ----------
+
+
+def _make_exercise_with_resource(
+    evaluator_dirs, slug: str, filename: str = "Input.zip", content: bytes = b"zip-bytes"
+):
+    folder = evaluator_dirs["exercises"] / slug
+    (folder / "resources").mkdir(parents=True, exist_ok=True)
+    (folder / "description.md").write_text(f"# {slug}", encoding="utf-8")
+    (folder / "resources" / filename).write_bytes(content)
+    return folder
+
+
+def test_list_exercises_includes_resources(aws, evaluator_dirs):
+    _make_exercise_with_resource(evaluator_dirs, "api_res_list", content=b"123456789")
+    resp = _call(api_event("GET", "/v1/exercises"))
+    exercises = {e["slug"]: e for e in _body(resp)["exercises"]}
+    assert exercises["api_res_list"]["resources"] == [
+        {"filename": "Input.zip", "size_bytes": 9}
+    ]
+
+
+def test_download_resource_presigns_and_mirrors_to_s3(aws, evaluator_dirs):
+    _make_exercise_with_resource(evaluator_dirs, "api_res_dl", content=b"data-123")
+    resp = _call(api_event("GET", "/v1/exercises/api_res_dl/resources/Input.zip"))
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    assert data["filename"] == "Input.zip"
+    assert "exercise-resources/api_res_dl/Input.zip" in data["url"]
+    # The image copy got mirrored into S3 (that's what the URL points at).
+    obj = aws["s3"].get_object(
+        Bucket=os.environ["DATA_BUCKET"], Key="exercise-resources/api_res_dl/Input.zip"
+    )
+    assert obj["Body"].read() == b"data-123"
+
+
+def test_download_resource_refreshes_stale_s3_copy(aws, evaluator_dirs):
+    _make_exercise_with_resource(evaluator_dirs, "api_res_stale", content=b"new-content")
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="exercise-resources/api_res_stale/Input.zip",
+        Body=b"old-content",
+    )
+    resp = _call(api_event("GET", "/v1/exercises/api_res_stale/resources/Input.zip"))
+    assert resp["statusCode"] == 200
+    obj = aws["s3"].get_object(
+        Bucket=os.environ["DATA_BUCKET"], Key="exercise-resources/api_res_stale/Input.zip"
+    )
+    assert obj["Body"].read() == b"new-content"
+
+
+def test_download_unknown_resource_404(aws, evaluator_dirs):
+    _make_exercise_with_resource(evaluator_dirs, "api_res_404")
+    resp = _call(api_event("GET", "/v1/exercises/api_res_404/resources/nope.csv"))
+    assert resp["statusCode"] == 404
+    resp = _call(api_event("GET", "/v1/exercises/no_such_task/resources/Input.zip"))
+    assert resp["statusCode"] == 404
+
+
+def test_download_resource_rejects_path_traversal(aws, evaluator_dirs):
+    folder = _make_exercise_with_resource(evaluator_dirs, "api_res_trav")
+    (folder / "task.json").write_text("{}", encoding="utf-8")
+    from evaluator.tasks import exercise_resource_path
+
+    assert exercise_resource_path("api_res_trav", "..") is None
+    assert exercise_resource_path("api_res_trav", "../task.json") is None
+    assert exercise_resource_path("api_res_trav", "") is None
+    assert exercise_resource_path("../api_res_trav", "Input.zip") is None

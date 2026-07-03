@@ -55,6 +55,15 @@ export const api = {
   listExercises: (token: string) =>
     request<{ exercises: Exercise[] }>(token, "GET", "/v1/exercises"),
 
+  // Returns a short-lived presigned S3 URL; the browser downloads directly
+  // from S3 (files can exceed what a Lambda response can carry).
+  getExerciseResourceUrl: (token: string, slug: string, filename: string) =>
+    request<{ filename: string; url: string; expires_in: number }>(
+      token,
+      "GET",
+      `/v1/exercises/${encodeURIComponent(slug)}/resources/${encodeURIComponent(filename)}`,
+    ),
+
   startGrading: (token: string, student: string, task?: string) =>
     request<{ id: string }>(token, "POST", "/v1/gradings", {
       student,

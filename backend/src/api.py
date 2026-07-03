@@ -22,6 +22,7 @@ import ipaddress
 import json
 import os
 import uuid
+from pathlib import Path
 from typing import Any
 
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, Response
@@ -195,7 +196,9 @@ def get_student(slug: str) -> dict[str, Any]:
         raise NotFoundError(f"No graded student {slug!r}.")
     meta = public_item(item)
     report = None
-    key = meta.get("report_json_key")
+    # "report_json" is the legacy attribute name written before the store
+    # labels were fixed; keep reading it so old gradings stay viewable.
+    key = meta.get("report_json_key") or meta.get("report_json")
     if key:
         obj = s3_client().get_object(Bucket=data_bucket(), Key=key)
         report = json.loads(obj["Body"].read().decode("utf-8"))
@@ -217,7 +220,12 @@ def list_student_reports(slug: str) -> dict[str, Any]:
 def list_exercises() -> dict[str, Any]:
     _require_role(ROLE_ADMIN, ROLE_MENTOR)
     # Authored folders ship in this image; prep state lives in DynamoDB.
-    from evaluator.tasks import list_exercise_folders, read_pipeline_name_from_description
+    from evaluator.tasks import (
+        list_exercise_folders,
+        list_exercise_resources,
+        read_exercise_description,
+        read_pipeline_name_from_description,
+    )
 
     resp = dynamo_table().query(
         IndexName="gsi1", KeyConditionExpression=Key("entity").eq("exercise")
@@ -231,6 +239,8 @@ def list_exercises() -> dict[str, Any]:
         }
         entry.setdefault("title", read_pipeline_name_from_description(folder) or folder)
         entry.setdefault("max_points", 10)
+        entry["description"] = read_exercise_description(folder)
+        entry["resources"] = list_exercise_resources(folder)
         exercises.append(entry)
     # Exercises known to DynamoDB but missing from the image (e.g. folder
     # deleted in git) still show up, flagged.
@@ -238,6 +248,63 @@ def list_exercises() -> dict[str, Any]:
         entry["missing_from_image"] = True
         exercises.append(entry)
     return {"exercises": exercises}
+
+
+RESOURCE_URL_TTL_SECONDS = 300
+
+
+def _sync_resource_to_s3(path: Path, key: str) -> None:
+    """Mirror one baked-in resource file into S3 (image copy is canonical).
+
+    Skips the upload when S3 already holds byte-identical content (single
+    part uploads: ETag == content MD5), so repeat downloads cost one
+    HeadObject. Files live under ``exercise-resources/`` — deliberately
+    outside the worker-owned ``exercises/`` prefix, which S3Store
+    re-downloads wholesale on every job.
+    """
+    import hashlib
+
+    from botocore.exceptions import ClientError
+
+    body = path.read_bytes()
+    md5 = hashlib.md5(body).hexdigest()
+    s3 = s3_client()
+    try:
+        head = s3.head_object(Bucket=data_bucket(), Key=key)
+        if head.get("ETag", "").strip('"') == md5:
+            return
+    except ClientError as e:
+        if e.response["Error"]["Code"] not in ("404", "NoSuchKey", "NotFound"):
+            raise
+    s3.put_object(Bucket=data_bucket(), Key=key, Body=body)
+
+
+@app.get("/v1/exercises/<slug>/resources/<filename>")
+def get_exercise_resource(slug: str, filename: str) -> dict[str, Any]:
+    """Short-lived presigned download URL for one student input file.
+
+    Streaming ~4 MB zips through Lambda would flirt with the 6 MB response
+    ceiling once base64-encoded, so the browser downloads straight from S3
+    instead: lazily mirror the image's copy there, then presign a GET.
+    """
+    _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    from evaluator.tasks import exercise_resource_path
+
+    path = exercise_resource_path(slug, filename)
+    if path is None:
+        raise NotFoundError(f"No resource file {filename!r} for exercise {slug!r}.")
+    key = f"exercise-resources/{slug}/{path.name}"
+    _sync_resource_to_s3(path, key)
+    url = s3_client().generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": data_bucket(),
+            "Key": key,
+            "ResponseContentDisposition": f'attachment; filename="{path.name}"',
+        },
+        ExpiresIn=RESOURCE_URL_TTL_SECONDS,
+    )
+    return {"filename": path.name, "url": url, "expires_in": RESOURCE_URL_TTL_SECONDS}
 
 
 @app.get("/v1/gradings/<job_id>")

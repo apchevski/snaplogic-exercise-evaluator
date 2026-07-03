@@ -77,13 +77,20 @@ export interface Job {
   };
 }
 
+export interface ExerciseResource {
+  filename: string;
+  size_bytes: number;
+}
+
 export interface Exercise {
   slug: string;
   title?: string;
+  description?: string | null;
   task_type?: string | null;
   prep_status: string;
   reason?: string;
   last_prepped_at?: string;
   max_points?: number;
   missing_from_image?: boolean;
+  resources?: ExerciseResource[];
 }
