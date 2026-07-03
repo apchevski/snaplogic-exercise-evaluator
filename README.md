@@ -25,6 +25,11 @@ tables, tabbed sub-nav):
   deterministic hard gates against SnapLogic, sends each surviving exercise
   to Claude (Sonnet 4.6, ~$0.95 per full run), renders the report, and the
   row refreshes live with points and per-task detail.
+- **Regrade one exercise** (mentor or admin): on a student's detail page,
+  every task card has a **Regrade** button that re-runs just that exercise
+  (one Claude call instead of one per exercise — faster and cheaper than a
+  full run). The result is merged into the student's existing report; all
+  other task results, and the Overall summary, are left untouched.
 - **Prep** (admin only): click Prep on an exercise to refresh its solution
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
 - **Exercises** (mentor or admin): the exercise list shows prep status per
@@ -49,7 +54,7 @@ Browser (VPN/office IPs only)
   ├─► CloudFront ── CF Function (IP allowlist) ──► S3 (React SPA, frontend/)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
         ├─ GET  students / reports / exercises / job status   (any logged-in user)
-        ├─ POST /v1/gradings {student}                        (mentor or admin)
+        ├─ POST /v1/gradings {student, task?}                 (mentor or admin)
         └─ POST /v1/preps {slug?}                             (admin only)
                   │ JOB item (DynamoDB) + SQS message
                   ▼

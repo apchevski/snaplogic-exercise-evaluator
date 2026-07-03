@@ -94,6 +94,23 @@ def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
 
     student = job["student"]
     student_slug = job.get("student_slug") or slugify(student)
+    if job.get("task"):
+        # Single-task re-grade merges into the previous report, which on
+        # Lambda must be pulled from S3 first (fresh /tmp every job).
+        meta = (
+            dynamo_table()
+            .get_item(Key={"pk": f"STUDENT#{student_slug}", "sk": "META"})
+            .get("Item")
+            or {}
+        )
+        store.materialize_report(
+            student,
+            {
+                "report_md_key": meta.get("report_md_key"),
+                # "report_json" is the legacy attribute name (see api.py).
+                "report_json_key": meta.get("report_json_key") or meta.get("report_json"),
+            },
+        )
     result = run_grade(
         student,
         project_space=job.get("space"),

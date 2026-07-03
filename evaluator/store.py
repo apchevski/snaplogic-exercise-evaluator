@@ -41,6 +41,9 @@ class LocalStore:
     def materialize_exercises(self) -> Path:
         return EXERCISES_DIR
 
+    def materialize_report(self, student: str, report_keys: dict[str, Any]) -> None:
+        return None  # grades/<student>/ already lives in the working tree
+
     def upload_exercise_artifacts(self, slug: str) -> list[str]:
         return []
 
@@ -103,6 +106,24 @@ class S3Store:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 self._s3.download_file(self.bucket, key, str(target))
         return dest
+
+    def materialize_report(self, student: str, report_keys: dict[str, Any]) -> None:
+        """Download a previous report version into GRADES_DIR/<student>/.
+
+        Single-task re-grades merge the new result into the existing
+        report.{md,json}; the Lambda filesystem starts empty, so without
+        this download the "merge" would silently produce a report holding
+        only the regraded task and wipe every other result.
+        """
+        report_dir = GRADES_DIR / student
+        report_dir.mkdir(parents=True, exist_ok=True)
+        for label, filename in (
+            ("report_md_key", "report.md"),
+            ("report_json_key", "report.json"),
+        ):
+            key = report_keys.get(label)
+            if key:
+                self._s3.download_file(self.bucket, str(key), str(report_dir / filename))
 
     # ----- outbound: prep artifacts -----
 

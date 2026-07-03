@@ -77,6 +77,31 @@ def test_post_grading_requires_student(aws):
     assert resp["statusCode"] == 400
 
 
+def test_post_grading_with_unknown_task_400(aws, evaluator_dirs):
+    resp = _call(
+        api_event(
+            "POST", "/v1/gradings", body={"student": "Jane Doe", "task": "no_such_task"}
+        )
+    )
+    assert resp["statusCode"] == 400
+    assert "no_such_task" in _body(resp)["message"]
+
+
+def test_post_grading_with_task_passes_it_to_the_queue(aws, evaluator_dirs):
+    (evaluator_dirs["exercises"] / "api_grade_task").mkdir(exist_ok=True)
+
+    resp = _call(
+        api_event(
+            "POST", "/v1/gradings", body={"student": "Task Ed", "task": "api_grade_task"}
+        )
+    )
+    assert resp["statusCode"] == 202
+    messages = aws["sqs"].receive_message(QueueUrl=os.environ["QUEUE_URL"])["Messages"]
+    payload = json.loads(messages[0]["Body"])
+    assert payload["task"] == "api_grade_task"
+    assert payload["student"] == "Task Ed"
+
+
 def test_get_grading_status(aws):
     created = _body(_call(api_event("POST", "/v1/gradings", body={"student": "Stat Us"})))
     resp = _call(api_event("GET", f"/v1/gradings/{created['id']}"))

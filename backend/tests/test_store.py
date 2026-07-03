@@ -63,6 +63,39 @@ def test_upload_exercise_artifacts(aws, evaluator_dirs, tmp_path):
     assert {o["Key"] for o in listed["Contents"]} == set(keys)
 
 
+def test_materialize_report_downloads_previous_version(aws, evaluator_dirs, tmp_path):
+    s3 = aws["s3"]
+    s3.put_object(
+        Bucket=_bucket(), Key="students/prev-student/v1/report.md", Body=b"# old report"
+    )
+    s3.put_object(
+        Bucket=_bucket(), Key="students/prev-student/v1/report.json", Body=b'{"tasks": []}'
+    )
+
+    store = S3Store(_bucket(), image_exercises_dir=tmp_path / "nonexistent")
+    store.materialize_report(
+        "Prev Student",
+        {
+            "report_md_key": "students/prev-student/v1/report.md",
+            "report_json_key": "students/prev-student/v1/report.json",
+        },
+    )
+
+    report_dir = GRADES_DIR / "Prev Student"
+    assert (report_dir / "report.md").read_text(encoding="utf-8") == "# old report"
+    assert (report_dir / "report.json").read_text(encoding="utf-8") == '{"tasks": []}'
+
+
+def test_materialize_report_without_keys_is_a_noop(aws, evaluator_dirs, tmp_path):
+    store = S3Store(_bucket(), image_exercises_dir=tmp_path / "nonexistent")
+    store.materialize_report(
+        "No Report Student", {"report_md_key": None, "report_json_key": None}
+    )
+    report_dir = GRADES_DIR / "No Report Student"
+    assert not (report_dir / "report.md").exists()
+    assert not (report_dir / "report.json").exists()
+
+
 def test_upload_report_versions(aws, evaluator_dirs, tmp_path):
     student = "Store Report Student"
     report_dir = GRADES_DIR / student

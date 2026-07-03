@@ -1,4 +1,6 @@
 // Port of renderTask() from the static dashboard (evaluator/ui.py).
+import type { ReactNode } from "react";
+
 import type { Difference, TaskResult } from "../types";
 
 const MAX_POINTS = 10;
@@ -28,7 +30,7 @@ function DiffItem({ d }: { d: Difference }) {
   );
 }
 
-export function TaskCard({ task }: { task: TaskResult }) {
+export function TaskCard({ task, action }: { task: TaskResult; action?: ReactNode }) {
   const verdict = task.verdict || task.status || "unknown";
   const pts = typeof task.points === "number" ? task.points : null;
   const tier = pts === null ? "none" : tierForRatio(pts, MAX_POINTS);
@@ -45,6 +47,7 @@ export function TaskCard({ task }: { task: TaskResult }) {
         <span className={`points-pill tier-${tier}`}>
           {pts === null ? "—" : pts}/{MAX_POINTS}
         </span>
+        {action}
       </header>
       {task.student_pipeline_name && (
         <p className="task-pipeline">Pipeline: {task.student_pipeline_name}</p>
