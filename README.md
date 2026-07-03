@@ -29,7 +29,9 @@ tables, tabbed sub-nav):
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
 - **Exercises** (mentor or admin): the exercise list shows prep status per
   task; click a task name to expand its full description (rendered from the
-  exercise's `description.md`).
+  exercise's `description.md`). Exercises that ship input data (zips, CSVs
+  under `exercises/<slug>/resources/`) show a **Files** column — click a
+  file to download it (served via a short-lived presigned S3 URL).
 
 Exercise *authoring* stays in git (description.md, notes.md, rules); the
 `/prep` Claude Code skill still works locally as a dev fallback:
@@ -242,7 +244,7 @@ silently route to the wrong task.
 │   │   ├── task.json           # COMMITTED: intent (output_filename(s)); solution_pipeline_path auto-rewritten by /prep
 │   │   ├── description.md      # the student-facing prompt (H1 = canonical pipeline name)
 │   │   ├── notes.md            # instructor hints fed to the AI judge
-│   │   ├── Task1.zip           # student-facing input data
+│   │   ├── resources/          # student-facing input data (e.g. Task1.zip) — downloadable from the Exercises page
 │   │   ├── solution.json       # cached solution pipeline JSON (gitignored; fetched by /prep)
 │   │   ├── solution.cache.json # sidecar: signature + snode_id for cache invalidation (gitignored)
 │   │   └── expected/           # golden output file(s) (gitignored; auto-fetched by /prep)
@@ -466,7 +468,11 @@ Exit codes:
    best-practice rules in `exercises/general_evaluation_rules.md` apply
    automatically. Use `notes.md` to override a universal rule when the
    exercise legitimately requires it.
-3. Run `/prep`.
+3. If the exercise hands the student input data (a zip, CSVs, …), put those
+   files in `exercises/<slug>/resources/`. They appear automatically as
+   download buttons on the web UI's Exercises page — no code or config
+   needed. Skip the folder entirely when there are no input files.
+4. Run `/prep`.
 
    - For **single-output file_writer** exercises, `/prep` auto-creates `task.json`
      (with `"output_filename": "<output>.csv"`) and fetches `solution.json` +

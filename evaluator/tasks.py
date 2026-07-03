@@ -336,3 +336,40 @@ def read_exercise_description(folder: str) -> str | None:
     if not desc.exists():
         return None
     return desc.read_text(encoding="utf-8").strip() or None
+
+
+#: Student-facing input files (zips, CSVs, …) live in this subfolder of each
+#: exercise. Convention: .claude/conventions/exercise-resources-folder.md.
+RESOURCES_DIR_NAME = "resources"
+
+
+def list_exercise_resources(folder: str) -> list[dict[str, Any]]:
+    """Return the student-facing input files of `exercises/<folder>/resources/`.
+
+    Each entry is ``{"filename": str, "size_bytes": int}``, sorted by
+    filename. Empty list when the exercise ships no input files. The web
+    UI renders these as download buttons on the Exercises page.
+    """
+    res_dir = EXERCISES_DIR / folder / RESOURCES_DIR_NAME
+    if not res_dir.is_dir():
+        return []
+    return [
+        {"filename": p.name, "size_bytes": p.stat().st_size}
+        for p in sorted(res_dir.iterdir(), key=lambda p: p.name.lower())
+        if p.is_file()
+    ]
+
+
+def exercise_resource_path(folder: str, filename: str) -> Path | None:
+    """Resolve one resource file to its on-disk path, or None.
+
+    Returns None when the exercise folder or file doesn't exist, and for
+    any filename that isn't a plain name inside the resources dir (path
+    separators, `..`, absolute paths) — callers can treat None as 404.
+    """
+    if folder not in list_exercise_folders():
+        return None
+    if not filename or filename != Path(filename).name:
+        return None
+    path = EXERCISES_DIR / folder / RESOURCES_DIR_NAME / filename
+    return path if path.is_file() else None

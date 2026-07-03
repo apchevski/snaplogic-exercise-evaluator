@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { ApiError, pollJob } from "./api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { api, ApiError, pollJob } from "./api";
 import type { Job } from "./types";
 
 function job(status: Job["status"]): Job {
@@ -12,6 +12,27 @@ describe("ApiError", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err.status).toBe(404);
     expect(err.message).toBe("not found");
+  });
+});
+
+describe("api.getExerciseResourceUrl", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("URL-encodes the slug and filename and returns the parsed body", async () => {
+    const payload = { filename: "My File.zip", url: "https://s3.example/x", expires_in: 300 };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await api.getExerciseResourceUrl("tok", "task_01", "My File.zip");
+
+    expect(out).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/exercises/task_01/resources/My%20File.zip",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ Authorization: "Bearer tok" }),
+      }),
+    );
   });
 });
 

@@ -68,6 +68,14 @@ plan → judge → report loop the skill used to drive interactively.
   written only by prep jobs. `evaluator/store.py` materializes the merged
   tree under /tmp because the Lambda image filesystem is read-only
   (`evaluator/config.py` honors `EVALUATOR_*_DIR` env overrides).
+- **Student input files** (`exercises/<slug>/resources/` — see
+  `conventions/exercise-resources-folder.md`) are authored content, but
+  they're too big to stream through a Lambda response (base64 + the 6 MB
+  ceiling). `GET /v1/exercises/{slug}/resources/{filename}` lazily mirrors
+  the image copy to S3 under `exercise-resources/<slug>/` (a prefix the
+  worker's materialize step does NOT re-download, and the only prefix the
+  API role can PutObject to) and returns a 5-minute presigned URL the
+  browser downloads directly.
 - **Reports are immutable versions** in S3 (`students/<slug>/<ver>/`);
   DynamoDB single table holds student cards, report history, job
   lifecycle, conditional-put locks (TTL 30 min), and exercise prep state.
@@ -141,6 +149,9 @@ Each exercise lives at `exercises/<slug>/` with:
     where `requests` is a non-empty list of `{ name, params }` scenarios
     (each `name` becomes a filename in `expected/<name>.json`).
 - `description.md` (required) — student-facing prompt
+- `resources/` (optional) — the input files handed to students (zips,
+  CSVs). Listed and downloadable on the web UI's Exercises page; never
+  loose in the exercise root.
 - `notes.md` (optional) — instructor hints fed to the AI judge.
   For triggered_task exercises this is also where the canonical
   Triggered Task name and scenario list live (in prose); /prep reads

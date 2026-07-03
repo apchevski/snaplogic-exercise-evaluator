@@ -35,6 +35,15 @@ data "aws_iam_policy_document" "api" {
     actions   = ["s3:GetObject"]
     resources = ["${var.bucket_arn}/*"]
   }
+  # Lazy mirror of baked-in student input files (exercises/<slug>/resources/)
+  # so downloads are presigned S3 GETs instead of Lambda-streamed bodies.
+  # Scoped to its own prefix: the API must NOT be able to overwrite the
+  # worker-owned artifacts under exercises/ or reports under students/.
+  statement {
+    sid       = "S3WriteExerciseResources"
+    actions   = ["s3:PutObject"]
+    resources = ["${var.bucket_arn}/exercise-resources/*"]
+  }
   statement {
     sid       = "QueueSend"
     actions   = ["sqs:SendMessage"]

@@ -201,6 +201,18 @@ button.btn.small { padding: 3px 10px; font-size: 12.5px; }
 
 .actions-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
+/* downloadable exercise input files (Exercises page "Files" column) */
+.resource-list { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.resource-chip {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  padding: 2px 8px; border: 1px solid #9fb0bf; border-radius: 3px;
+  background: white; cursor: pointer; font-size: 12px; color: var(--sl-blue);
+  font-family: var(--mono); white-space: nowrap;
+}
+.resource-chip:hover:not(:disabled) { border-color: var(--sl-blue); background: #f2f8fd; }
+.resource-chip:disabled { opacity: 0.55; cursor: wait; }
+.resource-size { color: #8a97a3; font-size: 11px; }
+
 .expander {
   width: 16px; height: 16px; padding: 0;
   border: 1px solid #9fb0bf; border-radius: 2px; background: white;

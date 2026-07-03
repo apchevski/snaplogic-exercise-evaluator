@@ -29,6 +29,13 @@ const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   prepped: "desc",
 };
 
+/** "4017654" → "3.8 MB" — chip labels stay short. */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /** Lightweight description.md renderer: the leading H1 is skipped (it
  * duplicates the exercise title), `##`+ headings become sub-headings, and
  * everything else keeps its line breaks (numbered steps, JSON snippets). */
@@ -113,6 +120,36 @@ export default function Exercises() {
     [token, refresh],
   );
 
+  const [downloading, setDownloading] = useState<Set<string>>(new Set());
+
+  const downloadResource = useCallback(
+    async (slug: string, filename: string) => {
+      const key = `${slug}/${filename}`;
+      setDownloading((prev) => new Set(prev).add(key));
+      setError(null);
+      try {
+        const { url } = await api.getExerciseResourceUrl(token, slug, filename);
+        // Presigned S3 URL with Content-Disposition: attachment — navigating
+        // to it triggers the download without leaving the page.
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setDownloading((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
+    },
+    [token],
+  );
+
   const anyBusy = Object.values(jobs).some(
     (j) => j.status === "queued" || j.status === "running",
   );
@@ -134,14 +171,14 @@ export default function Exercises() {
 
   const onSort = (key: string) => setSort((s) => nextSort(s, key, DEFAULT_DIR[key] ?? "asc"));
   const sc = (key: string) => (sort.key === key ? "sorted" : "");
-  const colCount = isAdmin ? 6 : 5;
+  const colCount = isAdmin ? 7 : 6;
 
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
       <Panel
         title="Exercise Prep Status of All Projects"
-        hint="Every authored exercise and whether its grading artifacts are prepped and current. Click a task name to view its description."
+        hint="Every authored exercise and whether its grading artifacts are prepped and current. Click a task name to view its description; click a file to download its input data."
         toolbar={
           <>
             <SearchBox
@@ -195,6 +232,7 @@ export default function Exercises() {
                 <SortableTh label="Exercise" sortKey="exercise" sort={sort} onSort={onSort} />
                 <SortableTh label="Slug" sortKey="slug" sort={sort} onSort={onSort} />
                 <SortableTh label="Task Type" sortKey="type" sort={sort} onSort={onSort} />
+                <th className="plain">Files</th>
                 <SortableTh label="Prep Status" sortKey="status" sort={sort} onSort={onSort} />
                 <SortableTh label="Last Prepped" sortKey="prepped" sort={sort} onSort={onSort} />
                 {isAdmin && <th className="plain">Actions</th>}
@@ -227,6 +265,26 @@ export default function Exercises() {
                       </td>
                       <td className={`${sc("slug")} cell-mono`}>{ex.slug}</td>
                       <td className={`${sc("type")} cell-muted`}>{ex.task_type ?? "—"}</td>
+                      <td>
+                        {ex.resources && ex.resources.length > 0 ? (
+                          <span className="resource-list">
+                            {ex.resources.map((r) => (
+                              <button
+                                key={r.filename}
+                                className="resource-chip"
+                                onClick={() => void downloadResource(ex.slug, r.filename)}
+                                disabled={downloading.has(`${ex.slug}/${r.filename}`)}
+                                title={`Download ${r.filename} (${formatSize(r.size_bytes)})`}
+                              >
+                                <span aria-hidden="true">⬇</span> {r.filename}
+                                <span className="resource-size">{formatSize(r.size_bytes)}</span>
+                              </button>
+                            ))}
+                          </span>
+                        ) : (
+                          <span className="cell-muted">—</span>
+                        )}
+                      </td>
                       <td className={sc("status")}>
                         <span className={`prep-status ${ex.prep_status}`}>
                           {ex.prep_status.replace(/_/g, " ")}
