@@ -15,7 +15,11 @@ module "data" {
   source           = "../../modules/data-storage"
   name_prefix      = var.name_prefix
   data_bucket_name = local.data_bucket_name
-  tags             = local.tags
+  # Same origins as the API's CORS: presigned-PUT uploads from the SPA.
+  # References web_hosting, so on a greenfield build-out the CORS rule only
+  # lands in the Phase-5 re-apply (fine — nothing uploads before then).
+  cors_allow_origins = concat([local.cloudfront_url], var.extra_cors_origins)
+  tags               = local.tags
 }
 
 module "secrets" {

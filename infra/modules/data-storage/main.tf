@@ -19,6 +19,12 @@ resource "aws_dynamodb_table" "main" {
   range_key                   = "sk"
   deletion_protection_enabled = true
 
+  # This table + the data bucket ARE the product's data (exercises are
+  # authored in AWS, not in git) — infra is cattle, data is sacred.
+  lifecycle {
+    prevent_destroy = true
+  }
+
   attribute {
     name = "pk"
     type = "S"
@@ -60,6 +66,36 @@ resource "aws_dynamodb_table" "main" {
 resource "aws_s3_bucket" "data" {
   bucket = var.data_bucket_name
   tags   = var.tags
+
+  # Sole home of authored exercises + all grading history. A careless
+  # `terraform destroy` must not be able to take it along.
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Authored exercise content is edited in place from the web UI; versioning
+# turns an accidental overwrite/delete into a non-event. Noncurrent versions
+# are kept 90 days so the insurance stays ~free at this scale.
+resource "aws_s3_bucket_versioning" "data" {
+  bucket = aws_s3_bucket.data.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "data" {
+  bucket     = aws_s3_bucket.data.id
+  depends_on = [aws_s3_bucket_versioning.data]
+
+  rule {
+    id     = "expire-noncurrent"
+    status = "Enabled"
+    filter {}
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+  }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
@@ -77,4 +113,20 @@ resource "aws_s3_bucket_public_access_block" "data" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+# The SPA uploads new-exercise input files straight to S3 via presigned PUT
+# URLs (POST /v1/exercises returns them) — a cross-origin XHR, so the bucket
+# must answer the browser's preflight. Presigned GET downloads are plain
+# navigations and never needed CORS.
+resource "aws_s3_bucket_cors_configuration" "data" {
+  count  = length(var.cors_allow_origins) > 0 ? 1 : 0
+  bucket = aws_s3_bucket.data.id
+
+  cors_rule {
+    allowed_methods = ["PUT"]
+    allowed_origins = var.cors_allow_origins
+    allowed_headers = ["*"]
+    max_age_seconds = 3600
+  }
 }

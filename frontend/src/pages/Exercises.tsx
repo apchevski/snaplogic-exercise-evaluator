@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 
 import { api, pollJob } from "../api";
 import { useIsAdmin, useToken } from "../auth";
+import { ExerciseModal } from "../components/ExerciseModal";
 import { StatusPill } from "../components/StatusPill";
 import {
   PagerFooter,
@@ -12,7 +13,7 @@ import {
   usePagination,
   type SortState,
 } from "../components/table";
-import type { Exercise, Job } from "../types";
+import type { Exercise, ExerciseDetail, Job } from "../types";
 
 const COMPARE: Record<string, (a: Exercise, b: Exercise) => number> = {
   exercise: (a, b) => (a.title ?? a.slug).localeCompare(b.title ?? b.slug),
@@ -74,6 +75,10 @@ export default function Exercises() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<ExerciseDetail | null>(null);
+  const [editLoading, setEditLoading] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState<string | null>(null);
 
   const toggleExpanded = (slug: string) =>
     setExpanded((prev) => {
@@ -113,6 +118,48 @@ export default function Exercises() {
         if (job.status === "succeeded") void refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [token, refresh],
+  );
+
+  const openEdit = useCallback(
+    async (slug: string) => {
+      setEditLoading(slug);
+      setError(null);
+      try {
+        const { exercise } = await api.getExercise(token, slug);
+        setEditing(exercise);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setEditLoading(null);
+      }
+    },
+    [token],
+  );
+
+  const toggleArchived = useCallback(
+    async (ex: Exercise) => {
+      const archive = !ex.archived;
+      if (
+        archive &&
+        !window.confirm(
+          `Archive "${ex.title ?? ex.slug}"? It stops being prepped, graded and counted ` +
+            `toward student totals. Nothing is deleted — you can unarchive it anytime.`,
+        )
+      ) {
+        return;
+      }
+      setArchiving(ex.slug);
+      setError(null);
+      try {
+        await api.updateExercise(token, ex.slug, { archived: archive });
+        await refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setArchiving(null);
       }
     },
     [token, refresh],
@@ -188,6 +235,9 @@ export default function Exercises() {
             {isAdmin && (
               <>
                 {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="prep" />}
+                <button className="btn" onClick={() => setShowAdd(true)} disabled={anyBusy}>
+                  Add New Exercise
+                </button>
                 <button
                   className="btn primary"
                   onClick={() => void startPrep()}
@@ -240,7 +290,7 @@ export default function Exercises() {
                 const isOpen = expanded.has(ex.slug);
                 return (
                   <Fragment key={ex.slug}>
-                    <tr>
+                    <tr className={ex.archived ? "row-archived" : undefined}>
                       <td className={sc("exercise")}>
                         {ex.description ? (
                           <button
@@ -285,6 +335,7 @@ export default function Exercises() {
                         <span className={`prep-status ${ex.prep_status}`}>
                           {ex.prep_status.replace(/_/g, " ")}
                         </span>{" "}
+                        {ex.archived && <span className="prep-status archived">archived</span>}{" "}
                         {ex.missing_from_image && (
                           <span className="prep-status config_error">missing from image</span>
                         )}
@@ -298,9 +349,23 @@ export default function Exercises() {
                             <button
                               className="btn small"
                               onClick={() => void startPrep(ex.slug)}
-                              disabled={anyBusy}
+                              disabled={anyBusy || ex.archived}
                             >
                               Prep
+                            </button>
+                            <button
+                              className="btn small"
+                              onClick={() => void openEdit(ex.slug)}
+                              disabled={editLoading === ex.slug}
+                            >
+                              {editLoading === ex.slug ? "…" : "Edit"}
+                            </button>
+                            <button
+                              className="btn small"
+                              onClick={() => void toggleArchived(ex)}
+                              disabled={archiving === ex.slug || anyBusy}
+                            >
+                              {ex.archived ? "Unarchive" : "Archive"}
                             </button>
                             {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="prep" />}
                           </span>
@@ -336,6 +401,21 @@ export default function Exercises() {
           </table>
         </div>
       </Panel>
+      {showAdd && isAdmin && (
+        <ExerciseModal
+          token={token}
+          onClose={() => setShowAdd(false)}
+          onSaved={() => void refresh()}
+        />
+      )}
+      {editing && isAdmin && (
+        <ExerciseModal
+          token={token}
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => void refresh()}
+        />
+      )}
     </main>
   );
 }

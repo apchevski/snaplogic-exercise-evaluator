@@ -44,9 +44,29 @@ data "aws_iam_policy_document" "api" {
     actions   = ["s3:PutObject"]
     resources = ["${var.bucket_arn}/exercise-resources/*"]
   }
+  # POST/PUT /v1/exercises author exercises straight into S3 — the canonical
+  # home of authored content. Only the authored filenames are writable, and
+  # only input files are deletable — the generated artifacts sharing the
+  # exercises/ prefix (task.json, solution.json, expected/) stay worker-only.
+  statement {
+    sid     = "S3WriteAuthoredExercises"
+    actions = ["s3:PutObject"]
+    resources = [
+      "${var.bucket_arn}/exercises/*/description.md",
+      "${var.bucket_arn}/exercises/*/notes.md",
+      "${var.bucket_arn}/exercises/*/resources/*",
+    ]
+  }
+  statement {
+    sid       = "S3DeleteExerciseInputFiles"
+    actions   = ["s3:DeleteObject"]
+    resources = ["${var.bucket_arn}/exercises/*/resources/*"]
+  }
   # Without ListBucket, S3 answers HeadObject on a missing key with 403
   # instead of 404, which broke the first download of every resource file.
-  # Prefix-scoped so the API still can't enumerate worker-owned prefixes.
+  # Prefix-scoped so the API still can't enumerate other prefixes (reports
+  # under students/ stay unlistable). exercises/* is listable so the API can
+  # discover UI-authored exercises and their input files.
   statement {
     sid       = "S3HeadExerciseResources"
     actions   = ["s3:ListBucket"]
@@ -54,7 +74,7 @@ data "aws_iam_policy_document" "api" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["exercise-resources/*"]
+      values   = ["exercise-resources/*", "exercises/*"]
     }
   }
   statement {
@@ -124,7 +144,7 @@ resource "aws_apigatewayv2_api" "main" {
 
   cors_configuration {
     allow_origins = var.cors_allow_origins
-    allow_methods = ["GET", "POST", "OPTIONS"]
+    allow_methods = ["GET", "POST", "PUT", "OPTIONS"]
     allow_headers = ["authorization", "content-type"]
     max_age       = 3600
   }
