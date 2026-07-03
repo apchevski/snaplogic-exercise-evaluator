@@ -74,12 +74,12 @@ def test_upload_report_versions(aws, evaluator_dirs, tmp_path):
     keys = store.upload_report(student, "store-report-student", "2026-06-12T10:00:00Z")
 
     assert keys == {
-        "report_md": "students/store-report-student/2026-06-12T10:00:00Z/report.md",
-        "report_json": "students/store-report-student/2026-06-12T10:00:00Z/report.json",
+        "report_md_key": "students/store-report-student/2026-06-12T10:00:00Z/report.md",
+        "report_json_key": "students/store-report-student/2026-06-12T10:00:00Z/report.json",
     }
     body = (
         aws["s3"]
-        .get_object(Bucket=_bucket(), Key=keys["report_md"])["Body"]
+        .get_object(Bucket=_bucket(), Key=keys["report_md_key"])["Body"]
         .read()
         .decode("utf-8")
     )

@@ -196,7 +196,9 @@ def get_student(slug: str) -> dict[str, Any]:
         raise NotFoundError(f"No graded student {slug!r}.")
     meta = public_item(item)
     report = None
-    key = meta.get("report_json_key")
+    # "report_json" is the legacy attribute name written before the store
+    # labels were fixed; keep reading it so old gradings stay viewable.
+    key = meta.get("report_json_key") or meta.get("report_json")
     if key:
         obj = s3_client().get_object(Bucket=data_bucket(), Key=key)
         report = json.loads(obj["Body"].read().decode("utf-8"))

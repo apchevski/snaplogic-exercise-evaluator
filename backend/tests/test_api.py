@@ -158,6 +158,29 @@ def test_get_student_with_latest_report(aws):
     assert data["report"]["points_earned"] == 52
 
 
+def test_get_student_reads_legacy_report_json_attribute(aws):
+    # Students graded before the store labels were fixed carry the report S3
+    # key under "report_json" instead of "report_json_key".
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="students/old-grad/v1/report.json",
+        Body=json.dumps({"points_earned": 40}).encode(),
+    )
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#old-grad",
+            "sk": "META",
+            "entity": "student",
+            "slug": "old-grad",
+            "display_name": "Old Grad",
+            "report_json": "students/old-grad/v1/report.json",
+        }
+    )
+    resp = _call(api_event("GET", "/v1/students/old-grad"))
+    assert resp["statusCode"] == 200
+    assert _body(resp)["report"]["points_earned"] == 40
+
+
 def test_list_exercises_merges_image_and_dynamo(aws, evaluator_dirs):
     folder = evaluator_dirs["exercises"] / "api_ex_merge"
     folder.mkdir(exist_ok=True)

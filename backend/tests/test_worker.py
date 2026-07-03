@@ -23,8 +23,8 @@ class StubStore:
     def upload_report(self, student, student_slug, version):
         self.uploaded_reports.append((student, student_slug, version))
         return {
-            "report_md": f"students/{student_slug}/{version}/report.md",
-            "report_json": f"students/{student_slug}/{version}/report.json",
+            "report_md_key": f"students/{student_slug}/{version}/report.md",
+            "report_json_key": f"students/{student_slug}/{version}/report.json",
         }
 
     def upload_exercise_artifacts(self, slug):

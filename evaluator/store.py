@@ -47,8 +47,8 @@ class LocalStore:
     def upload_report(self, student: str, student_slug: str, version: str) -> dict[str, str]:
         report_dir = GRADES_DIR / student
         return {
-            "report_md": str(report_dir / "report.md"),
-            "report_json": str(report_dir / "report.json"),
+            "report_md_key": str(report_dir / "report.md"),
+            "report_json_key": str(report_dir / "report.json"),
         }
 
 
@@ -131,7 +131,9 @@ class S3Store:
         """Upload grades/<student>/report.{md,json} as a new report version."""
         report_dir = GRADES_DIR / student
         keys: dict[str, str] = {}
-        for filename, label in (("report.md", "report_md"), ("report.json", "report_json")):
+        # Label names must match what GET /v1/students/<slug> reads off the
+        # student META item (report_json_key) — the worker spreads these in.
+        for filename, label in (("report.md", "report_md_key"), ("report.json", "report_json_key")):
             path = report_dir / filename
             if not path.is_file():
                 raise FileNotFoundError(f"Expected report file missing: {path}")
