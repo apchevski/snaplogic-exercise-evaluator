@@ -23,7 +23,6 @@ const COMPARE: Record<string, (a: StudentMeta, b: StudentMeta) => number> = {
   pass: (a, b) => (a.counts?.pass ?? 0) - (b.counts?.pass ?? 0),
   fail: (a, b) => (a.counts?.fail ?? 0) - (b.counts?.fail ?? 0),
   missing: (a, b) => (a.counts?.missing ?? 0) - (b.counts?.missing ?? 0),
-  needs_prep: (a, b) => (a.counts?.needs_prep ?? 0) - (b.counts?.needs_prep ?? 0),
   graded: (a, b) => (a.graded_at ?? "").localeCompare(b.graded_at ?? ""),
 };
 const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
@@ -33,7 +32,6 @@ const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   pass: "desc",
   fail: "desc",
   missing: "desc",
-  needs_prep: "desc",
   graded: "desc",
 };
 
@@ -224,7 +222,6 @@ export default function Dashboard() {
                 <SortableTh label="Pass" sortKey="pass" sort={sort} onSort={onSort} />
                 <SortableTh label="Fail" sortKey="fail" sort={sort} onSort={onSort} />
                 <SortableTh label="Missing" sortKey="missing" sort={sort} onSort={onSort} />
-                <SortableTh label="Needs Prep" sortKey="needs_prep" sort={sort} onSort={onSort} />
                 <SortableTh label="Last Graded" sortKey="graded" sort={sort} onSort={onSort} />
                 <th className="plain">Actions</th>
               </tr>
@@ -263,6 +260,14 @@ export default function Dashboard() {
                           {earned}/{possible} pts
                           {pct !== null && <span className="pct">({pct}%)</span>}
                         </span>
+                        {c.needs_prep > 0 && (
+                          <span
+                            className="warn-chip"
+                            title={`${c.needs_prep} exercise${c.needs_prep === 1 ? " was" : "s were"} skipped because its grading artifacts are not prepped. Prep them on the Exercises page, then regrade.`}
+                          >
+                            ⚠
+                          </span>
+                        )}
                       </td>
                       <td className={sc("pass")}>
                         <Count n={c.pass} kind="pass" />
@@ -272,9 +277,6 @@ export default function Dashboard() {
                       </td>
                       <td className={sc("missing")}>
                         <Count n={c.missing} kind="missing" />
-                      </td>
-                      <td className={sc("needs_prep")}>
-                        <Count n={c.needs_prep} kind="needs_prep" />
                       </td>
                       <td className={`${sc("graded")} cell-muted`}>
                         {s.graded_at ?? "never graded"}
@@ -293,7 +295,7 @@ export default function Dashboard() {
                     </tr>
                     {isOpen && s.overall_summary && (
                       <tr className="expand-row">
-                        <td colSpan={10}>{s.overall_summary}</td>
+                        <td colSpan={9}>{s.overall_summary}</td>
                       </tr>
                     )}
                   </Fragment>
@@ -301,7 +303,7 @@ export default function Dashboard() {
               })}
               {!loading && visible.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="empty-cell">
+                  <td colSpan={9} className="empty-cell">
                     <h3>No graded students yet</h3>
                     Use “Grade a new student” above to run the first grading.
                   </td>
@@ -309,7 +311,7 @@ export default function Dashboard() {
               )}
               {loading && (
                 <tr>
-                  <td colSpan={10} className="empty-cell">
+                  <td colSpan={9} className="empty-cell">
                     Loading…
                   </td>
                 </tr>

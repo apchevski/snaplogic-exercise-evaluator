@@ -196,7 +196,6 @@ button.btn.small { padding: 3px 10px; font-size: 12.5px; }
 .count-pass { color: #2e7d32; font-weight: 600; }
 .count-fail { color: #c62828; font-weight: 600; }
 .count-missing { color: #5b6771; font-weight: 600; }
-.count-needs_prep { color: var(--sl-blue); font-weight: 600; }
 .count-zero { color: #adb6bf; }
 
 .actions-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -313,7 +312,6 @@ tr.expand-row:hover td { background: #f8f9fb; }
 .badge.pass { background: #e7f2e7; color: #256d29; border-color: #b9dcba; }
 .badge.fail { background: #fbe7e7; color: #a33230; border-color: #eec1c0; }
 .badge.missing { background: #f1f3f5; color: #5b6771; border-color: var(--sl-border); }
-.badge.needs-prep { background: #e8eff6; color: var(--sl-navy); border-color: #c3d5e6; }
 
 .prep-status {
   padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: 600;
@@ -351,7 +349,6 @@ tr.expand-row:hover td { background: #f8f9fb; }
 .task.v-pass { border-left-color: #43a047; }
 .task.v-fail, .task.v-config_error, .task.v-missing_evaluation { border-left-color: #d9534f; }
 .task.v-missing { border-left-color: #90a0ac; }
-.task.v-needs_prep { border-left-color: var(--sl-blue); }
 .task > header { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 .task h3 { margin: 0; font-size: 13px; font-weight: 600; font-family: var(--mono); color: var(--sl-text); }
 .verdict-badge {
@@ -362,7 +359,6 @@ tr.expand-row:hover td { background: #f8f9fb; }
 .verdict-badge.pass { background: #43a047; }
 .verdict-badge.fail, .verdict-badge.config_error, .verdict-badge.missing_evaluation { background: #d9534f; }
 .verdict-badge.missing { background: #78909c; }
-.verdict-badge.needs_prep { background: var(--sl-blue); }
 
 .points-pill {
   margin-left: auto; padding: 1px 8px; border-radius: 3px;
@@ -406,6 +402,11 @@ tr.expand-row:hover td { background: #f8f9fb; }
   background: #fbe7e7; color: #a33230; border: 1px solid #eec1c0;
   border-radius: 3px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
 }
+.warn-banner {
+  background: #fdf3dc; color: #8a6116; border: 1px solid #ecd9a6;
+  border-radius: 3px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
+}
+.warn-chip { margin-left: 6px; color: #8a6116; cursor: help; }
 
 .login-page {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
