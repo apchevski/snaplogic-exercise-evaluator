@@ -27,6 +27,9 @@ tables, tabbed sub-nav):
   row refreshes live with points and per-task detail.
 - **Prep** (admin only): click Prep on an exercise to refresh its solution
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
+- **Exercises** (mentor or admin): the exercise list shows prep status per
+  task; click a task name to expand its full description (rendered from the
+  exercise's `description.md`).
 
 Exercise *authoring* stays in git (description.md, notes.md, rules); the
 `/prep` Claude Code skill still works locally as a dev fallback:

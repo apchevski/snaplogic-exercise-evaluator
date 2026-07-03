@@ -217,7 +217,11 @@ def list_student_reports(slug: str) -> dict[str, Any]:
 def list_exercises() -> dict[str, Any]:
     _require_role(ROLE_ADMIN, ROLE_MENTOR)
     # Authored folders ship in this image; prep state lives in DynamoDB.
-    from evaluator.tasks import list_exercise_folders, read_pipeline_name_from_description
+    from evaluator.tasks import (
+        list_exercise_folders,
+        read_exercise_description,
+        read_pipeline_name_from_description,
+    )
 
     resp = dynamo_table().query(
         IndexName="gsi1", KeyConditionExpression=Key("entity").eq("exercise")
@@ -231,6 +235,7 @@ def list_exercises() -> dict[str, Any]:
         }
         entry.setdefault("title", read_pipeline_name_from_description(folder) or folder)
         entry.setdefault("max_points", 10)
+        entry["description"] = read_exercise_description(folder)
         exercises.append(entry)
     # Exercises known to DynamoDB but missing from the image (e.g. folder
     # deleted in git) still show up, flagged.

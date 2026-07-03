@@ -324,3 +324,15 @@ def read_pipeline_name_from_description(folder: str) -> str | None:
         if line.startswith("# ") and not line.startswith("## "):
             return line[2:].strip() or None
     return None
+
+
+def read_exercise_description(folder: str) -> str | None:
+    """Return the full markdown text of `exercises/<folder>/description.md`.
+
+    None if the file is missing or empty. The web UI shows this when a
+    mentor expands an exercise row.
+    """
+    desc = EXERCISES_DIR / folder / "description.md"
+    if not desc.exists():
+        return None
+    return desc.read_text(encoding="utf-8").strip() or None

@@ -161,7 +161,10 @@ def test_get_student_with_latest_report(aws):
 def test_list_exercises_merges_image_and_dynamo(aws, evaluator_dirs):
     folder = evaluator_dirs["exercises"] / "api_ex_merge"
     folder.mkdir(exist_ok=True)
-    (folder / "description.md").write_text("# Task Merge", encoding="utf-8")
+    (folder / "description.md").write_text(
+        "# Task Merge\n\n### Objective:\n\nBuild the merge pipeline.\n",
+        encoding="utf-8",
+    )
     dynamo_table().put_item(
         Item={
             "pk": "EXERCISE#api_ex_merge",
@@ -176,3 +179,4 @@ def test_list_exercises_merges_image_and_dynamo(aws, evaluator_dirs):
     exercises = {e["slug"]: e for e in _body(resp)["exercises"]}
     assert exercises["api_ex_merge"]["prep_status"] == "ready"
     assert exercises["api_ex_merge"]["title"] == "Task Merge"
+    assert "Build the merge pipeline." in exercises["api_ex_merge"]["description"]

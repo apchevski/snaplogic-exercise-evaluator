@@ -80,6 +80,7 @@ export interface Job {
 export interface Exercise {
   slug: string;
   title?: string;
+  description?: string | null;
   task_type?: string | null;
   prep_status: string;
   reason?: string;
