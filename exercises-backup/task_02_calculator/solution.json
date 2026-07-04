@@ -1,0 +1,465 @@
+{
+  "class_fqid": "com-snaplogic-pipeline_9",
+  "instance_version": 2,
+  "link_serial": 118,
+  "path_id": "/Interworks-Partner/Training_Program_Demo/Solutions",
+  "property_map": {
+    "info": {
+      "label": {
+        "value": "Task 02 \u2013 Calculator"
+      },
+      "author": {
+        "value": "antonio.apchevski@iwconnect.com"
+      },
+      "pipeline_doc_uri": {
+        "value": null
+      },
+      "notes": {
+        "value": null
+      },
+      "purpose": {
+        "value": null
+      }
+    },
+    "error": {
+      "error_behavior": {
+        "value": "none"
+      }
+    },
+    "settings": {
+      "suspendable": {
+        "value": false
+      },
+      "error_pipeline": {
+        "value": null,
+        "expression": false
+      },
+      "error_param_table": {
+        "value": []
+      },
+      "param_table": {
+        "value": [
+          {
+            "capture": {
+              "value": true
+            },
+            "key": {
+              "value": "mathOperation"
+            },
+            "value": {
+              "value": "3+5"
+            },
+            "required": {
+              "value": false
+            },
+            "data_type": {
+              "value": "string"
+            },
+            "description": {
+              "value": null
+            }
+          }
+        ]
+      },
+      "imports": {
+        "value": []
+      },
+      "tags": {
+        "value": []
+      }
+    },
+    "instance_version": 1,
+    "input": {
+      "b9b8e4c2-1322-4274-923f-562bbfc57721_input0": {
+        "view_type": {
+          "value": "document"
+        },
+        "label": {
+          "value": "Map Parameter - input0"
+        }
+      }
+    },
+    "output": {
+      "b3e68219-8482-4f76-97bd-b5b29508bc35_output0": {
+        "view_type": {
+          "value": "document"
+        },
+        "label": {
+          "value": "Map Output - output0"
+        }
+      }
+    }
+  },
+  "render_map": {
+    "scale_ratio": 1,
+    "pan_x_num": 0,
+    "pan_y_num": 0,
+    "default_snaplex": "5d89da2976832905c0b877e2",
+    "detail_map": {
+      "0f5b3f09-b710-4236-9757-d0a13780db4a": {
+        "grid_x_int": 3.2,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {},
+        "error": {}
+      },
+      "b9b8e4c2-1322-4274-923f-562bbfc57721": {
+        "grid_x_int": 2.2,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {},
+        "error": {}
+      },
+      "b3e68219-8482-4f76-97bd-b5b29508bc35": {
+        "grid_x_int": 4.2,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {},
+        "error": {}
+      }
+    }
+  },
+  "snap_map": {
+    "0f5b3f09-b710-4236-9757-d0a13780db4a": {
+      "class_fqid": "com-snaplogic-snaps-transform-conditional_1-443patches34538",
+      "class_id": "com-snaplogic-snaps-transform-conditional",
+      "class_version": 1,
+      "instance_fqid": "0f5b3f09-b710-4236-9757-d0a13780db4a_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "label": {
+            "value": "Switch Case By Operator"
+          },
+          "notes": {}
+        },
+        "input": {
+          "input0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "input0"
+            }
+          }
+        },
+        "output": {
+          "output0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "output0"
+            }
+          }
+        },
+        "error": {
+          "error0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "error0"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "settings": {
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "evaluateAll": {
+            "value": false
+          },
+          "conditionalTable": {
+            "value": [
+              {
+                "conditionalExpression": {
+                  "expression": true,
+                  "value": "$mathOperation.replace(/[0-9.\\s]/g, \"\") == \"+\""
+                },
+                "returnValue": {
+                  "expression": true,
+                  "value": "$mathOperation.match(/^[0-9.]+/)[0] + \" + \" +$mathOperation.match(/[0-9.]+$/)[0] + \" = \" +(  parseFloat($mathOperation.match(/^[0-9.]+/)[0]) +  parseFloat($mathOperation.match(/[0-9.]+$/)[0]))"
+                },
+                "targetPath": {
+                  "value": "$result"
+                }
+              },
+              {
+                "conditionalExpression": {
+                  "value": "$mathOperation.replace(/[0-9.\\s]/g, \"\") == \"-\"",
+                  "expression": true
+                },
+                "returnValue": {
+                  "value": "$mathOperation.match(/^[0-9.]+/)[0] + \" - \" +$mathOperation.match(/[0-9.]+$/)[0] + \" = \" +(  parseFloat($mathOperation.match(/^[0-9.]+/)[0]) -  parseFloat($mathOperation.match(/[0-9.]+$/)[0]))",
+                  "expression": true
+                },
+                "targetPath": {
+                  "value": "$result"
+                }
+              },
+              {
+                "conditionalExpression": {
+                  "value": "$mathOperation.replace(/[0-9.\\s]/g, \"\") == \"*\"",
+                  "expression": true
+                },
+                "returnValue": {
+                  "value": "$mathOperation.match(/^[0-9.]+/)[0] + \" * \" +$mathOperation.match(/[0-9.]+$/)[0] + \" = \" +(  parseFloat($mathOperation.match(/^[0-9.]+/)[0]) *  parseFloat($mathOperation.match(/[0-9.]+$/)[0]))",
+                  "expression": true
+                },
+                "targetPath": {
+                  "value": "$result"
+                }
+              },
+              {
+                "conditionalExpression": {
+                  "value": "$mathOperation.replace(/[0-9.\\s]/g, \"\") == \"/\"",
+                  "expression": true
+                },
+                "returnValue": {
+                  "value": "$mathOperation.match(/^[0-9.]+/)[0] + \" / \" +$mathOperation.match(/[0-9.]+$/)[0] + \" = \" +(  parseFloat($mathOperation.match(/^[0-9.]+/)[0]) /  parseFloat($mathOperation.match(/[0-9.]+$/)[0]))",
+                  "expression": true
+                },
+                "targetPath": {
+                  "value": "$result"
+                }
+              }
+            ]
+          },
+          "defaultValueTable": {
+            "value": {
+              "defaultValue": {
+                "expression": false,
+                "value": "No operator in the equation"
+              },
+              "defaultValuePath": {
+                "value": "$result"
+              }
+            }
+          },
+          "nullSafeAccess": {
+            "value": false
+          }
+        },
+        "view_serial": 100
+      },
+      "class_build_tag": "443patches34538",
+      "instance_id": "0f5b3f09-b710-4236-9757-d0a13780db4a"
+    },
+    "b9b8e4c2-1322-4274-923f-562bbfc57721": {
+      "class_fqid": "com-snaplogic-snaps-transform-datatransform_4-443patches34538",
+      "class_id": "com-snaplogic-snaps-transform-datatransform",
+      "class_version": 4,
+      "instance_fqid": "b9b8e4c2-1322-4274-923f-562bbfc57721_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "label": {
+            "value": "Map Parameter"
+          },
+          "notes": {}
+        },
+        "input": {
+          "input0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "input0"
+            }
+          }
+        },
+        "output": {
+          "output0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "output0"
+            }
+          }
+        },
+        "error": {
+          "error0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "error0"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "settings": {
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "passThrough": {
+            "value": false
+          },
+          "transformations": {
+            "value": {
+              "mappingRoot": {
+                "value": "$"
+              },
+              "mappingTable": {
+                "value": [
+                  {
+                    "expression": {
+                      "expression": true,
+                      "value": "_mathOperation"
+                    },
+                    "targetPath": {
+                      "value": "$mathOperation"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "nullSafeAccess": {
+            "value": false
+          }
+        },
+        "view_serial": 100
+      },
+      "class_build_tag": "443patches34538",
+      "instance_id": "b9b8e4c2-1322-4274-923f-562bbfc57721"
+    },
+    "b3e68219-8482-4f76-97bd-b5b29508bc35": {
+      "class_fqid": "com-snaplogic-snaps-transform-datatransform_4-443patches34538",
+      "class_id": "com-snaplogic-snaps-transform-datatransform",
+      "class_version": 4,
+      "instance_fqid": "b3e68219-8482-4f76-97bd-b5b29508bc35_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "label": {
+            "value": "Map Output"
+          },
+          "notes": {}
+        },
+        "input": {
+          "input0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "input0"
+            }
+          }
+        },
+        "output": {
+          "output0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "output0"
+            }
+          }
+        },
+        "error": {
+          "error0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "error0"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "settings": {
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "passThrough": {
+            "value": false
+          },
+          "transformations": {
+            "value": {
+              "mappingRoot": {
+                "value": "$"
+              },
+              "mappingTable": {
+                "value": [
+                  {
+                    "expression": {
+                      "expression": true,
+                      "value": "$result"
+                    },
+                    "targetPath": {
+                      "value": "$result"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "nullSafeAccess": {
+            "value": false
+          }
+        },
+        "view_serial": 100
+      },
+      "class_build_tag": "443patches34538",
+      "instance_id": "b3e68219-8482-4f76-97bd-b5b29508bc35"
+    }
+  },
+  "link_map": {
+    "link116": {
+      "dst_id": "0f5b3f09-b710-4236-9757-d0a13780db4a",
+      "dst_view_id": "input0",
+      "src_id": "b9b8e4c2-1322-4274-923f-562bbfc57721",
+      "src_view_id": "output0"
+    },
+    "link117": {
+      "dst_id": "b3e68219-8482-4f76-97bd-b5b29508bc35",
+      "dst_view_id": "input0",
+      "src_id": "0f5b3f09-b710-4236-9757-d0a13780db4a",
+      "src_view_id": "output0"
+    }
+  },
+  "class_id": "com-snaplogic-pipeline",
+  "class_version": 9,
+  "instance_id": "aab7b503-1bdb-498d-98ab-3c650de90a3f",
+  "instance_fqid": "aab7b503-1bdb-498d-98ab-3c650de90a3f_2",
+  "create_time": "2026-06-04T15:25:52.363000+00:00",
+  "update_time": "2026-06-04T20:55:19.395000+00:00",
+  "update_user_id": "antonio.apchevski@iwconnect.com",
+  "create_user_id": "antonio.apchevski@iwconnect.com",
+  "migrate_version": "main-42425",
+  "scrub_backup": [],
+  "scrub_version": "bd5ad2571a0eafe60808d55c3e16c0f8e0ae08d67f5369bb3ad9c1921556eb14",
+  "path": "/Interworks-Partner/Training_Program_Demo/Solutions/Task 02 \u2013 Calculator",
+  "snode_id": "6a219900f2436f2ba83cee9a",
+  "project_snode_id": "6a219781b3069768e857466d",
+  "partition_snode_id": "6a218cf4a22ac47a1095aa54",
+  "name": "Task 02 \u2013 Calculator",
+  "target_runtime": "standard",
+  "org_id": "5b7548984dd5a8001fb7e9ca",
+  "org_snode_id": "5b7548984dd5a8001fb7e9ca"
+}

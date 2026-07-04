@@ -1,0 +1,7 @@
+"First","Last","Phone_h","Phone_m","Phone_w","Address","City","State","Zip","LessThan10K","MoreThan10K","MoreThan25K","MoreThan50K","MoreThan10K-Boolean"
+"Sofia","Warfield","(423) 165-7500","(459) 671-1175","(288) 418-0508","1715 Scott Dr","San Francisco","CA","90006","0.24","0.51","0.21","0.04","true"
+"Stefan","Severin","(582) 300-4042","(268) 145-0601","(962) 144-6362","9 IBM Path","San Francisco","CA","90011","0.23","0.52","0.22","0.03","true"
+"Guy","Fluker","(608) 178-1109","(448) 520-3372","(348) 517-9282","345 Sugar Blvd.","San Francisco","CA","90044","0.23","0.45","0.25","0.07","true"
+"Stacey","Mangano","(590) 020-6679","(910) 082-3416","(659) 316-3286","777 West Filmore","San Francisco","CA","93261","0.38","0.49","0.12","0.02","true"
+"Tamra","Friedman","(732) 925-9863","(478) 541-6179","(715) 891-0202","345 Sugar Blvd.","San Francisco","CA","93615","0.33","0.47","0.17","0.04","true"
+"Cecile","Charland","(377) 666-8353","(945) 684-2078","(690) 784-5674","1715 Scott Dr","San Francisco","CA","95365","0.28","0.49","0.2","0.04","true"

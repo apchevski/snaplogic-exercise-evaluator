@@ -1,0 +1,1385 @@
+{
+  "class_fqid": "com-snaplogic-pipeline_9",
+  "instance_version": 7,
+  "link_serial": 111,
+  "path_id": "/Interworks-Partner/Training_Program_Demo/Solutions",
+  "property_map": {
+    "info": {
+      "label": {
+        "value": "Task 05 - Multiple Flows \u2013 One pipeline"
+      },
+      "author": {
+        "value": "antonio.apchevski@iwconnect.com"
+      },
+      "pipeline_doc_uri": {
+        "value": null
+      },
+      "notes": {
+        "value": null
+      },
+      "purpose": {
+        "value": null
+      }
+    },
+    "error": {
+      "error_behavior": {
+        "value": "none"
+      }
+    },
+    "settings": {
+      "suspendable": {
+        "value": false
+      },
+      "error_pipeline": {
+        "value": null,
+        "expression": false
+      },
+      "error_param_table": {
+        "value": []
+      },
+      "param_table": {
+        "value": []
+      },
+      "imports": {
+        "value": []
+      },
+      "cache_pipelines": {
+        "value": []
+      },
+      "tags": {
+        "value": []
+      }
+    },
+    "instance_version": 6,
+    "input": {},
+    "output": {}
+  },
+  "render_map": {
+    "scale_ratio": 1,
+    "pan_x_num": 0,
+    "pan_y_num": 0,
+    "default_snaplex": "5d89da2976832905c0b877e2",
+    "detail_map": {
+      "6e1d53f1-5bc4-4034-9681-9ab907453655": {
+        "grid_x_int": 7.4,
+        "grid_y_int": 2.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {}
+      },
+      "5a34240d-af14-4e2c-bae5-ea895a25030b": {
+        "grid_x_int": 8.4,
+        "grid_y_int": 2.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {}
+      },
+      "88b8f60b-b3b2-41ea-923d-8c24025be417": {
+        "grid_x_int": 3.4,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {}
+      },
+      "c492be4a-1d4d-412b-acf8-9926bd113949": {
+        "grid_x_int": 2.4,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {}
+      },
+      "2e5fc015-310b-4544-87b4-f4b15eeacbd3": {
+        "grid_x_int": 8.4,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {}
+      },
+      "b0054c93-4b77-49e2-b869-d6381f956433": {
+        "grid_x_int": 7.4,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {}
+      },
+      "f0089920-36e0-41e3-a3bf-efee242101b8": {
+        "grid_x_int": 6.4,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {
+          "output1": {
+            "rot_int": 0,
+            "dx_int": 0,
+            "dy_int": 1
+          },
+          "output101": {
+            "rot_int": 0,
+            "dx_int": 0,
+            "dy_int": 2
+          }
+        }
+      },
+      "32ae1454-9d85-4ae9-af9d-febfd21b8691": {
+        "grid_x_int": 4.4,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {}
+      },
+      "0385ddfc-98b0-4f72-9bff-0c1846efffe6": {
+        "grid_x_int": 8.4,
+        "grid_y_int": 3.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {}
+      },
+      "4a1867b6-5610-481e-b0f8-13a7cb3f3bce": {
+        "grid_x_int": 7.4,
+        "grid_y_int": 3.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {}
+      },
+      "20b99378-6084-478e-a3e7-bb0fb155482e": {
+        "grid_x_int": 5.4,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "output": {},
+        "input": {}
+      },
+      "01c8df5f-05c7-4b04-b1a5-d62bcdd684b5": {
+        "grid_x_int": 1.4,
+        "grid_y_int": 1.4,
+        "rot_int": 0,
+        "recommendation_id": null,
+        "source": "",
+        "index": null,
+        "rot_tail_int": 0,
+        "input": {}
+      }
+    }
+  },
+  "snap_map": {
+    "6e1d53f1-5bc4-4034-9681-9ab907453655": {
+      "class_fqid": "com-snaplogic-snaps-transform-csvformatter_3-snapsmrc480",
+      "class_id": "com-snaplogic-snaps-transform-csvformatter",
+      "class_version": 3,
+      "instance_fqid": "6e1d53f1-5bc4-4034-9681-9ab907453655_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Format Second CSV File"
+          }
+        },
+        "view_serial": 100,
+        "input": {
+          "input0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "input0"
+            }
+          }
+        },
+        "settings": {
+          "writeBOM": {
+            "value": false
+          },
+          "delimiter": {
+            "expression": false,
+            "value": ","
+          },
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "userDefinedHeader": {
+            "value": []
+          },
+          "charset": {
+            "value": "UTF-8"
+          },
+          "writeHeader": {
+            "value": true
+          },
+          "quoteCharacter": {
+            "expression": false,
+            "value": "\""
+          },
+          "outputHeader": {
+            "value": []
+          },
+          "useDefinedHeader": {
+            "value": false
+          },
+          "newlineCharacter": {
+            "value": "LF"
+          },
+          "escapeChar": {
+            "expression": false,
+            "value": "\\"
+          },
+          "errorPolicy": {
+            "value": "Default"
+          },
+          "ignoreEmptyStream": {
+            "value": true
+          },
+          "quoteMode": {
+            "value": "ALL"
+          }
+        },
+        "error": {
+          "error0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "error0"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "output": {
+          "output0": {
+            "view_type": {
+              "value": "binary"
+            },
+            "label": {
+              "value": "output0"
+            }
+          }
+        }
+      },
+      "class_build_tag": "snapsmrc480",
+      "instance_id": "6e1d53f1-5bc4-4034-9681-9ab907453655"
+    },
+    "5a34240d-af14-4e2c-bae5-ea895a25030b": {
+      "class_fqid": "com-snaplogic-snaps-binary-write_3-snapsmrc480",
+      "class_id": "com-snaplogic-snaps-binary-write",
+      "class_version": 3,
+      "instance_fqid": "5a34240d-af14-4e2c-bae5-ea895a25030b_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Write Records < 15"
+          }
+        },
+        "view_serial": 100,
+        "account": {
+          "account_ref": {
+            "expression": false,
+            "value": {}
+          }
+        },
+        "input": {
+          "input0": {
+            "view_type": {
+              "value": "binary"
+            },
+            "label": {
+              "value": "input0"
+            }
+          }
+        },
+        "settings": {
+          "retryInterval": {
+            "expression": false,
+            "value": 1
+          },
+          "retries": {
+            "expression": false,
+            "value": 0
+          },
+          "execution_mode": {
+            "value": "Execute only"
+          },
+          "flushIntervalKb": {
+            "value": -1
+          },
+          "writeHeader": {
+            "value": false
+          },
+          "createDir": {
+            "value": false
+          },
+          "executable_during_suggest": {
+            "value": false
+          },
+          "filename": {
+            "value": "Trng_IDbelow15.csv",
+            "expression": false
+          },
+          "writeEmptyFile": {
+            "value": false
+          },
+          "UserPermissionsKey": {
+            "value": []
+          },
+          "advancedProperties": {
+            "value": []
+          },
+          "validate": {
+            "value": false
+          },
+          "fileAction": {
+            "value": "OVERWRITE"
+          }
+        },
+        "error": {
+          "error0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "error0"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "output": {}
+      },
+      "class_build_tag": "snapsmrc480",
+      "instance_id": "5a34240d-af14-4e2c-bae5-ea895a25030b"
+    },
+    "88b8f60b-b3b2-41ea-923d-8c24025be417": {
+      "class_fqid": "com-snaplogic-snaps-transform-sequence_1-snapsmrc486",
+      "class_id": "com-snaplogic-snaps-transform-sequence",
+      "class_version": 1,
+      "instance_fqid": "88b8f60b-b3b2-41ea-923d-8c24025be417_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Add Record Index"
+          }
+        },
+        "view_serial": 101,
+        "input": {
+          "input101": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "input0"
+            }
+          }
+        },
+        "settings": {
+          "initialValueProp": {
+            "expression": false,
+            "value": 1
+          },
+          "passThroughProp": {
+            "value": true
+          },
+          "numberOfDocumentsProp": {
+            "expression": false,
+            "value": 1
+          },
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "stepValueProp": {
+            "expression": false,
+            "value": 1
+          }
+        },
+        "error": {
+          "error0": {
+            "label": {
+              "value": "error0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "output": {
+          "output0": {
+            "label": {
+              "value": "output0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          }
+        }
+      },
+      "class_build_tag": "snapsmrc486",
+      "instance_id": "88b8f60b-b3b2-41ea-923d-8c24025be417"
+    },
+    "c492be4a-1d4d-412b-acf8-9926bd113949": {
+      "class_fqid": "com-snaplogic-snaps-transform-csvparser_3-snapsmrc480",
+      "class_id": "com-snaplogic-snaps-transform-csvparser",
+      "class_version": 3,
+      "instance_fqid": "c492be4a-1d4d-412b-acf8-9926bd113949_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Parse CSV File"
+          }
+        },
+        "view_serial": 100,
+        "input": {
+          "input0": {
+            "view_type": {
+              "value": "binary"
+            },
+            "label": {
+              "value": "input0"
+            }
+          }
+        },
+        "settings": {
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "escapeChar": {
+            "expression": false,
+            "value": "\\"
+          },
+          "quoteCharacter": {
+            "expression": false,
+            "value": "\""
+          },
+          "ignoreEmptyData": {
+            "value": true
+          },
+          "charset": {
+            "value": "Auto BOM detect"
+          },
+          "skipLines": {
+            "value": 0
+          },
+          "preserveSurroundingSpaces": {
+            "expression": false,
+            "value": false
+          },
+          "delimiter": {
+            "expression": false,
+            "value": ","
+          },
+          "errorPolicy": {
+            "value": "Both"
+          },
+          "columnList": {
+            "value": []
+          },
+          "validateHeaders": {
+            "value": false
+          },
+          "containsHeader": {
+            "value": true
+          }
+        },
+        "error": {
+          "error0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "error0"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "output": {
+          "output0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "output0"
+            }
+          }
+        }
+      },
+      "class_build_tag": "snapsmrc480",
+      "instance_id": "c492be4a-1d4d-412b-acf8-9926bd113949"
+    },
+    "2e5fc015-310b-4544-87b4-f4b15eeacbd3": {
+      "class_fqid": "com-snaplogic-snaps-binary-write_3-snapsmrc480",
+      "class_id": "com-snaplogic-snaps-binary-write",
+      "class_version": 3,
+      "instance_fqid": "2e5fc015-310b-4544-87b4-f4b15eeacbd3_2",
+      "instance_version": 2,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Write Even Records"
+          }
+        },
+        "view_serial": 100,
+        "account": {
+          "account_ref": {
+            "expression": false,
+            "value": {}
+          }
+        },
+        "settings": {
+          "flushIntervalKb": {
+            "value": -1
+          },
+          "UserPermissionsKey": {
+            "value": []
+          },
+          "retries": {
+            "expression": false,
+            "value": 0
+          },
+          "cannedAcls": {
+            "value": "None"
+          },
+          "filename": {
+            "value": "Trng_FilterEven.csv",
+            "expression": false
+          },
+          "execution_mode": {
+            "value": "Execute only"
+          },
+          "preventURLEncoding": {
+            "value": false
+          },
+          "writeEmptyFile": {
+            "value": false
+          },
+          "writeHeader": {
+            "value": false
+          },
+          "retryInterval": {
+            "expression": false,
+            "value": 1
+          },
+          "createDir": {
+            "value": false
+          },
+          "fileAction": {
+            "value": "OVERWRITE"
+          },
+          "advancedProperties": {
+            "value": []
+          },
+          "validate": {
+            "value": false
+          },
+          "executable_during_suggest": {
+            "value": false
+          }
+        },
+        "output": {},
+        "error": {
+          "error0": {
+            "label": {
+              "value": "error0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "input": {
+          "input0": {
+            "label": {
+              "value": "input0"
+            },
+            "view_type": {
+              "value": "binary"
+            }
+          }
+        }
+      },
+      "class_build_tag": "snapsmrc480",
+      "instance_id": "2e5fc015-310b-4544-87b4-f4b15eeacbd3"
+    },
+    "b0054c93-4b77-49e2-b869-d6381f956433": {
+      "class_fqid": "com-snaplogic-snaps-transform-csvformatter_3-snapsmrc480",
+      "class_id": "com-snaplogic-snaps-transform-csvformatter",
+      "class_version": 3,
+      "instance_fqid": "b0054c93-4b77-49e2-b869-d6381f956433_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Format First CSV File"
+          }
+        },
+        "view_serial": 100,
+        "input": {
+          "input0": {
+            "label": {
+              "value": "input0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          }
+        },
+        "settings": {
+          "writeBOM": {
+            "value": false
+          },
+          "delimiter": {
+            "expression": false,
+            "value": ","
+          },
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "userDefinedHeader": {
+            "value": []
+          },
+          "charset": {
+            "value": "UTF-8"
+          },
+          "writeHeader": {
+            "value": true
+          },
+          "quoteCharacter": {
+            "expression": false,
+            "value": "\""
+          },
+          "outputHeader": {
+            "value": []
+          },
+          "useDefinedHeader": {
+            "value": false
+          },
+          "newlineCharacter": {
+            "value": "LF"
+          },
+          "escapeChar": {
+            "expression": false,
+            "value": "\\"
+          },
+          "errorPolicy": {
+            "value": "Default"
+          },
+          "ignoreEmptyStream": {
+            "value": true
+          },
+          "quoteMode": {
+            "value": "ALL"
+          }
+        },
+        "error": {
+          "error0": {
+            "label": {
+              "value": "error0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "output": {
+          "output0": {
+            "label": {
+              "value": "output0"
+            },
+            "view_type": {
+              "value": "binary"
+            }
+          }
+        }
+      },
+      "class_build_tag": "snapsmrc480",
+      "instance_id": "b0054c93-4b77-49e2-b869-d6381f956433"
+    },
+    "f0089920-36e0-41e3-a3bf-efee242101b8": {
+      "class_fqid": "com-snaplogic-snaps-flow-router_2-430patches18070",
+      "class_id": "com-snaplogic-snaps-flow-router",
+      "class_version": 2,
+      "instance_fqid": "f0089920-36e0-41e3-a3bf-efee242101b8_2",
+      "instance_version": 2,
+      "property_map": {
+        "info": {
+          "notes": {},
+          "label": {
+            "value": "Router By Index and ID"
+          }
+        },
+        "view_serial": 101,
+        "input": {
+          "input0": {
+            "label": {
+              "value": "input0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          }
+        },
+        "settings": {
+          "routes": {
+            "value": [
+              {
+                "expression": {
+                  "expression": true,
+                  "value": "true"
+                },
+                "outputViewName": {
+                  "value": "true"
+                }
+              },
+              {
+                "expression": {
+                  "expression": true,
+                  "value": "$['Employee ID']<15"
+                },
+                "outputViewName": {
+                  "value": "<15"
+                }
+              },
+              {
+                "expression": {
+                  "expression": true,
+                  "value": "$['Employee ID']>15"
+                },
+                "outputViewName": {
+                  "value": ">15"
+                }
+              }
+            ]
+          },
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "firstMatch": {
+            "value": false
+          }
+        },
+        "error": {
+          "error0": {
+            "label": {
+              "value": "error0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "output": {
+          "output0": {
+            "label": {
+              "value": "true"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          },
+          "output1": {
+            "label": {
+              "value": "<15"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          },
+          "output101": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": ">15"
+            }
+          }
+        }
+      },
+      "class_build_tag": "430patches18070",
+      "instance_id": "f0089920-36e0-41e3-a3bf-efee242101b8"
+    },
+    "32ae1454-9d85-4ae9-af9d-febfd21b8691": {
+      "class_fqid": "com-snaplogic-snaps-flow-filter_2-430patches18070",
+      "class_id": "com-snaplogic-snaps-flow-filter",
+      "class_version": 2,
+      "instance_fqid": "32ae1454-9d85-4ae9-af9d-febfd21b8691_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "notes": {},
+          "label": {
+            "value": "Filter Even Index Records"
+          }
+        },
+        "view_serial": 100,
+        "input": {
+          "input0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "input0"
+            }
+          }
+        },
+        "settings": {
+          "filterExpression": {
+            "expression": true,
+            "value": "$value%2==0"
+          },
+          "nullSafeAccess": {
+            "value": false
+          },
+          "execution_mode": {
+            "value": "Validate & Execute"
+          }
+        },
+        "error": {
+          "error0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "error0"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "output": {
+          "output0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "output0"
+            }
+          }
+        }
+      },
+      "class_build_tag": "430patches18070",
+      "instance_id": "32ae1454-9d85-4ae9-af9d-febfd21b8691"
+    },
+    "0385ddfc-98b0-4f72-9bff-0c1846efffe6": {
+      "class_fqid": "com-snaplogic-snaps-binary-write_3-snapsmrc480",
+      "class_id": "com-snaplogic-snaps-binary-write",
+      "class_version": 3,
+      "instance_fqid": "0385ddfc-98b0-4f72-9bff-0c1846efffe6_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Write Records > 15"
+          }
+        },
+        "view_serial": 100,
+        "account": {
+          "account_ref": {
+            "expression": false,
+            "value": {}
+          }
+        },
+        "settings": {
+          "retryInterval": {
+            "expression": false,
+            "value": 1
+          },
+          "retries": {
+            "expression": false,
+            "value": 0
+          },
+          "execution_mode": {
+            "value": "Execute only"
+          },
+          "flushIntervalKb": {
+            "value": -1
+          },
+          "writeHeader": {
+            "value": false
+          },
+          "createDir": {
+            "value": false
+          },
+          "executable_during_suggest": {
+            "value": false
+          },
+          "filename": {
+            "value": "Trng_IDabove15.csv",
+            "expression": false
+          },
+          "writeEmptyFile": {
+            "value": false
+          },
+          "UserPermissionsKey": {
+            "value": []
+          },
+          "advancedProperties": {
+            "value": []
+          },
+          "validate": {
+            "value": false
+          },
+          "fileAction": {
+            "value": "OVERWRITE"
+          }
+        },
+        "output": {},
+        "error": {
+          "error0": {
+            "label": {
+              "value": "error0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "input": {
+          "input0": {
+            "label": {
+              "value": "input0"
+            },
+            "view_type": {
+              "value": "binary"
+            }
+          }
+        }
+      },
+      "class_build_tag": "snapsmrc480",
+      "instance_id": "0385ddfc-98b0-4f72-9bff-0c1846efffe6"
+    },
+    "4a1867b6-5610-481e-b0f8-13a7cb3f3bce": {
+      "class_fqid": "com-snaplogic-snaps-transform-csvformatter_3-snapsmrc480",
+      "class_id": "com-snaplogic-snaps-transform-csvformatter",
+      "class_version": 3,
+      "instance_fqid": "4a1867b6-5610-481e-b0f8-13a7cb3f3bce_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Format Third CSV File"
+          }
+        },
+        "view_serial": 100,
+        "input": {
+          "input0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "input0"
+            }
+          }
+        },
+        "settings": {
+          "writeBOM": {
+            "value": false
+          },
+          "delimiter": {
+            "expression": false,
+            "value": ","
+          },
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "userDefinedHeader": {
+            "value": []
+          },
+          "charset": {
+            "value": "UTF-8"
+          },
+          "writeHeader": {
+            "value": true
+          },
+          "quoteCharacter": {
+            "expression": false,
+            "value": "\""
+          },
+          "outputHeader": {
+            "value": []
+          },
+          "useDefinedHeader": {
+            "value": false
+          },
+          "newlineCharacter": {
+            "value": "LF"
+          },
+          "escapeChar": {
+            "expression": false,
+            "value": "\\"
+          },
+          "errorPolicy": {
+            "value": "Default"
+          },
+          "ignoreEmptyStream": {
+            "value": true
+          },
+          "quoteMode": {
+            "value": "ALL"
+          }
+        },
+        "error": {
+          "error0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "error0"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "output": {
+          "output0": {
+            "view_type": {
+              "value": "binary"
+            },
+            "label": {
+              "value": "output0"
+            }
+          }
+        }
+      },
+      "class_build_tag": "snapsmrc480",
+      "instance_id": "4a1867b6-5610-481e-b0f8-13a7cb3f3bce"
+    },
+    "20b99378-6084-478e-a3e7-bb0fb155482e": {
+      "class_fqid": "com-snaplogic-snaps-transform-datatransform_4-snapsmrc486",
+      "class_id": "com-snaplogic-snaps-transform-datatransform",
+      "class_version": 4,
+      "instance_fqid": "20b99378-6084-478e-a3e7-bb0fb155482e_1",
+      "instance_version": 1,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Map Needed Fields"
+          }
+        },
+        "view_serial": 100,
+        "input": {
+          "input0": {
+            "label": {
+              "value": "input0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          }
+        },
+        "settings": {
+          "nullSafeAccess": {
+            "value": false
+          },
+          "passThrough": {
+            "value": true
+          },
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "transformations": {
+            "value": {
+              "mappingTable": {
+                "value": [
+                  {
+                    "targetPath": {
+                      "value": null
+                    },
+                    "expression": {
+                      "expression": true,
+                      "value": "$value"
+                    }
+                  }
+                ]
+              },
+              "mappingRoot": {
+                "value": "$"
+              }
+            }
+          }
+        },
+        "error": {
+          "error0": {
+            "label": {
+              "value": "error0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "output": {
+          "output0": {
+            "label": {
+              "value": "output0"
+            },
+            "view_type": {
+              "value": "document"
+            }
+          }
+        }
+      },
+      "class_build_tag": "snapsmrc486",
+      "instance_id": "20b99378-6084-478e-a3e7-bb0fb155482e"
+    },
+    "01c8df5f-05c7-4b04-b1a5-d62bcdd684b5": {
+      "class_fqid": "com-snaplogic-snaps-binary-simpleread_1-snapsmrc480",
+      "class_id": "com-snaplogic-snaps-binary-simpleread",
+      "class_version": 1,
+      "instance_fqid": "01c8df5f-05c7-4b04-b1a5-d62bcdd684b5_2",
+      "instance_version": 2,
+      "property_map": {
+        "info": {
+          "notes": {
+            "value": null
+          },
+          "label": {
+            "value": "Read CSV File"
+          }
+        },
+        "view_serial": 100,
+        "account": {
+          "account_ref": {
+            "expression": false,
+            "value": {}
+          }
+        },
+        "settings": {
+          "filePath": {
+            "value": "Trng_Employees.csv",
+            "expression": false
+          },
+          "outputHeaders": {
+            "value": []
+          },
+          "retries": {
+            "expression": false,
+            "value": 0
+          },
+          "execution_mode": {
+            "value": "Validate & Execute"
+          },
+          "preventURLEncoding": {
+            "value": false
+          },
+          "retryInterval": {
+            "expression": false,
+            "value": 1
+          },
+          "executeDuringPreview": {
+            "value": true
+          },
+          "advancedProperties": {
+            "value": []
+          },
+          "enableStaging": {
+            "value": false
+          }
+        },
+        "output": {
+          "output0": {
+            "view_type": {
+              "value": "binary"
+            },
+            "label": {
+              "value": "output0"
+            }
+          }
+        },
+        "error": {
+          "error0": {
+            "view_type": {
+              "value": "document"
+            },
+            "label": {
+              "value": "error0"
+            }
+          },
+          "error_behavior": {
+            "value": "fail"
+          }
+        },
+        "input": {}
+      },
+      "class_build_tag": "snapsmrc480",
+      "instance_id": "01c8df5f-05c7-4b04-b1a5-d62bcdd684b5"
+    }
+  },
+  "link_map": {
+    "link100": {
+      "dst_id": "88b8f60b-b3b2-41ea-923d-8c24025be417",
+      "dst_view_id": "input101",
+      "src_id": "c492be4a-1d4d-412b-acf8-9926bd113949",
+      "src_view_id": "output0"
+    },
+    "link101": {
+      "dst_id": "2e5fc015-310b-4544-87b4-f4b15eeacbd3",
+      "dst_view_id": "input0",
+      "src_id": "b0054c93-4b77-49e2-b869-d6381f956433",
+      "src_view_id": "output0"
+    },
+    "link102": {
+      "dst_id": "6e1d53f1-5bc4-4034-9681-9ab907453655",
+      "dst_view_id": "input0",
+      "src_id": "f0089920-36e0-41e3-a3bf-efee242101b8",
+      "src_view_id": "output1"
+    },
+    "link103": {
+      "dst_id": "b0054c93-4b77-49e2-b869-d6381f956433",
+      "dst_view_id": "input0",
+      "src_id": "f0089920-36e0-41e3-a3bf-efee242101b8",
+      "src_view_id": "output0"
+    },
+    "link104": {
+      "dst_id": "0385ddfc-98b0-4f72-9bff-0c1846efffe6",
+      "dst_view_id": "input0",
+      "src_id": "4a1867b6-5610-481e-b0f8-13a7cb3f3bce",
+      "src_view_id": "output0"
+    },
+    "link105": {
+      "dst_id": "f0089920-36e0-41e3-a3bf-efee242101b8",
+      "dst_view_id": "input0",
+      "src_id": "20b99378-6084-478e-a3e7-bb0fb155482e",
+      "src_view_id": "output0"
+    },
+    "link106": {
+      "dst_id": "c492be4a-1d4d-412b-acf8-9926bd113949",
+      "dst_view_id": "input0",
+      "src_id": "01c8df5f-05c7-4b04-b1a5-d62bcdd684b5",
+      "src_view_id": "output0"
+    },
+    "link107": {
+      "dst_id": "32ae1454-9d85-4ae9-af9d-febfd21b8691",
+      "dst_view_id": "input0",
+      "src_id": "88b8f60b-b3b2-41ea-923d-8c24025be417",
+      "src_view_id": "output0"
+    },
+    "link108": {
+      "dst_id": "5a34240d-af14-4e2c-bae5-ea895a25030b",
+      "dst_view_id": "input0",
+      "src_id": "6e1d53f1-5bc4-4034-9681-9ab907453655",
+      "src_view_id": "output0"
+    },
+    "link109": {
+      "dst_id": "20b99378-6084-478e-a3e7-bb0fb155482e",
+      "dst_view_id": "input0",
+      "src_id": "32ae1454-9d85-4ae9-af9d-febfd21b8691",
+      "src_view_id": "output0"
+    },
+    "link110": {
+      "dst_id": "4a1867b6-5610-481e-b0f8-13a7cb3f3bce",
+      "dst_view_id": "input0",
+      "src_id": "f0089920-36e0-41e3-a3bf-efee242101b8",
+      "src_view_id": "output101"
+    }
+  },
+  "class_id": "com-snaplogic-pipeline",
+  "class_version": 9,
+  "instance_id": "7f1cf338-f866-4558-ba40-47d35e6b305f",
+  "instance_fqid": "7f1cf338-f866-4558-ba40-47d35e6b305f_7",
+  "create_time": "2026-06-05T09:22:18.891000+00:00",
+  "update_time": "2026-06-05T09:23:52.761000+00:00",
+  "update_user_id": "antonio.apchevski@iwconnect.com",
+  "create_user_id": "antonio.apchevski@iwconnect.com",
+  "migrate_version": "main-42425",
+  "scrub_backup": [],
+  "scrub_version": "bd5ad2571a0eafe60808d55c3e16c0f8e0ae08d67f5369bb3ad9c1921556eb14",
+  "path": "/Interworks-Partner/Training_Program_Demo/Solutions/Task 05 - Multiple Flows \u2013 One pipeline",
+  "snode_id": "6a22954ad3ba879a2b3a13c7",
+  "project_snode_id": "6a219781b3069768e857466d",
+  "partition_snode_id": "6a218cf4a22ac47a1095aa54",
+  "name": "Task 05 - Multiple Flows \u2013 One pipeline",
+  "target_runtime": "standard",
+  "org_id": "5b7548984dd5a8001fb7e9ca",
+  "org_snode_id": "5b7548984dd5a8001fb7e9ca"
+}
