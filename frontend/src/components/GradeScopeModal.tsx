@@ -42,6 +42,10 @@ export function GradeScopeModal({
     });
 
   const allSelected = selected.size === exercises.length;
+  const toggleAll = () =>
+    setSelected(
+      allSelected ? new Set() : new Set(exercises.map((e) => e.slug)),
+    );
   const start = () => onStart(allSelected ? null : [...selected]);
 
   return (
@@ -63,19 +67,22 @@ export function GradeScopeModal({
         </header>
         <div className="modal-body">
           <div className="modal-field">
-            <label>
-              Exercises to grade
-              <span className="check-list-links">
-                <button type="button" className="link-btn" onClick={() => setSelected(new Set(exercises.map((e) => e.slug)))}>
-                  all
-                </button>
-                {" / "}
-                <button type="button" className="link-btn" onClick={() => setSelected(new Set())}>
-                  none
-                </button>
-              </span>
-            </label>
+            <label>Exercises to grade</label>
             <div className="check-list">
+              {exercises.length > 0 && (
+                <label className="check-item check-item-all">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = selected.size > 0 && !allSelected;
+                    }}
+                    onChange={toggleAll}
+                    aria-label="Select all exercises"
+                  />
+                  <span>Select all</span>
+                </label>
+              )}
               {exercises.map((e) => (
                 <label key={e.slug} className="check-item">
                   <input

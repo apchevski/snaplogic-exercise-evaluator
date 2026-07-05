@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- **Grade-scope picker: "all / none" links replaced with a select-all checkbox.** The exercise list in the Grade dialog now has a master checkbox at the top of the list (SnapLogic Monitor style): check to select every exercise, uncheck to clear, with an indeterminate dash when only some are selected.
+
 - **Pick which exercises a grading covers, register students without grading, and surface never-graded exercises everywhere.** Three connected changes to how students enter the system:
   - **Grade-scope picker.** The dashboard's per-row **Grade** button and the "grade a new student" form now open a scope dialog (all active exercises preselected): keep everything for a full run, or check a subset — including for a brand-new student, who previously could only start with an all-exercises run. `POST /v1/gradings` accepts a new `tasks` array (validated, deduped, archived slugs rejected; mutually exclusive with `task`; a one-element array collapses to the existing single-`task` semantics), and the worker runs the scoped slugs sequentially inside one job/lock, merging each result into the student's stored report and summing usage/cost onto the JOB item (REPORT history rows record the multi-slug scope in `tasks_scope`). A full run still refreshes the AI Overall summary; scoped runs leave it untouched.
   - **Register without grading.** The scope dialog's **Register only** button calls the new `POST /v1/students` (mentor or admin), which creates the student card with zero grades and $0 spent (409 if the student already exists). Grading later fills the card in; the registration stamp (`registered_by`/`registered_at`) and any registered `space` survive the card refresh.
