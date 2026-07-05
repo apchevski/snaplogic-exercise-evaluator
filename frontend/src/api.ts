@@ -25,7 +25,7 @@ export class ApiError extends Error {
 
 async function request<T>(
   token: string,
-  method: "GET" | "POST" | "PUT",
+  method: "GET" | "POST" | "PUT" | "PATCH",
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -59,6 +59,20 @@ export const api = {
       token,
       "GET",
       `/v1/students/${encodeURIComponent(slug)}`,
+    ),
+
+  // Rewrite AI-written report text in place (overall summary or one task's
+  // summary) — no re-grade, no AI cost. Returns the same shape as getStudent.
+  updateStudentReport: (
+    token: string,
+    slug: string,
+    payload: { overall_summary?: string; task?: string; summary?: string },
+  ) =>
+    request<{ student: StudentMeta; report: Report }>(
+      token,
+      "PATCH",
+      `/v1/students/${encodeURIComponent(slug)}/report`,
+      payload,
     ),
 
   listExercises: (token: string) =>

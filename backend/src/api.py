@@ -6,13 +6,14 @@ Defense layers (outer → inner):
 3. This handler re-checks the source IP against ALLOWED_CIDRS and enforces
    the role matrix per route (the UI hiding buttons is cosmetic only):
 
-       | Action                          | admin | mentor |
-       |---------------------------------|-------|--------|
-       | GET  (students/reports/jobs/…)  |  ✅   |  ✅    |
-       | POST /v1/gradings               |  ✅   |  ✅    |
-       | POST /v1/preps                  |  ✅   |  ❌ 403|
-       | POST /v1/exercises              |  ✅   |  ❌ 403|
-       | PUT  /v1/exercises/{slug}       |  ✅   |  ❌ 403|
+       | Action                            | admin | mentor |
+       |-----------------------------------|-------|--------|
+       | GET  (students/reports/jobs/…)    |  ✅   |  ✅    |
+       | POST /v1/gradings                 |  ✅   |  ✅    |
+       | PATCH /v1/students/{slug}/report  |  ✅   |  ✅    |
+       | POST /v1/preps                    |  ✅   |  ❌ 403|
+       | POST /v1/exercises                |  ✅   |  ❌ 403|
+       | PUT  /v1/exercises/{slug}         |  ✅   |  ❌ 403|
 
 POSTs never do the work inline — they write a JOB item + an SQS message and
 return 202; the worker Lambda owns execution. A conditional-put LOCK item
@@ -580,6 +581,114 @@ def post_grading() -> Response:
     return Response(
         status_code=202, content_type="application/json", body=json.dumps(job)
     )
+
+
+@app.patch("/v1/students/<slug>/report")
+def patch_student_report(slug: str) -> dict[str, Any]:
+    """Edit AI-written report text in place (admin or mentor).
+
+    Accepted keys — only the ones present are applied:
+      overall_summary    replacement text for the report's Overall paragraph
+      task + summary     replacement summary text for one task
+
+    Rewrites the latest stored report.json (and the report.md Overall
+    section) at its existing S3 key — verdicts, points and deductions are
+    untouched. This lets a mentor fix the AI's wording without paying for a
+    re-grade. Edits to a task's summary are overwritten by the next re-grade
+    of that task, which is the intended semantics: new grading, new text.
+    """
+    claims = _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    body = app.current_event.json_body or {}
+
+    new_overall: str | None = None
+    if "overall_summary" in body:
+        new_overall = str(body.get("overall_summary") or "").strip()
+        if not new_overall:
+            raise BadRequestError("overall_summary must not be empty.")
+    task_edit: tuple[str, str] | None = None
+    if "task" in body or "summary" in body:
+        task_slug = str(body.get("task") or "").strip()
+        task_summary = str(body.get("summary") or "").strip()
+        if not task_slug or not task_summary:
+            raise BadRequestError(
+                "Editing a task summary needs non-empty 'task' and 'summary'."
+            )
+        task_edit = (task_slug, task_summary)
+    if new_overall is None and task_edit is None:
+        raise BadRequestError(
+            "Body must include 'overall_summary' and/or 'task' + 'summary'."
+        )
+
+    item = dynamo_table().get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"}).get("Item")
+    if not item:
+        raise NotFoundError(f"No graded student {slug!r}.")
+    meta = public_item(item)
+    # "report_json" is the legacy attribute name (see get_student).
+    report_key = meta.get("report_json_key") or meta.get("report_json")
+    if not report_key:
+        raise BadRequestError("This student has no stored report to edit.")
+
+    s3 = s3_client()
+    obj = s3.get_object(Bucket=data_bucket(), Key=str(report_key))
+    report = json.loads(obj["Body"].read().decode("utf-8"))
+    editor = _email(claims)
+    now = utc_now_iso()
+
+    if task_edit is not None:
+        task_slug, task_summary = task_edit
+        task = next(
+            (t for t in report.get("tasks") or [] if t.get("slug") == task_slug), None
+        )
+        if task is None:
+            raise NotFoundError(f"No task {task_slug!r} in the stored report.")
+        task["summary"] = task_summary
+        task["summary_edited_by"] = editor
+        task["summary_edited_at"] = now
+
+    if new_overall is not None:
+        report["overall_summary"] = new_overall
+        report["overall_summary_edited_by"] = editor
+        report["overall_summary_edited_at"] = now
+
+    s3.put_object(
+        Bucket=data_bucket(),
+        Key=str(report_key),
+        Body=json.dumps(report, indent=2).encode("utf-8"),
+        ContentType="application/json; charset=utf-8",
+    )
+
+    # Keep the human-readable report.md's Overall paragraph in sync (task
+    # sections are left as rendered — the web UI only ever shows report.json).
+    if new_overall is not None:
+        md_key = meta.get("report_md_key")
+        md_text = _s3_text(str(md_key)) if md_key else None
+        if md_text is not None:
+            from evaluator.runner import _replace_overall_in_md
+
+            s3.put_object(
+                Bucket=data_bucket(),
+                Key=str(md_key),
+                Body=_replace_overall_in_md(md_text, new_overall).encode("utf-8"),
+                ContentType="text/markdown; charset=utf-8",
+            )
+
+    # Refresh the denormalized student card + stamp the edit.
+    update_expr = "SET report_edited_by = :e, report_edited_at = :t"
+    values: dict[str, Any] = {":e": editor, ":t": now}
+    if new_overall is not None:
+        update_expr += ", overall_summary = :s"
+        values[":s"] = new_overall
+    dynamo_table().update_item(
+        Key={"pk": f"STUDENT#{slug}", "sk": "META"},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues=values,
+    )
+    meta["report_edited_by"] = editor
+    meta["report_edited_at"] = now
+    if new_overall is not None:
+        meta["overall_summary"] = new_overall
+    # Same shape as GET /v1/students/{slug} so the UI can swap state directly.
+    return {"student": meta, "report": report}
 
 
 @app.post("/v1/preps")

@@ -30,7 +30,16 @@ function DiffItem({ d }: { d: Difference }) {
   );
 }
 
-export function TaskCard({ task, action }: { task: TaskResult; action?: ReactNode }) {
+export function TaskCard({
+  task,
+  action,
+  summaryEditor,
+}: {
+  task: TaskResult;
+  action?: ReactNode;
+  /** When set, rendered in place of the summary paragraph (inline editing). */
+  summaryEditor?: ReactNode;
+}) {
   const verdict = task.verdict || task.status || "unknown";
   const pts = typeof task.points === "number" ? task.points : null;
   const tier = pts === null ? "none" : tierForRatio(pts, MAX_POINTS);
@@ -52,9 +61,10 @@ export function TaskCard({ task, action }: { task: TaskResult; action?: ReactNod
       {task.student_pipeline_name && (
         <p className="task-pipeline">Pipeline: {task.student_pipeline_name}</p>
       )}
-      {(task.summary || task.reason) && (
-        <p className="summary">{task.summary || task.reason}</p>
-      )}
+      {summaryEditor ??
+        ((task.summary || task.reason) && (
+          <p className="summary">{task.summary || task.reason}</p>
+        ))}
       {task.failing_gate && (
         <>
           <p className="failing-gate">Failing gate: {task.failing_gate}</p>

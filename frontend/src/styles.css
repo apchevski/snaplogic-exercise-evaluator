@@ -133,7 +133,7 @@ input, select, button { font: inherit; }
   padding: 5px 8px 5px 28px; border: 1px solid var(--sl-input-border);
   border-radius: 3px; font-size: 13px; width: 260px; color: inherit;
 }
-input:focus, select:focus {
+input:focus, select:focus, textarea:focus {
   outline: none; border-color: var(--sl-blue);
   box-shadow: 0 0 0 2px rgba(17, 115, 179, 0.15);
 }
@@ -154,6 +154,10 @@ button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 button.btn.primary { background: var(--sl-navy); border-color: var(--sl-navy); color: white; }
 button.btn.primary:hover:not(:disabled) { background: var(--sl-navy-dark); }
 button.btn.small { padding: 3px 10px; font-size: 12.5px; }
+button.btn.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 4px 7px; color: #4a5560; line-height: 1;
+}
 
 .grade-new { display: flex; gap: 6px; }
 .grade-new input {
@@ -338,7 +342,20 @@ tr.expand-row:hover td { background: #f8f9fb; }
   margin: 12px 0 0; padding: 10px 12px; background: #f5f8fb;
   border-left: 3px solid var(--sl-navy); border-radius: 2px; color: #38414b;
 }
+.overall.muted { color: var(--sl-muted); font-style: italic; }
+.overall-row { display: flex; align-items: flex-start; gap: 8px; }
+.overall-row .overall { flex: 1; }
+.overall-row .icon-btn { margin-top: 12px; } /* lines up with .overall's top margin */
 .summary { margin: 6px 0; color: #4a5560; }
+
+/* inline editing of AI-written summaries (pencil buttons on the detail page) */
+.summary-editor { margin: 8px 0 4px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.summary-editor textarea {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--sl-input-border);
+  border-radius: 3px; font-size: 13px; line-height: 1.5; color: inherit;
+  font-family: inherit; resize: vertical;
+}
+.editor-actions { display: flex; gap: 6px; }
 
 /* ---------- task results ---------- */
 .tasks { display: flex; flex-direction: column; gap: 10px; }
