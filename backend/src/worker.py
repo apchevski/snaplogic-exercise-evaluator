@@ -21,7 +21,6 @@ import json
 import os
 import shutil
 import traceback
-from functools import lru_cache
 from typing import Any
 
 from boto3.dynamodb.conditions import Key
@@ -30,40 +29,12 @@ from .common import (
     data_bucket,
     dynamo_table,
     from_dynamo,
+    load_secrets_into_env,
     lock_key,
     slugify,
     to_dynamo,
     utc_now_iso,
 )
-
-# Secret keys copied into the process env (SnapLogic creds + Anthropic key).
-_SECRET_ENV_KEYS = (
-    "SNAPLOGIC_BASE_URL",
-    "SNAPLOGIC_ADMIN_USERNAME",
-    "SNAPLOGIC_ADMIN_PASSWORD",
-    "SNAPLOGIC_ORG_NAME",
-    "SNAPLOGIC_SOLUTION_PROJECT_SPACE",
-    "SNAPLOGIC_SOLUTION_PROJECT",
-    "SNAPLOGIC_STUDENT_PROJECT_SPACE",
-    "ANTHROPIC_API_KEY",
-)
-
-
-@lru_cache(maxsize=1)
-def _load_secrets_into_env() -> bool:
-    """Fetch the app secret once per container and export the keys."""
-    secret_arn = os.environ.get("SECRET_ARN", "").strip()
-    if not secret_arn:
-        return False  # local/dev: rely on the ambient environment (.env)
-    import boto3
-
-    resp = boto3.client("secretsmanager").get_secret_value(SecretId=secret_arn)
-    data = json.loads(resp["SecretString"])
-    for key in _SECRET_ENV_KEYS:
-        value = str(data.get(key, "")).strip()
-        if value:
-            os.environ[key] = value
-    return True
 
 
 def _make_store():
@@ -363,7 +334,7 @@ def _process_job(job: dict[str, Any]) -> None:
         # Lambda's image filesystem is read-only and the React SPA replaces
         # the static dashboard, so never attempt the frontend/dist/index.html rebuild.
         os.environ.setdefault("EVALUATOR_DISABLE_UI_REBUILD", "1")
-        _load_secrets_into_env()
+        load_secrets_into_env()
         store = _make_store()
         store.materialize_exercises()
         # Archived exercises stay in S3 (nothing is ever deleted there) but

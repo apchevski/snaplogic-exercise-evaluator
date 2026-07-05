@@ -24,6 +24,35 @@ from typing import Any
 
 LOCK_TTL_SECONDS = 30 * 60
 
+# Secret keys copied into the process env (SnapLogic creds + Anthropic key).
+SECRET_ENV_KEYS = (
+    "SNAPLOGIC_BASE_URL",
+    "SNAPLOGIC_ADMIN_USERNAME",
+    "SNAPLOGIC_ADMIN_PASSWORD",
+    "SNAPLOGIC_ORG_NAME",
+    "SNAPLOGIC_SOLUTION_PROJECT_SPACE",
+    "SNAPLOGIC_SOLUTION_PROJECT",
+    "SNAPLOGIC_STUDENT_PROJECT_SPACE",
+    "ANTHROPIC_API_KEY",
+)
+
+
+@lru_cache(maxsize=1)
+def load_secrets_into_env() -> bool:
+    """Fetch the app secret once per container and export the keys."""
+    secret_arn = os.environ.get("SECRET_ARN", "").strip()
+    if not secret_arn:
+        return False  # local/dev: rely on the ambient environment (.env)
+    import boto3
+
+    resp = boto3.client("secretsmanager").get_secret_value(SecretId=secret_arn)
+    data = json.loads(resp["SecretString"])
+    for key in SECRET_ENV_KEYS:
+        value = str(data.get(key, "")).strip()
+        if value:
+            os.environ[key] = value
+    return True
+
 
 def table_name() -> str:
     return os.environ["TABLE_NAME"]

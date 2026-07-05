@@ -66,6 +66,7 @@ module "api" {
   bucket_arn         = module.data.bucket_arn
   queue_url          = module.worker.queue_url
   queue_arn          = module.worker.queue_arn
+  secret_arn         = module.secrets.secret_arn
   jwt_issuer         = module.cognito.issuer
   jwt_audience       = module.cognito.client_id
   cors_allow_origins = concat([local.cloudfront_url], var.extra_cors_origins)

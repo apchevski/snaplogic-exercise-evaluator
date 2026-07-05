@@ -96,6 +96,13 @@ data "aws_iam_policy_document" "api" {
     actions   = ["sqs:SendMessage"]
     resources = [var.queue_arn]
   }
+  # POST /v1/students checks the student's SnapLogic project exists before
+  # registering; the SnapLogic credentials live in the app secret.
+  statement {
+    sid       = "Secret"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [var.secret_arn]
+  }
   statement {
     sid       = "Logs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
@@ -134,6 +141,7 @@ resource "aws_lambda_function" "api" {
       TABLE_NAME    = var.table_name
       DATA_BUCKET   = var.bucket_name
       QUEUE_URL     = var.queue_url
+      SECRET_ARN    = var.secret_arn
       ALLOWED_CIDRS = join(",", var.allowed_cidrs)
     }
   }

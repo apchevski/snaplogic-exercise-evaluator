@@ -6,22 +6,17 @@ interface Props {
   studentName: string;
   /** Active (non-archived) exercises to offer; all preselected. */
   exercises: Exercise[];
-  /** True when the student isn't on the list yet — offers "Register only". */
-  isNew?: boolean;
   onStart: (tasks: string[] | null) => void; // null = all exercises (full run)
-  onRegister?: () => void;
   onClose: () => void;
 }
 
 /** Scope picker shown before a grading starts: grade every exercise
- * (default — also refreshes the AI Overall summary), grade a selected
- * subset, or just register the student without grading anything yet. */
+ * (default — also refreshes the AI Overall summary) or grade a selected
+ * subset. Registering a new student lives on the dashboard toolbar. */
 export function GradeScopeModal({
   studentName,
   exercises,
-  isNew,
   onStart,
-  onRegister,
   onClose,
 }: Props) {
   const [selected, setSelected] = useState<Set<string>>(
@@ -115,11 +110,6 @@ export function GradeScopeModal({
           </div>
         </div>
         <footer>
-          {isNew && onRegister && (
-            <button type="button" className="btn" onClick={onRegister} style={{ marginRight: "auto" }}>
-              Register only (no grading)
-            </button>
-          )}
           <button type="button" className="btn" onClick={onClose}>
             Cancel
           </button>

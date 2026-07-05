@@ -50,8 +50,9 @@ export default function Dashboard() {
   const [perPage, setPerPage] = useState(25);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [newStudent, setNewStudent] = useState("");
+  const [registering, setRegistering] = useState(false);
   // Grade-scope picker: which student a grading is being configured for.
-  const [scopeFor, setScopeFor] = useState<{ name: string; slug?: string; isNew: boolean } | null>(null);
+  const [scopeFor, setScopeFor] = useState<{ name: string; slug: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -103,14 +104,20 @@ export default function Dashboard() {
     [token, refresh],
   );
 
+  // Adding a student never grades anything — the backend first checks the
+  // matching SnapLogic project exists, then creates the card ($0 spent).
   const registerOnly = useCallback(
     async (studentName: string) => {
       setError(null);
+      setRegistering(true);
       try {
         await api.registerStudent(token, studentName);
+        setNewStudent("");
         void refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setRegistering(false);
       }
     },
     [token, refresh],
@@ -199,16 +206,7 @@ export default function Dashboard() {
               onSubmit={(e) => {
                 e.preventDefault();
                 const name = newStudent.trim();
-                if (name) {
-                  const existing = students.find(
-                    (s) => s.display_name.toLowerCase() === name.toLowerCase(),
-                  );
-                  setScopeFor({
-                    name: existing?.display_name ?? name,
-                    slug: existing?.slug,
-                    isNew: !existing,
-                  });
-                }
+                if (name) void registerOnly(name);
               }}
             >
               <input
@@ -216,8 +214,12 @@ export default function Dashboard() {
                 value={newStudent}
                 onChange={(e) => setNewStudent(e.target.value)}
               />
-              <button className="btn primary" type="submit" disabled={!newStudent.trim()}>
-                Grade / Register
+              <button
+                className="btn primary"
+                type="submit"
+                disabled={!newStudent.trim() || registering}
+              >
+                {registering ? "Adding…" : "Add Student"}
               </button>
             </form>
             <label className="field">
@@ -336,7 +338,7 @@ export default function Dashboard() {
                           <button
                             className="btn small"
                             onClick={() =>
-                              setScopeFor({ name: s.display_name, slug: s.slug, isNew: false })
+                              setScopeFor({ name: s.display_name, slug: s.slug })
                             }
                             disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
                           >
@@ -357,8 +359,9 @@ export default function Dashboard() {
                 <tr>
                   <td colSpan={9} className="empty-cell">
                     <h3>No students yet</h3>
-                    Use “Add a new student” above to register a student or run the
-                    first grading — all exercises or just the ones you pick.
+                    Use “Add a new student” above to register a student (their
+                    SnapLogic project must already exist), then start a grading
+                    with the row&rsquo;s Grade… button.
                   </td>
                 </tr>
               )}
@@ -378,18 +381,10 @@ export default function Dashboard() {
         <GradeScopeModal
           studentName={scopeFor.name}
           exercises={activeExercises}
-          isNew={scopeFor.isNew}
           onStart={(tasks) => {
             const { name, slug } = scopeFor;
             setScopeFor(null);
-            setNewStudent("");
             void startGrade(name, slug, tasks);
-          }}
-          onRegister={() => {
-            const { name } = scopeFor;
-            setScopeFor(null);
-            setNewStudent("");
-            void registerOnly(name);
           }}
           onClose={() => setScopeFor(null)}
         />

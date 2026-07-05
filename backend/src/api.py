@@ -45,6 +45,7 @@ from .common import (
     dynamo_table,
     epoch_in,
     from_dynamo,
+    load_secrets_into_env,
     lock_key,
     public_item,
     s3_client,
@@ -558,14 +559,72 @@ def get_prep(job_id: str) -> dict[str, Any]:
 # ---------- write routes ----------
 
 
+def _verify_student_project(student: str, space: str | None) -> None:
+    """Reject registration when SnapLogic has no project named after the student.
+
+    The student name IS the project name inside the student project space, so
+    a typo here would register a card that every subsequent grading run fails
+    on. One GET (asset list) settles it: 404 → clear 400 back to the UI.
+    Credentials come from the app secret (deployed) or the ambient env
+    (local dev); when they aren't configured at all the check is skipped so
+    registration keeps working in credential-less environments (e.g. tests).
+    """
+    import httpx
+
+    load_secrets_into_env()
+    base_url = os.environ.get("SNAPLOGIC_BASE_URL", "").strip().rstrip("/")
+    username = os.environ.get("SNAPLOGIC_ADMIN_USERNAME", "").strip()
+    password = os.environ.get("SNAPLOGIC_ADMIN_PASSWORD", "").strip()
+    org = os.environ.get("SNAPLOGIC_ORG_NAME", "").strip()
+    if not (base_url and username and password and org):
+        return
+    ps = space or os.environ.get(
+        "SNAPLOGIC_STUDENT_PROJECT_SPACE", ""
+    ).strip() or "IWC_Support"
+
+    from evaluator.config import Settings
+    from evaluator.snaplogic_client import SnapLogicClient
+
+    settings = Settings(
+        base_url=base_url,
+        username=username,
+        password=password,
+        org_name=org,
+        project_space_name="",
+        project_name="",
+        student_project_space_name=ps,
+    )
+    # Stay well under the 29 s API Gateway ceiling.
+    with SnapLogicClient(settings, timeout_s=10.0) as client:
+        try:
+            client.list_assets(org, ps, student)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise BadRequestError(
+                    f"No project named {student!r} exists in the {ps!r} "
+                    "project space — the student name must match their "
+                    "SnapLogic project exactly."
+                )
+            raise ServiceError(
+                502,
+                "Could not verify the SnapLogic project "
+                f"(SnapLogic answered HTTP {e.response.status_code}). Try again.",
+            )
+        except httpx.HTTPError as e:
+            raise ServiceError(
+                502, f"Could not reach SnapLogic to verify the project: {e}"
+            )
+
+
 @app.post("/v1/students")
 def post_student() -> Response:
     """Register a student without grading anything (admin or mentor).
 
     Creates the STUDENT card so the student shows up on the dashboard with
     every exercise still ungraded; a full or per-exercise grading can then
-    be started later. 409 if the student already exists (registered or
-    graded) — nothing about an existing student is overwritten.
+    be started later. 400 if no SnapLogic project matches the student name;
+    409 if the student already exists (registered or graded) — nothing about
+    an existing student is overwritten.
     """
     from botocore.exceptions import ClientError
 
@@ -575,6 +634,9 @@ def post_student() -> Response:
     if not student:
         raise BadRequestError("Body must include a non-empty 'student'.")
     slug = slugify(student)
+    _verify_student_project(
+        student, (str(body.get("space")).strip() or None) if body.get("space") else None
+    )
     row = {
         "pk": f"STUDENT#{slug}",
         "sk": "META",

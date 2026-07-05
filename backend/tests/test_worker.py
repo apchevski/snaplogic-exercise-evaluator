@@ -8,7 +8,12 @@ from types import SimpleNamespace
 import boto3
 
 from backend.src import worker
-from backend.src.common import dynamo_table, lock_key, utc_now_iso
+from backend.src.common import (
+    dynamo_table,
+    load_secrets_into_env,
+    lock_key,
+    utc_now_iso,
+)
 
 
 class StubStore:
@@ -504,8 +509,8 @@ def test_secrets_loaded_into_env(aws, monkeypatch):
     monkeypatch.setenv("SECRET_ARN", secret["ARN"])
     monkeypatch.delenv("SNAPLOGIC_BASE_URL", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    worker._load_secrets_into_env.cache_clear()
-    assert worker._load_secrets_into_env() is True
+    load_secrets_into_env.cache_clear()
+    assert load_secrets_into_env() is True
     assert os.environ["SNAPLOGIC_BASE_URL"] == "https://example.snaplogic.test"
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-test"
-    worker._load_secrets_into_env.cache_clear()
+    load_secrets_into_env.cache_clear()
