@@ -3,6 +3,7 @@ locals {
     "GET /v1/students",
     "GET /v1/students/{slug}",
     "GET /v1/students/{slug}/reports",
+    "PATCH /v1/students/{slug}/report",
     "GET /v1/exercises",
     "GET /v1/exercises/{slug}",
     "PUT /v1/exercises/{slug}",

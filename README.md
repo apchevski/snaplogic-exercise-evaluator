@@ -30,6 +30,12 @@ tables, tabbed sub-nav):
   (one Claude call instead of one per exercise — faster and cheaper than a
   full run). The result is merged into the student's existing report; all
   other task results, and the Overall summary, are left untouched.
+- **Edit report text** (mentor or admin): next to each task card's Regrade
+  button — and beside the Overall summary — a pencil button opens an inline
+  editor to rewrite the AI's summary text. Edits are saved into the stored
+  report in place ($0 — no re-grade); verdicts, points, and deductions are
+  untouched. Regrading a task later replaces its edited summary with fresh
+  AI text.
 - **Prep** (admin only): click Prep on an exercise to refresh its solution
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
 - **Exercises** (mentor or admin): the exercise list shows prep status per
@@ -55,6 +61,7 @@ Browser (VPN/office IPs only)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
         ├─ GET  students / reports / exercises / job status   (any logged-in user)
         ├─ POST /v1/gradings {student, task?}                 (mentor or admin)
+        ├─ PATCH /v1/students/{slug}/report — edit AI text    (mentor or admin)
         ├─ POST /v1/preps {slug?}                             (admin only)
         └─ POST/PUT /v1/exercises — create / edit / archive   (admin only)
                   │ JOB item (DynamoDB) + SQS message

@@ -6,7 +6,29 @@ import { useToken } from "../auth";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/table";
 import { TaskCard, tierForRatio } from "../components/TaskCard";
-import type { Job, Report, StudentMeta } from "../types";
+import type { Job, Report, StudentMeta, TaskResult } from "../types";
+
+// Edit target for the AI-written text: the report's Overall paragraph or one
+// task's summary. Saving PATCHes the stored report in place — no re-grade.
+type EditTarget = { kind: "overall" } | { kind: "task"; slug: string };
+
+function PencilIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+    </svg>
+  );
+}
 
 export default function StudentDetail() {
   const { slug = "" } = useParams();
@@ -16,6 +38,9 @@ export default function StudentDetail() {
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<EditTarget | null>(null);
+  const [draft, setDraft] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -51,13 +76,44 @@ export default function StudentDetail() {
           () => api.getGrading(token, id),
           (j) => setJobs((prev) => ({ ...prev, [taskSlug]: j })),
         );
-        if (job.status === "succeeded") void refresh();
+        if (job.status === "succeeded") {
+          // Drop any in-progress text edit: the regraded report replaces it.
+          setEditing(null);
+          void refresh();
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     },
     [token, name, refresh],
   );
+
+  const startEdit = (target: EditTarget, currentText: string) => {
+    setEditing(target);
+    setDraft(currentText);
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    const text = draft.trim();
+    if (!text) return;
+    setSavingEdit(true);
+    setError(null);
+    try {
+      const payload =
+        editing.kind === "overall"
+          ? { overall_summary: text }
+          : { task: editing.slug, summary: text };
+      const updated = await api.updateStudentReport(token, slug, payload);
+      setStudent(updated.student);
+      setReport(updated.report);
+      setEditing(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   if (loading) return <main className="page">Loading…</main>;
   if (error && !student && !report) {
@@ -82,6 +138,52 @@ export default function StudentDetail() {
   const unprepped = report?.tasks.filter((t) => t.status === "needs_prep") ?? [];
   const needsPrepCount = unprepped.length || (counts?.needs_prep ?? 0);
   const gradedTasks = report?.tasks.filter((t) => t.status !== "needs_prep") ?? [];
+
+  const overallText = report?.overall_summary ?? student?.overall_summary ?? "";
+
+  // Shared inline editor rendered in place of whichever text is being edited.
+  const editorNode = (
+    <div className="summary-editor">
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={4}
+        disabled={savingEdit}
+        autoFocus
+      />
+      <div className="editor-actions">
+        <button
+          className="btn small primary"
+          onClick={() => void saveEdit()}
+          disabled={savingEdit || !draft.trim()}
+        >
+          {savingEdit ? "Saving…" : "Save"}
+        </button>
+        <button
+          className="btn small"
+          onClick={() => setEditing(null)}
+          disabled={savingEdit}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+
+  const editPencil = (title: string, onClick: () => void) => (
+    <button
+      className="btn small icon-btn"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={anyBusy || savingEdit}
+    >
+      <PencilIcon />
+    </button>
+  );
+
+  const taskEditor = (t: TaskResult) =>
+    editing?.kind === "task" && editing.slug === t.slug ? editorNode : undefined;
 
   return (
     <main className="page">
@@ -124,10 +226,21 @@ export default function StudentDetail() {
               <span className="badge missing">{counts.missing} missing</span>
             </div>
           )}
-          {(report?.overall_summary ?? student?.overall_summary) && (
-            <p className="overall">
-              {report?.overall_summary ?? student?.overall_summary}
-            </p>
+          {editing?.kind === "overall" ? (
+            editorNode
+          ) : report ? (
+            <div className="overall-row">
+              {overallText ? (
+                <p className="overall">{overallText}</p>
+              ) : (
+                <p className="overall muted">No overall summary yet.</p>
+              )}
+              {editPencil("Edit overall summary", () =>
+                startEdit({ kind: "overall" }, overallText),
+              )}
+            </div>
+          ) : (
+            overallText && <p className="overall">{overallText}</p>
           )}
         </div>
       </Panel>
@@ -142,9 +255,16 @@ export default function StudentDetail() {
                 <TaskCard
                   key={t.slug}
                   task={t}
+                  summaryEditor={taskEditor(t)}
                   action={
                     <span className="actions-cell">
                       {jobs[t.slug] && <StatusPill job={jobs[t.slug]} kind="grade" />}
+                      {editPencil("Edit summary", () =>
+                        startEdit(
+                          { kind: "task", slug: t.slug },
+                          t.summary || t.reason || "",
+                        ),
+                      )}
                       <button
                         className="btn small"
                         onClick={() => void regradeTask(t.slug)}

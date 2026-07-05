@@ -38,11 +38,22 @@ data "aws_iam_policy_document" "api" {
   # Lazy mirror of baked-in student input files (exercises/<slug>/resources/)
   # so downloads are presigned S3 GETs instead of Lambda-streamed bodies.
   # Scoped to its own prefix: the API must NOT be able to overwrite the
-  # worker-owned artifacts under exercises/ or reports under students/.
+  # worker-owned artifacts under exercises/.
   statement {
     sid       = "S3WriteExerciseResources"
     actions   = ["s3:PutObject"]
     resources = ["${var.bucket_arn}/exercise-resources/*"]
+  }
+  # PATCH /v1/students/{slug}/report edits AI-written report text in place.
+  # Only the two report files themselves are writable — everything else
+  # under students/ stays worker-only.
+  statement {
+    sid     = "S3EditStoredReports"
+    actions = ["s3:PutObject"]
+    resources = [
+      "${var.bucket_arn}/students/*/report.json",
+      "${var.bucket_arn}/students/*/report.md",
+    ]
   }
   # POST/PUT /v1/exercises author exercises straight into S3 — the canonical
   # home of authored content. Only the authored filenames are writable, and
@@ -144,7 +155,7 @@ resource "aws_apigatewayv2_api" "main" {
 
   cors_configuration {
     allow_origins = var.cors_allow_origins
-    allow_methods = ["GET", "POST", "PUT", "OPTIONS"]
+    allow_methods = ["GET", "POST", "PUT", "PATCH", "OPTIONS"]
     allow_headers = ["authorization", "content-type"]
     max_age       = 3600
   }

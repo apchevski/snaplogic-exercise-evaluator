@@ -688,6 +688,140 @@ def test_archived_exercise_blocks_prep_and_single_task_grade(aws, evaluator_dirs
     assert resp["statusCode"] == 202
 
 
+# ---------- PATCH /v1/students/{slug}/report (edit AI-written text) ----------
+
+
+def _seed_student_report(aws, slug="edit-me", name="Edit Me"):
+    report = {
+        "student": name,
+        "counts": {"pass": 1, "fail": 0, "missing": 1, "needs_prep": 0, "total": 2},
+        "points_earned": 10,
+        "points_possible": 20,
+        "overall_summary": "AI overall text.",
+        "tasks": [
+            {
+                "slug": "task_a",
+                "status": "evaluated",
+                "verdict": "pass",
+                "points": 10,
+                "summary": "AI summary for task_a.",
+            },
+            {"slug": "task_b", "status": "missing", "verdict": None, "reason": "Not found."},
+        ],
+    }
+    json_key = f"students/{slug}/v1/report.json"
+    md_key = f"students/{slug}/v1/report.md"
+    bucket = os.environ["DATA_BUCKET"]
+    aws["s3"].put_object(Bucket=bucket, Key=json_key, Body=json.dumps(report).encode())
+    aws["s3"].put_object(
+        Bucket=bucket,
+        Key=md_key,
+        Body=(
+            "# Grading Report\n\n## Overall\n\nAI overall text.\n\n---\n\n"
+            "## task_a\n\nAI summary for task_a.\n"
+        ).encode("utf-8"),
+    )
+    dynamo_table().put_item(
+        Item={
+            "pk": f"STUDENT#{slug}",
+            "sk": "META",
+            "entity": "student",
+            "slug": slug,
+            "display_name": name,
+            "overall_summary": "AI overall text.",
+            "report_json_key": json_key,
+            "report_md_key": md_key,
+        }
+    )
+    return slug, json_key, md_key
+
+
+def test_mentor_edits_overall_summary(aws):
+    slug, json_key, md_key = _seed_student_report(aws)
+    resp = _call(
+        api_event(
+            "PATCH",
+            f"/v1/students/{slug}/report",
+            groups=("mentor",),
+            email="m@x.io",
+            body={"overall_summary": "Human-corrected overall."},
+        )
+    )
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    assert data["report"]["overall_summary"] == "Human-corrected overall."
+    assert data["student"]["overall_summary"] == "Human-corrected overall."
+
+    bucket = os.environ["DATA_BUCKET"]
+    stored = json.loads(aws["s3"].get_object(Bucket=bucket, Key=json_key)["Body"].read())
+    assert stored["overall_summary"] == "Human-corrected overall."
+    assert stored["overall_summary_edited_by"] == "m@x.io"
+    # report.md's Overall paragraph is rewritten too; the task section is not.
+    md = aws["s3"].get_object(Bucket=bucket, Key=md_key)["Body"].read().decode()
+    assert "Human-corrected overall." in md
+    assert "AI overall text." not in md
+    assert "AI summary for task_a." in md
+    # Denormalized student card refreshed + edit stamped.
+    item = dynamo_table().get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"})["Item"]
+    assert item["overall_summary"] == "Human-corrected overall."
+    assert item["report_edited_by"] == "m@x.io"
+
+
+def test_edit_task_summary_touches_only_that_task(aws):
+    slug, json_key, _ = _seed_student_report(aws, slug="edit-task", name="Edit Task")
+    resp = _call(
+        api_event(
+            "PATCH",
+            f"/v1/students/{slug}/report",
+            body={"task": "task_b", "summary": "Mentor explanation instead."},
+        )
+    )
+    assert resp["statusCode"] == 200
+    stored = json.loads(
+        aws["s3"].get_object(Bucket=os.environ["DATA_BUCKET"], Key=json_key)["Body"].read()
+    )
+    by_slug = {t["slug"]: t for t in stored["tasks"]}
+    assert by_slug["task_b"]["summary"] == "Mentor explanation instead."
+    assert by_slug["task_b"]["summary_edited_by"] == "mentor@example.com"
+    assert by_slug["task_a"]["summary"] == "AI summary for task_a."
+    # Verdict/points untouched, overall untouched.
+    assert by_slug["task_b"]["status"] == "missing"
+    assert stored["overall_summary"] == "AI overall text."
+    assert stored["points_earned"] == 10
+
+
+def test_edit_report_validation(aws):
+    slug, _, _ = _seed_student_report(aws, slug="edit-val", name="Edit Val")
+
+    def patch(body, slug=slug):
+        return _call(api_event("PATCH", f"/v1/students/{slug}/report", body=body))
+
+    assert patch({})["statusCode"] == 400  # nothing to apply
+    assert patch({"overall_summary": "   "})["statusCode"] == 400
+    assert patch({"task": "task_a"})["statusCode"] == 400  # summary missing
+    assert patch({"task": "", "summary": "x"})["statusCode"] == 400
+    assert patch({"task": "no_such_task", "summary": "x"})["statusCode"] == 404
+    assert patch({"overall_summary": "x"}, slug="no-such-student")["statusCode"] == 404
+
+
+def test_edit_report_without_stored_report_400(aws):
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#no-report",
+            "sk": "META",
+            "entity": "student",
+            "slug": "no-report",
+            "display_name": "No Report",
+        }
+    )
+    resp = _call(
+        api_event(
+            "PATCH", "/v1/students/no-report/report", body={"overall_summary": "x"}
+        )
+    )
+    assert resp["statusCode"] == 400
+
+
 def test_list_exercises_s3_description_wins_over_image_copy(aws, evaluator_dirs):
     """After a UI edit the S3 copy is canonical — a stale image copy of the
     same folder must not shadow it."""
