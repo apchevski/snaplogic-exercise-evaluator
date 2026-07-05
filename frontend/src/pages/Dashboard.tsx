@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { api, pollJob } from "../api";
 import { useToken } from "../auth";
+import { AddStudentModal } from "../components/AddStudentModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
 import { StatusPill } from "../components/StatusPill";
 import {
@@ -49,8 +50,8 @@ export default function Dashboard() {
   const [sort, setSort] = useState<SortState>({ key: "points", dir: "desc" });
   const [perPage, setPerPage] = useState(25);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [newStudent, setNewStudent] = useState("");
-  const [registering, setRegistering] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [defaultSpace, setDefaultSpace] = useState("");
   // Grade-scope picker: which student a grading is being configured for.
   const [scopeFor, setScopeFor] = useState<{ name: string; slug: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +82,14 @@ export default function Dashboard() {
       .catch(() => setExercises([])); // chip/scope picker degrade gracefully
   }, [token]);
 
+  // Default student project space, prefilled in the Add Student dialog.
+  useEffect(() => {
+    api
+      .getConfig(token)
+      .then(({ config }) => setDefaultSpace(config.student_project_space ?? ""))
+      .catch(() => setDefaultSpace("")); // dialog still works, field just empty
+  }, [token]);
+
   const activeExercises = useMemo(
     () => exercises.filter((e) => !e.archived && !e.missing_from_image),
     [exercises],
@@ -106,19 +115,11 @@ export default function Dashboard() {
 
   // Adding a student never grades anything — the backend first checks the
   // matching SnapLogic project exists, then creates the card ($0 spent).
+  // Errors propagate to the dialog, which stays open and shows them.
   const registerOnly = useCallback(
-    async (studentName: string) => {
-      setError(null);
-      setRegistering(true);
-      try {
-        await api.registerStudent(token, studentName);
-        setNewStudent("");
-        void refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setRegistering(false);
-      }
+    async (studentName: string, space?: string, project?: string) => {
+      await api.registerStudent(token, studentName, space, project);
+      void refresh();
     },
     [token, refresh],
   );
@@ -201,27 +202,9 @@ export default function Dashboard() {
               placeholder="Search by student or project space"
             />
             <span className="toolbar-spacer" />
-            <form
-              className="grade-new"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const name = newStudent.trim();
-                if (name) void registerOnly(name);
-              }}
-            >
-              <input
-                placeholder="Add a new student (project name)…"
-                value={newStudent}
-                onChange={(e) => setNewStudent(e.target.value)}
-              />
-              <button
-                className="btn primary"
-                type="submit"
-                disabled={!newStudent.trim() || registering}
-              >
-                {registering ? "Adding…" : "Add Student"}
-              </button>
-            </form>
+            <button className="btn primary" onClick={() => setAdding(true)}>
+              Add Student…
+            </button>
             <label className="field">
               Entries per Page:
               <select
@@ -297,6 +280,14 @@ export default function Dashboard() {
                         <Link to={`/students/${encodeURIComponent(s.slug)}`}>
                           {s.display_name}
                         </Link>
+                        {s.project && s.project !== s.display_name && (
+                          <div
+                            className="cell-muted cell-mono cell-sub"
+                            title="SnapLogic project grading looks in (differs from the student name)"
+                          >
+                            {s.project}
+                          </div>
+                        )}
                       </td>
                       <td className={`${sc("space")} cell-mono`}>{s.space ?? "—"}</td>
                       <td className={sc("points")}>
@@ -359,7 +350,7 @@ export default function Dashboard() {
                 <tr>
                   <td colSpan={9} className="empty-cell">
                     <h3>No students yet</h3>
-                    Use “Add a new student” above to register a student (their
+                    Use “Add Student…” above to register a student (their
                     SnapLogic project must already exist), then start a grading
                     with the row&rsquo;s Grade… button.
                   </td>
@@ -376,6 +367,14 @@ export default function Dashboard() {
           </table>
         </div>
       </Panel>
+
+      {adding && (
+        <AddStudentModal
+          defaultSpace={defaultSpace}
+          onSubmit={registerOnly}
+          onClose={() => setAdding(false)}
+        />
+      )}
 
       {scopeFor && (
         <GradeScopeModal

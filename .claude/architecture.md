@@ -98,6 +98,19 @@ plan → judge → report loop the skill used to drive interactively.
 - **Reports are immutable versions** in S3 (`students/<slug>/<ver>/`);
   DynamoDB single table holds student cards, report history, job
   lifecycle, conditional-put locks (TTL 30 min), and exercise prep state.
+- **The STUDENT card is the source of truth for where grading looks
+  (July 2026).** Registration (the Add Student dialog) stores `space`
+  (project space, resolved to the env default if left blank) and
+  optionally `project` (SnapLogic project name, when it isn't named
+  exactly after the student) on the card. `POST /v1/gradings` resolves
+  `body override → card → env default` into the job payload; the worker
+  passes both into `run_grade` and writes them back on the card refresh
+  (backfilling legacy cards on their next grading).
+  `SNAPLOGIC_STUDENT_PROJECT_SPACE` is only the default that prefills the
+  dialog (exposed via `GET /v1/config`, which returns non-secret settings
+  only). There is deliberately no student-edit endpoint yet — a wrong
+  space/project at registration is caught by the SnapLogic
+  project-existence check; changing it later needs a new registration.
 - **Auth**: Cognito (admin-created users; groups `admin`/`mentor`) + API
   Gateway JWT authorizer; the Lambda re-checks source IP and enforces the
   role matrix (mentors get 403 on /v1/preps). IP allowlist also runs at

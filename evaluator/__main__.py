@@ -27,6 +27,12 @@ def _run_subcommand(argv: list[str]) -> int:
     parser.add_argument("student", help="Student name (project name within the project space).")
     parser.add_argument("--space", dest="project_space", default=None)
     parser.add_argument(
+        "--project",
+        dest="project",
+        default=None,
+        help="SnapLogic project holding the student's pipelines (defaults to the student name).",
+    )
+    parser.add_argument(
         "--task",
         dest="task_slug",
         default=None,
@@ -40,6 +46,7 @@ def _run_subcommand(argv: list[str]) -> int:
         result = run_grade(
             args.student,
             project_space=args.project_space,
+            project=args.project,
             task_slug=args.task_slug,
         )
     except GradeRunError as e:

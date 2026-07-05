@@ -189,13 +189,20 @@ def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
                 "report_json_key": meta.get("report_json_key") or meta.get("report_json"),
             },
         )
+    # The job payload carries the resolved space/project (API merges body →
+    # STUDENT card → env default); the card is the fallback for jobs queued
+    # before that resolution existed.
+    space = job.get("space") or meta.get("space")
+    project = job.get("project") or meta.get("project")
     if scope is None:
-        results = [run_grade(student, project_space=job.get("space"), task_slug=None)]
+        results = [
+            run_grade(student, project_space=space, project=project, task_slug=None)
+        ]
     else:
         # One run per slug; each merges into report.{md,json} on disk, so
         # the last result carries the accumulated counts and points.
         results = [
-            run_grade(student, project_space=job.get("space"), task_slug=slug)
+            run_grade(student, project_space=space, project=project, task_slug=slug)
             for slug in scope
         ]
     result = results[-1]
@@ -228,7 +235,8 @@ def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
         "entity": "student",
         "slug": student_slug,
         "display_name": student,
-        "space": job.get("space") or meta.get("space"),
+        "space": space,
+        "project": project,
         "counts": result.counts,
         "points_earned": result.points_earned,
         "points_possible": result.points_possible,
