@@ -25,6 +25,9 @@ data "aws_iam_policy_document" "api" {
     actions = [
       "dynamodb:GetItem",
       "dynamodb:PutItem",
+      # PATCH /v1/students/{slug}/report stamps the edit onto the student card
+      # with update_item after rewriting report.json in S3.
+      "dynamodb:UpdateItem",
       "dynamodb:DeleteItem",
       "dynamodb:Query",
     ]

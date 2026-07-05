@@ -41,6 +41,9 @@ export default function StudentDetail() {
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const [draft, setDraft] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  // Rendered inside the editor — the page-top error banner can be scrolled
+  // out of view when editing a task card further down.
+  const [editError, setEditError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -91,6 +94,12 @@ export default function StudentDetail() {
   const startEdit = (target: EditTarget, currentText: string) => {
     setEditing(target);
     setDraft(currentText);
+    setEditError(null);
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setEditError(null);
   };
 
   const saveEdit = async () => {
@@ -98,7 +107,7 @@ export default function StudentDetail() {
     const text = draft.trim();
     if (!text) return;
     setSavingEdit(true);
-    setError(null);
+    setEditError(null);
     try {
       const payload =
         editing.kind === "overall"
@@ -109,7 +118,9 @@ export default function StudentDetail() {
       setReport(updated.report);
       setEditing(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setEditError(
+        `Saving failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
     } finally {
       setSavingEdit(false);
     }
@@ -159,14 +170,11 @@ export default function StudentDetail() {
         >
           {savingEdit ? "Saving…" : "Save"}
         </button>
-        <button
-          className="btn small"
-          onClick={() => setEditing(null)}
-          disabled={savingEdit}
-        >
+        <button className="btn small" onClick={cancelEdit} disabled={savingEdit}>
           Cancel
         </button>
       </div>
+      {editError && <div className="job-error">{editError}</div>}
     </div>
   );
 
