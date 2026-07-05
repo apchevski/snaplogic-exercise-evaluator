@@ -20,19 +20,21 @@ Mentors and admins log into a VPN-restricted web dashboard (styled after the
 classic SnapLogic Dashboard: navy panel headers, sortable/paginated data
 tables, tabbed sub-nav):
 
-- **Grade** (mentor or admin): click **Grade…** on a student's row (or type a
-  new student's project name). A scope picker opens with every active
-  exercise preselected — keep them all for a full run, or check just the
-  exercises you want. A job queues, a worker Lambda runs the deterministic
-  hard gates against SnapLogic, sends each surviving exercise to Claude
-  (Sonnet 4.6, ~$0.95 per full run), renders the report, and the row
-  refreshes live with points and per-task detail. A full run also refreshes
-  the AI Overall summary; a subset run only replaces the selected exercises'
-  results.
-- **Register without grading** (mentor or admin): the same scope picker has a
-  **Register only** button for new students — it adds the student to the list
-  with zero exercises graded (and $0 spent), so grading can happen exercise
-  by exercise later.
+- **Grade** (mentor or admin): click **Grade…** on a student's row. A scope
+  picker opens with every active exercise preselected — keep them all for a
+  full run, or check just the exercises you want. A job queues, a worker
+  Lambda runs the deterministic hard gates against SnapLogic, sends each
+  surviving exercise to Claude (Sonnet 4.6, ~$0.95 per full run), renders
+  the report, and the row refreshes live with points and per-task detail. A
+  full run also refreshes the AI Overall summary; a subset run only replaces
+  the selected exercises' results.
+- **Add a student** (mentor or admin): type the student's SnapLogic project
+  name into the toolbar and click **Add Student**. The API first verifies a
+  project with that exact name exists in the student project space (a typo
+  gets a clear "no project named …" error instead of a card that every
+  grading run would fail on), then registers the student with zero exercises
+  graded (and $0 spent) — grading starts later from the row's **Grade…**
+  button.
 - **Regrade one exercise** (mentor or admin): on a student's detail page,
   every task card has a **Regrade** button that re-runs just that exercise
   (one Claude call instead of one per exercise — faster and cheaper than a
@@ -73,7 +75,8 @@ Browser (VPN/office IPs only)
   ├─► CloudFront ── CF Function (IP allowlist) ──► S3 (React SPA, frontend/)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
         ├─ GET  students / reports / exercises / job status   (any logged-in user)
-        ├─ POST /v1/students {student} — register, no grading (mentor or admin)
+        ├─ POST /v1/students {student} — register, no grading; 400 unless a
+        │        matching SnapLogic project exists     (mentor or admin)
         ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
         ├─ PATCH /v1/students/{slug}/report — edit AI text    (mentor or admin)
         ├─ POST /v1/preps {slug?}                             (admin only)

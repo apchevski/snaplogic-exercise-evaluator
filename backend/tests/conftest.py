@@ -27,6 +27,17 @@ os.environ["EVALUATOR_EXERCISES_DIR"] = str(_SESSION_DIR / "exercises")
 os.environ["EVALUATOR_TMP_DIR"] = str(_SESSION_DIR / "scratch")
 os.environ["EVALUATOR_GRADES_DIR"] = str(_SESSION_DIR / "grades")
 os.environ["EVALUATOR_DISABLE_UI_REBUILD"] = "1"
+# POST /v1/students probes the SnapLogic API when credentials are present —
+# scrub any ambient creds (dev shell / .env) so no test can hit the real org.
+for _key in (
+    "SECRET_ARN",
+    "SNAPLOGIC_BASE_URL",
+    "SNAPLOGIC_ADMIN_USERNAME",
+    "SNAPLOGIC_ADMIN_PASSWORD",
+    "SNAPLOGIC_ORG_NAME",
+    "SNAPLOGIC_STUDENT_PROJECT_SPACE",
+):
+    os.environ.pop(_key, None)
 
 # Repo root on sys.path so `evaluator` and `backend` import in CI.
 _REPO_ROOT = Path(__file__).resolve().parents[2]

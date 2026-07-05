@@ -59,6 +59,8 @@ def test_source_ip_outside_allowlist_403(aws, monkeypatch):
 
 
 def test_register_student_then_duplicate_409(aws):
+    # No SnapLogic creds in the test env → the project-existence check is
+    # skipped and registration proceeds (credential-less local dev behavior).
     resp = _call(api_event("POST", "/v1/students", body={"student": "New Kid"}))
     assert resp["statusCode"] == 201
     student = _body(resp)["student"]
@@ -88,6 +90,66 @@ def test_registered_student_detail_has_no_report(aws):
     data = _body(resp)
     assert data["student"]["display_name"] == "Report Less"
     assert data["report"] is None
+
+
+def _snaplogic_env(monkeypatch):
+    """Fake SnapLogic creds so the register route's project check runs."""
+    monkeypatch.setenv("SNAPLOGIC_BASE_URL", "https://example.snaplogic.test")
+    monkeypatch.setenv("SNAPLOGIC_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("SNAPLOGIC_ADMIN_PASSWORD", "pw")
+    monkeypatch.setenv("SNAPLOGIC_ORG_NAME", "TestOrg")
+    monkeypatch.setenv("SNAPLOGIC_STUDENT_PROJECT_SPACE", "IWC_Support")
+
+
+def test_register_student_project_missing_400(aws, monkeypatch):
+    import httpx
+
+    from evaluator.snaplogic_client import SnapLogicClient
+
+    _snaplogic_env(monkeypatch)
+    seen = {}
+
+    def missing(self, org, ps, project):
+        seen["path"] = (org, ps, project)
+        req = httpx.Request("GET", "https://example.snaplogic.test/x")
+        raise httpx.HTTPStatusError(
+            "404", request=req, response=httpx.Response(404, request=req)
+        )
+
+    monkeypatch.setattr(SnapLogicClient, "list_assets", missing)
+    resp = _call(api_event("POST", "/v1/students", body={"student": "Ghost Kid"}))
+    assert resp["statusCode"] == 400
+    assert "No project named 'Ghost Kid'" in _body(resp)["message"]
+    assert seen["path"] == ("TestOrg", "IWC_Support", "Ghost Kid")
+    # Nothing was registered.
+    assert _body(_call(api_event("GET", "/v1/students")))["students"] == []
+
+
+def test_register_student_project_exists_201(aws, monkeypatch):
+    from evaluator.snaplogic_client import SnapLogicClient
+
+    _snaplogic_env(monkeypatch)
+    monkeypatch.setattr(
+        SnapLogicClient, "list_assets", lambda self, org, ps, project: []
+    )
+    resp = _call(api_event("POST", "/v1/students", body={"student": "Real Kid"}))
+    assert resp["statusCode"] == 201
+
+
+def test_register_student_snaplogic_unreachable_502(aws, monkeypatch):
+    import httpx
+
+    from evaluator.snaplogic_client import SnapLogicClient
+
+    _snaplogic_env(monkeypatch)
+
+    def down(self, org, ps, project):
+        raise httpx.ConnectError("no route to host")
+
+    monkeypatch.setattr(SnapLogicClient, "list_assets", down)
+    resp = _call(api_event("POST", "/v1/students", body={"student": "Any Kid"}))
+    assert resp["statusCode"] == 502
+    assert _body(_call(api_event("GET", "/v1/students")))["students"] == []
 
 
 # ---------- gradings ----------

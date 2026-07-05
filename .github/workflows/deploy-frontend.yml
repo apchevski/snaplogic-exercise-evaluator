@@ -70,6 +70,11 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      # Editor placeholders only — real values are loaded from .github/deploy.vars
+      # at runtime via $GITHUB_ENV, which overrides job-level env.
+      AWS_DEPLOY_ROLE_ARN: ""
+      AWS_REGION: ""
     defaults:
       run:
         working-directory: frontend

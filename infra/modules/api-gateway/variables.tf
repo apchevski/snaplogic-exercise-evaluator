@@ -30,6 +30,11 @@ variable "queue_arn" {
   type = string
 }
 
+variable "secret_arn" {
+  description = "App secret with the SnapLogic credentials — POST /v1/students verifies the student's project exists before registering."
+  type        = string
+}
+
 variable "jwt_issuer" {
   type = string
 }
