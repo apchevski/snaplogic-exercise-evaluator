@@ -3,6 +3,7 @@
 // and cognito:groups claims from it).
 
 import type {
+  AppConfig,
   CreateExercisePayload,
   CreateExerciseResult,
   Exercise,
@@ -59,6 +60,10 @@ function gradingScope(tasks?: string | string[]): { task?: string; tasks?: strin
 }
 
 export const api = {
+  // Non-secret SnapLogic settings (default student project space etc.).
+  getConfig: (token: string) =>
+    request<{ config: AppConfig }>(token, "GET", "/v1/config"),
+
   listStudents: (token: string) =>
     request<{ students: StudentMeta[] }>(token, "GET", "/v1/students"),
 
@@ -118,11 +123,14 @@ export const api = {
       payload,
     ),
 
-  // Add a student to the list without grading anything.
-  registerStudent: (token: string, student: string, space?: string) =>
+  // Add a student to the list without grading anything. The optional
+  // project space and project name are stored on the student and dictate
+  // where every later grading run looks for their pipelines.
+  registerStudent: (token: string, student: string, space?: string, project?: string) =>
     request<{ student: StudentMeta }>(token, "POST", "/v1/students", {
       student,
       ...(space ? { space } : {}),
+      ...(project ? { project } : {}),
     }),
 
   // No tasks = full grading (also refreshes the AI Overall summary); a

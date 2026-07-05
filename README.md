@@ -28,13 +28,16 @@ tables, tabbed sub-nav):
   the report, and the row refreshes live with points and per-task detail. A
   full run also refreshes the AI Overall summary; a subset run only replaces
   the selected exercises' results.
-- **Add a student** (mentor or admin): type the student's SnapLogic project
-  name into the toolbar and click **Add Student**. The API first verifies a
-  project with that exact name exists in the student project space (a typo
-  gets a clear "no project named …" error instead of a card that every
-  grading run would fail on), then registers the student with zero exercises
-  graded (and $0 spent) — grading starts later from the row's **Grade…**
-  button.
+- **Add a student** (mentor or admin): click **Add Student…** in the toolbar.
+  The dialog takes the student's name plus the SnapLogic **project space**
+  (prefilled with the configured default, `SNAPLOGIC_STUDENT_PROJECT_SPACE`)
+  and optionally a **project** name for when the project isn't named exactly
+  after the student. Both are stored on the student and dictate where every
+  later grading run looks for their pipelines. The API first verifies the
+  project exists at that location (a typo gets a clear "no project named …"
+  error instead of a card that every grading run would fail on), then
+  registers the student with zero exercises graded (and $0 spent) — grading
+  starts later from the row's **Grade…** button.
 - **Regrade one exercise** (mentor or admin): on a student's detail page,
   every task card has a **Regrade** button that re-runs just that exercise
   (one Claude call instead of one per exercise — faster and cheaper than a
@@ -75,8 +78,10 @@ Browser (VPN/office IPs only)
   ├─► CloudFront ── CF Function (IP allowlist) ──► S3 (React SPA, frontend/)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
         ├─ GET  students / reports / exercises / job status   (any logged-in user)
-        ├─ POST /v1/students {student} — register, no grading; 400 unless a
-        │        matching SnapLogic project exists     (mentor or admin)
+        ├─ GET  /v1/config — non-secret SnapLogic defaults     (any logged-in user)
+        ├─ POST /v1/students {student, space?, project?} — register, no
+        │        grading; 400 unless the SnapLogic project exists; the stored
+        │        space/project dictate later grading runs (mentor or admin)
         ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
         ├─ PATCH /v1/students/{slug}/report — edit AI text    (mentor or admin)
         ├─ POST /v1/preps {slug?}                             (admin only)
@@ -344,7 +349,7 @@ Required env vars (see `.env.example`):
 | `SNAPLOGIC_ORG_NAME`                | Top-level org (used as the first path segment in every lookup)       |
 | `SNAPLOGIC_SOLUTION_PROJECT_SPACE`  | Project space holding the **solution** pipelines                     |
 | `SNAPLOGIC_SOLUTION_PROJECT`        | Project (within the solution space) holding the solution pipelines   |
-| `SNAPLOGIC_STUDENT_PROJECT_SPACE`   | Project space to search when grading a student by name (default `IWC_Support`) |
+| `SNAPLOGIC_STUDENT_PROJECT_SPACE`   | **Default** project space for students (default `IWC_Support`) — prefills the Add Student dialog; the per-student space stored at registration wins |
 
 > Migration note: `SNAPLOGIC_PROJECT_SPACE_NAME` / `SNAPLOGIC_PROJECT_NAME` were
 > renamed to `SNAPLOGIC_SOLUTION_PROJECT_SPACE` / `SNAPLOGIC_SOLUTION_PROJECT`

@@ -76,6 +76,7 @@ def run_grade(
     student: str,
     *,
     project_space: str | None = None,
+    project: str | None = None,
     task_slug: str | None = None,
     judge: AIJudge | None = None,
     plan_fn: Callable[[str, str | None, str | None], int] | None = None,
@@ -83,10 +84,16 @@ def run_grade(
 ) -> GradeRunResult:
     """Grade one student end to end and return the structured result.
 
-    `plan_fn` / `report_fn` default to the real `evaluator.grade` commands;
-    tests inject fakes so no SnapLogic access is needed.
+    `project` overrides the SnapLogic project name to look in (defaults to
+    the student name). `plan_fn` / `report_fn` default to the real
+    `evaluator.grade` commands; tests inject fakes so no SnapLogic access is
+    needed.
     """
-    plan_fn = plan_fn or grade.cmd_plan
+    # Only the plan step reaches SnapLogic; the report step reads the
+    # manifest, which already carries the resolved project path.
+    plan_fn = plan_fn or (
+        lambda s, ps, t: grade.cmd_plan(s, ps, t, project=project)
+    )
     report_fn = report_fn or grade.cmd_report
 
     rc = plan_fn(student, project_space, task_slug)

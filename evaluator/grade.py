@@ -148,6 +148,7 @@ def cmd_plan(
     student: str,
     project_space: str | None,
     task_slug: str | None = None,
+    project: str | None = None,
 ) -> int:
     try:
         settings = load_settings()
@@ -161,7 +162,11 @@ def cmd_plan(
 
     org = settings.org_name
     ps = project_space or settings.student_project_space_name
-    student_project_path = f"{org}/{ps}/{student}"
+    # The SnapLogic project holding the student's pipelines — by default the
+    # project is named exactly after the student, but a per-student override
+    # (set when registering the student) wins.
+    proj = (project or "").strip() or student
+    student_project_path = f"{org}/{ps}/{proj}"
 
     registered = list_tasks()
     all_folders = list_exercise_folders()
@@ -199,7 +204,7 @@ def cmd_plan(
 
     with SnapLogicClient(settings) as client:
         try:
-            assets = client.list_assets(org, ps, student)
+            assets = client.list_assets(org, ps, proj)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 print(
@@ -237,7 +242,7 @@ def cmd_plan(
             print(f"[{slug}] MISSING — no pipeline matching {target!r}")
             continue
 
-        student_pipeline_path = f"{org}/{ps}/{student}/{matched}"
+        student_pipeline_path = f"{org}/{ps}/{proj}/{matched}"
         print(f"\n[{slug}] running evaluator against {matched!r} ...")
         try:
             exit_code = run_evaluation(slug, student_pipeline_path, student_name=student)
@@ -299,6 +304,7 @@ def cmd_plan(
         "student": student,
         "org": org,
         "project_space": ps,
+        "project": proj,
         "student_project_path": student_project_path,
         "generated_at": _dt.date.today().isoformat(),
         "entries": entries,
@@ -604,6 +610,7 @@ def _write_report_json(
         "student": manifest["student"],
         "org": manifest["org"],
         "project_space": manifest["project_space"],
+        "project": manifest.get("project") or manifest["student"],
         "student_project_path": manifest["student_project_path"],
         "graded_at": manifest["generated_at"],
         "counts": {**counts, "total": total_exercises},
@@ -661,6 +668,7 @@ def _update_report_json_in_place(
         "student": manifest["student"],
         "org": manifest["org"],
         "project_space": manifest["project_space"],
+        "project": manifest.get("project") or manifest["student"],
         "student_project_path": manifest["student_project_path"],
         "graded_at": manifest["generated_at"],
         "single_task_only": slug,
@@ -981,6 +989,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Override SNAPLOGIC_STUDENT_PROJECT_SPACE.",
     )
     p_plan.add_argument(
+        "--project",
+        dest="project",
+        default=None,
+        help="SnapLogic project holding the student's pipelines (defaults to the student name).",
+    )
+    p_plan.add_argument(
         "--task",
         dest="task_slug",
         default=None,
@@ -1012,7 +1026,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.cmd == "plan":
-        return cmd_plan(args.student, args.project_space, args.task_slug)
+        return cmd_plan(args.student, args.project_space, args.task_slug, args.project)
     if args.cmd == "report":
         return cmd_report(args.student, args.project_space, args.task_slug)
     if args.cmd == "sync-overall":

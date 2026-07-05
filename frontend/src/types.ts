@@ -48,6 +48,9 @@ export interface StudentMeta {
   slug: string;
   display_name: string;
   space?: string | null;
+  // SnapLogic project holding the student's pipelines; unset/null means
+  // the project is named exactly after the student.
+  project?: string | null;
   counts?: Counts;
   points_earned?: number;
   points_possible?: number;
@@ -59,6 +62,15 @@ export interface StudentMeta {
   // Set when the student was added via "register without grading".
   registered_by?: string;
   registered_at?: string;
+}
+
+/** Non-secret SnapLogic settings from GET /v1/config (prefills the Add
+ * Student dialog's project space). */
+export interface AppConfig {
+  org_name?: string | null;
+  student_project_space?: string | null;
+  solution_project_space?: string | null;
+  solution_project?: string | null;
 }
 
 export interface Job {

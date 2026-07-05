@@ -136,6 +136,52 @@ def test_register_student_project_exists_201(aws, monkeypatch):
     assert resp["statusCode"] == 201
 
 
+def test_register_student_stores_space_and_project(aws, monkeypatch):
+    from evaluator.snaplogic_client import SnapLogicClient
+
+    _snaplogic_env(monkeypatch)
+    seen = {}
+
+    def ok(self, org, ps, project):
+        seen["path"] = (org, ps, project)
+        return []
+
+    monkeypatch.setattr(SnapLogicClient, "list_assets", ok)
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/students",
+            body={
+                "student": "Custom Kid",
+                "space": "Other_Space",
+                "project": "Custom Project",
+            },
+        )
+    )
+    assert resp["statusCode"] == 201
+    student = _body(resp)["student"]
+    assert student["space"] == "Other_Space"
+    assert student["project"] == "Custom Project"
+    # Verification probed the overridden location, not the defaults.
+    assert seen["path"] == ("TestOrg", "Other_Space", "Custom Project")
+
+
+def test_register_student_defaults_space_from_env(aws, monkeypatch):
+    from evaluator.snaplogic_client import SnapLogicClient
+
+    _snaplogic_env(monkeypatch)  # SNAPLOGIC_STUDENT_PROJECT_SPACE=IWC_Support
+    monkeypatch.setattr(
+        SnapLogicClient, "list_assets", lambda self, org, ps, project: []
+    )
+    resp = _call(api_event("POST", "/v1/students", body={"student": "Env Kid"}))
+    assert resp["statusCode"] == 201
+    student = _body(resp)["student"]
+    # The resolved default is stored on the card so the dashboard column and
+    # every later grading run agree on where this student lives.
+    assert student["space"] == "IWC_Support"
+    assert student["project"] is None
+
+
 def test_register_student_snaplogic_unreachable_502(aws, monkeypatch):
     import httpx
 
@@ -152,7 +198,68 @@ def test_register_student_snaplogic_unreachable_502(aws, monkeypatch):
     assert _body(_call(api_event("GET", "/v1/students")))["students"] == []
 
 
+# ---------- config ----------
+
+
+def test_get_config_returns_non_secret_settings(aws, monkeypatch):
+    monkeypatch.setenv("SNAPLOGIC_ORG_NAME", "TestOrg")
+    monkeypatch.setenv("SNAPLOGIC_STUDENT_PROJECT_SPACE", "Training_Space")
+    resp = _call(api_event("GET", "/v1/config"))
+    assert resp["statusCode"] == 200
+    cfg = _body(resp)["config"]
+    assert cfg["org_name"] == "TestOrg"
+    assert cfg["student_project_space"] == "Training_Space"
+    assert cfg["solution_project_space"] is None
+    # Credentials never appear, not even as keys.
+    assert "SNAPLOGIC_ADMIN_PASSWORD" not in json.dumps(cfg)
+    assert "password" not in json.dumps(cfg).lower()
+
+
 # ---------- gradings ----------
+
+
+def test_post_grading_uses_registered_space_and_project(aws):
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#card-kid",
+            "sk": "META",
+            "entity": "student",
+            "slug": "card-kid",
+            "display_name": "Card Kid",
+            "space": "Space_Y",
+            "project": "Project_Y",
+        }
+    )
+    resp = _call(api_event("POST", "/v1/gradings", body={"student": "Card Kid"}))
+    assert resp["statusCode"] == 202
+    messages = aws["sqs"].receive_message(QueueUrl=os.environ["QUEUE_URL"])["Messages"]
+    payload = json.loads(messages[0]["Body"])
+    assert payload["space"] == "Space_Y"
+    assert payload["project"] == "Project_Y"
+
+
+def test_post_grading_body_space_overrides_card(aws):
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#override-kid",
+            "sk": "META",
+            "entity": "student",
+            "slug": "override-kid",
+            "display_name": "Override Kid",
+            "space": "Card_Space",
+        }
+    )
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/gradings",
+            body={"student": "Override Kid", "space": "One_Off_Space"},
+        )
+    )
+    assert resp["statusCode"] == 202
+    messages = aws["sqs"].receive_message(QueueUrl=os.environ["QUEUE_URL"])["Messages"]
+    payload = json.loads(messages[0]["Body"])
+    assert payload["space"] == "One_Off_Space"
 
 
 def test_post_grading_then_duplicate_409(aws):

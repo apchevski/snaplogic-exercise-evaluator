@@ -350,6 +350,26 @@ def _reject_archived(slug: str, action: str) -> None:
 # ---------- read routes (any authenticated user) ----------
 
 
+@app.get("/v1/config")
+def get_config() -> dict[str, Any]:
+    """Non-secret SnapLogic settings the UI needs (e.g. to prefill the
+    Add Student dialog's project space). Credentials never leave the server."""
+    _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    load_secrets_into_env()
+
+    def env(key: str) -> str | None:
+        return os.environ.get(key, "").strip() or None
+
+    return {
+        "config": {
+            "org_name": env("SNAPLOGIC_ORG_NAME"),
+            "student_project_space": env("SNAPLOGIC_STUDENT_PROJECT_SPACE"),
+            "solution_project_space": env("SNAPLOGIC_SOLUTION_PROJECT_SPACE"),
+            "solution_project": env("SNAPLOGIC_SOLUTION_PROJECT"),
+        }
+    }
+
+
 @app.get("/v1/students")
 def list_students() -> dict[str, Any]:
     _require_role(ROLE_ADMIN, ROLE_MENTOR)
@@ -559,12 +579,26 @@ def get_prep(job_id: str) -> dict[str, Any]:
 # ---------- write routes ----------
 
 
-def _verify_student_project(student: str, space: str | None) -> None:
-    """Reject registration when SnapLogic has no project named after the student.
+def _default_student_space() -> str | None:
+    """The configured default student project space, if any."""
+    load_secrets_into_env()
+    return os.environ.get("SNAPLOGIC_STUDENT_PROJECT_SPACE", "").strip() or None
 
-    The student name IS the project name inside the student project space, so
-    a typo here would register a card that every subsequent grading run fails
-    on. One GET (asset list) settles it: 404 → clear 400 back to the UI.
+
+def _opt_str(body: dict[str, Any], key: str) -> str | None:
+    """Trimmed optional string from the request body (empty → None)."""
+    raw = body.get(key)
+    if raw is None:
+        return None
+    return str(raw).strip() or None
+
+
+def _verify_student_project(project: str, space: str | None) -> None:
+    """Reject registration when SnapLogic has no project with that name.
+
+    The project (by default named exactly after the student) must exist in
+    the student project space, or every subsequent grading run would fail.
+    One GET (asset list) settles it: 404 → clear 400 back to the UI.
     Credentials come from the app secret (deployed) or the ambient env
     (local dev); when they aren't configured at all the check is skipped so
     registration keeps working in credential-less environments (e.g. tests).
@@ -578,9 +612,7 @@ def _verify_student_project(student: str, space: str | None) -> None:
     org = os.environ.get("SNAPLOGIC_ORG_NAME", "").strip()
     if not (base_url and username and password and org):
         return
-    ps = space or os.environ.get(
-        "SNAPLOGIC_STUDENT_PROJECT_SPACE", ""
-    ).strip() or "IWC_Support"
+    ps = space or _default_student_space() or "IWC_Support"
 
     from evaluator.config import Settings
     from evaluator.snaplogic_client import SnapLogicClient
@@ -597,13 +629,13 @@ def _verify_student_project(student: str, space: str | None) -> None:
     # Stay well under the 29 s API Gateway ceiling.
     with SnapLogicClient(settings, timeout_s=10.0) as client:
         try:
-            client.list_assets(org, ps, student)
+            client.list_assets(org, ps, project)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 raise BadRequestError(
-                    f"No project named {student!r} exists in the {ps!r} "
-                    "project space — the student name must match their "
-                    "SnapLogic project exactly."
+                    f"No project named {project!r} exists in the {ps!r} "
+                    "project space — check the project space and project "
+                    "name (the project defaults to the student name)."
                 )
             raise ServiceError(
                 502,
@@ -622,9 +654,13 @@ def post_student() -> Response:
 
     Creates the STUDENT card so the student shows up on the dashboard with
     every exercise still ungraded; a full or per-exercise grading can then
-    be started later. 400 if no SnapLogic project matches the student name;
-    409 if the student already exists (registered or graded) — nothing about
-    an existing student is overwritten.
+    be started later. Optional body keys 'space' (project space; defaults to
+    SNAPLOGIC_STUDENT_PROJECT_SPACE) and 'project' (SnapLogic project name;
+    defaults to the student name) are stored on the card and dictate where
+    every later grading run looks for this student's pipelines. 400 if no
+    matching SnapLogic project exists; 409 if the student already exists
+    (registered or graded) — nothing about an existing student is
+    overwritten.
     """
     from botocore.exceptions import ClientError
 
@@ -634,16 +670,19 @@ def post_student() -> Response:
     if not student:
         raise BadRequestError("Body must include a non-empty 'student'.")
     slug = slugify(student)
-    _verify_student_project(
-        student, (str(body.get("space")).strip() or None) if body.get("space") else None
-    )
+    # Resolve the space at registration time so the card (and the dashboard
+    # column) always carries the value grading will actually use.
+    space = _opt_str(body, "space") or _default_student_space()
+    project = _opt_str(body, "project")
+    _verify_student_project(project or student, space)
     row = {
         "pk": f"STUDENT#{slug}",
         "sk": "META",
         "entity": "student",
         "slug": slug,
         "display_name": student,
-        "space": (str(body.get("space")).strip() or None) if body.get("space") else None,
+        "space": space,
+        "project": project,
         "registered_by": _email(claims),
         "registered_at": utc_now_iso(),
     }
@@ -669,12 +708,24 @@ def post_grading() -> Response:
     A full run (no task/tasks) also refreshes the AI Overall summary; a
     scoped run only replaces the selected tasks' results in the stored
     report, appending them if the student was never graded on them before.
+
+    The project space and project name assigned at registration (the
+    STUDENT card) dictate where the run looks for the student's pipelines;
+    body 'space' overrides the card for one run, and the env default fills
+    the gap for cards registered before spaces were stored.
     """
     claims = _require_role(ROLE_ADMIN, ROLE_MENTOR)
     body = app.current_event.json_body or {}
     student = str(body.get("student") or "").strip()
     if not student:
         raise BadRequestError("Body must include a non-empty 'student'.")
+    student_slug = slugify(student)
+    card = from_dynamo(
+        dynamo_table()
+        .get_item(Key={"pk": f"STUDENT#{student_slug}", "sk": "META"})
+        .get("Item")
+        or {}
+    )
     task = (str(body.get("task")).strip() or None) if body.get("task") else None
     tasks: list[str] | None = None
     if body.get("tasks") is not None:
@@ -705,12 +756,13 @@ def post_grading() -> Response:
         _reject_archived(slug, "grade")
     payload = {
         "student": student,
-        "student_slug": slugify(student),
-        "space": (str(body.get("space")).strip() or None) if body.get("space") else None,
+        "student_slug": student_slug,
+        "space": _opt_str(body, "space") or card.get("space") or _default_student_space(),
+        "project": _opt_str(body, "project") or card.get("project"),
         "task": task,
         "tasks": tasks,
     }
-    job = _create_job("grade", slugify(student), payload, _email(claims))
+    job = _create_job("grade", student_slug, payload, _email(claims))
     return Response(
         status_code=202, content_type="application/json", body=json.dumps(job)
     )
