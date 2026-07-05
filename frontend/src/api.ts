@@ -50,6 +50,14 @@ async function request<T>(
   return (text ? JSON.parse(text) : {}) as T;
 }
 
+/** Map a grading scope onto the POST /v1/gradings body: single slug →
+ * 'task', several → 'tasks', empty/undefined → full grading. */
+function gradingScope(tasks?: string | string[]): { task?: string; tasks?: string[] } {
+  if (typeof tasks === "string") return tasks ? { task: tasks } : {};
+  if (!tasks || tasks.length === 0) return {};
+  return tasks.length === 1 ? { task: tasks[0] } : { tasks };
+}
+
 export const api = {
   listStudents: (token: string) =>
     request<{ students: StudentMeta[] }>(token, "GET", "/v1/students"),
@@ -110,10 +118,19 @@ export const api = {
       payload,
     ),
 
-  startGrading: (token: string, student: string, task?: string) =>
+  // Add a student to the list without grading anything.
+  registerStudent: (token: string, student: string, space?: string) =>
+    request<{ student: StudentMeta }>(token, "POST", "/v1/students", {
+      student,
+      ...(space ? { space } : {}),
+    }),
+
+  // No tasks = full grading (also refreshes the AI Overall summary); a
+  // string or a subset of slugs only (re)grades those exercises.
+  startGrading: (token: string, student: string, tasks?: string | string[]) =>
     request<{ id: string }>(token, "POST", "/v1/gradings", {
       student,
-      ...(task ? { task } : {}),
+      ...gradingScope(tasks),
     }),
 
   getGrading: (token: string, id: string) =>

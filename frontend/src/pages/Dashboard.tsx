@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { api, pollJob } from "../api";
 import { useToken } from "../auth";
+import { GradeScopeModal } from "../components/GradeScopeModal";
 import { StatusPill } from "../components/StatusPill";
 import {
   PagerFooter,
@@ -14,7 +15,7 @@ import {
   type SortState,
 } from "../components/table";
 import { tierForRatio } from "../components/TaskCard";
-import type { Job, StudentMeta } from "../types";
+import type { Exercise, Job, StudentMeta } from "../types";
 
 const COMPARE: Record<string, (a: StudentMeta, b: StudentMeta) => number> = {
   student: (a, b) => a.display_name.localeCompare(b.display_name),
@@ -42,12 +43,15 @@ function Count({ n, kind }: { n: number; kind: string }) {
 export default function Dashboard() {
   const token = useToken();
   const [students, setStudents] = useState<StudentMeta[]>([]);
+  const [exercises, setExercises] = useState<Exercise[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "points", dir: "desc" });
   const [perPage, setPerPage] = useState(25);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [newStudent, setNewStudent] = useState("");
+  // Grade-scope picker: which student a grading is being configured for.
+  const [scopeFor, setScopeFor] = useState<{ name: string; slug?: string; isNew: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -69,17 +73,42 @@ export default function Dashboard() {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    api
+      .listExercises(token)
+      .then(({ exercises }) => setExercises(exercises))
+      .catch(() => setExercises([])); // chip/scope picker degrade gracefully
+  }, [token]);
+
+  const activeExercises = useMemo(
+    () => exercises.filter((e) => !e.archived && !e.missing_from_image),
+    [exercises],
+  );
+
   const startGrade = useCallback(
-    async (studentName: string, slugHint?: string) => {
+    async (studentName: string, slugHint?: string, tasks?: string[] | null) => {
       const key = slugHint ?? studentName;
       setError(null);
       try {
-        const { id } = await api.startGrading(token, studentName);
+        const { id } = await api.startGrading(token, studentName, tasks ?? undefined);
         const job = await pollJob(
           () => api.getGrading(token, id),
           (j) => setJobs((prev) => ({ ...prev, [key]: j })),
         );
         if (job.status === "succeeded") void refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [token, refresh],
+  );
+
+  const registerOnly = useCallback(
+    async (studentName: string) => {
+      setError(null);
+      try {
+        await api.registerStudent(token, studentName);
+        void refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -171,18 +200,24 @@ export default function Dashboard() {
                 e.preventDefault();
                 const name = newStudent.trim();
                 if (name) {
-                  setNewStudent("");
-                  void startGrade(name);
+                  const existing = students.find(
+                    (s) => s.display_name.toLowerCase() === name.toLowerCase(),
+                  );
+                  setScopeFor({
+                    name: existing?.display_name ?? name,
+                    slug: existing?.slug,
+                    isNew: !existing,
+                  });
                 }
               }}
             >
               <input
-                placeholder="Grade a new student (project name)…"
+                placeholder="Add a new student (project name)…"
                 value={newStudent}
                 onChange={(e) => setNewStudent(e.target.value)}
               />
               <button className="btn primary" type="submit" disabled={!newStudent.trim()}>
-                Grade New
+                Grade / Register
               </button>
             </form>
             <label className="field">
@@ -234,6 +269,13 @@ export default function Dashboard() {
                 const tier = tierForRatio(earned, possible);
                 const pct = possible > 0 ? Math.round((earned / possible) * 100) : null;
                 const isOpen = expanded.has(s.slug);
+                // Registered exercises this student has no verdict for at
+                // all — never graded, or the exercise was added later.
+                const gradedCount = c.pass + c.fail + c.missing + (c.needs_prep ?? 0);
+                const notGraded =
+                  activeExercises.length > 0
+                    ? Math.max(0, activeExercises.length - gradedCount)
+                    : 0;
                 return (
                   <Fragment key={s.slug}>
                     <tr>
@@ -268,6 +310,14 @@ export default function Dashboard() {
                             ⚠
                           </span>
                         )}
+                        {notGraded > 0 && (
+                          <span
+                            className="ungraded-chip"
+                            title={`${notGraded} registered exercise${notGraded === 1 ? " has" : "s have"} never been graded for this student. Open the student to grade ${notGraded === 1 ? "it" : "them"} individually.`}
+                          >
+                            {notGraded} not graded
+                          </span>
+                        )}
                       </td>
                       <td className={sc("pass")}>
                         <Count n={c.pass} kind="pass" />
@@ -285,10 +335,12 @@ export default function Dashboard() {
                         <span className="actions-cell">
                           <button
                             className="btn small"
-                            onClick={() => void startGrade(s.display_name, s.slug)}
+                            onClick={() =>
+                              setScopeFor({ name: s.display_name, slug: s.slug, isNew: false })
+                            }
                             disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
                           >
-                            Grade
+                            Grade…
                           </button>
                         </span>
                       </td>
@@ -304,8 +356,9 @@ export default function Dashboard() {
               {!loading && visible.length === 0 && (
                 <tr>
                   <td colSpan={9} className="empty-cell">
-                    <h3>No graded students yet</h3>
-                    Use “Grade a new student” above to run the first grading.
+                    <h3>No students yet</h3>
+                    Use “Add a new student” above to register a student or run the
+                    first grading — all exercises or just the ones you pick.
                   </td>
                 </tr>
               )}
@@ -320,6 +373,27 @@ export default function Dashboard() {
           </table>
         </div>
       </Panel>
+
+      {scopeFor && (
+        <GradeScopeModal
+          studentName={scopeFor.name}
+          exercises={activeExercises}
+          isNew={scopeFor.isNew}
+          onStart={(tasks) => {
+            const { name, slug } = scopeFor;
+            setScopeFor(null);
+            setNewStudent("");
+            void startGrade(name, slug, tasks);
+          }}
+          onRegister={() => {
+            const { name } = scopeFor;
+            setScopeFor(null);
+            setNewStudent("");
+            void registerOnly(name);
+          }}
+          onClose={() => setScopeFor(null)}
+        />
+      )}
     </main>
   );
 }

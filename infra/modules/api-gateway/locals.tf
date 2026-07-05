@@ -1,6 +1,7 @@
 locals {
   routes = [
     "GET /v1/students",
+    "POST /v1/students",
     "GET /v1/students/{slug}",
     "GET /v1/students/{slug}/reports",
     "PATCH /v1/students/{slug}/report",

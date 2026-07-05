@@ -9,6 +9,7 @@ Defense layers (outer → inner):
        | Action                            | admin | mentor |
        |-----------------------------------|-------|--------|
        | GET  (students/reports/jobs/…)    |  ✅   |  ✅    |
+       | POST /v1/students                 |  ✅   |  ✅    |
        | POST /v1/gradings                 |  ✅   |  ✅    |
        | PATCH /v1/students/{slug}/report  |  ✅   |  ✅    |
        | POST /v1/preps                    |  ✅   |  ❌ 403|
@@ -557,25 +558,95 @@ def get_prep(job_id: str) -> dict[str, Any]:
 # ---------- write routes ----------
 
 
+@app.post("/v1/students")
+def post_student() -> Response:
+    """Register a student without grading anything (admin or mentor).
+
+    Creates the STUDENT card so the student shows up on the dashboard with
+    every exercise still ungraded; a full or per-exercise grading can then
+    be started later. 409 if the student already exists (registered or
+    graded) — nothing about an existing student is overwritten.
+    """
+    from botocore.exceptions import ClientError
+
+    claims = _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    body = app.current_event.json_body or {}
+    student = str(body.get("student") or "").strip()
+    if not student:
+        raise BadRequestError("Body must include a non-empty 'student'.")
+    slug = slugify(student)
+    row = {
+        "pk": f"STUDENT#{slug}",
+        "sk": "META",
+        "entity": "student",
+        "slug": slug,
+        "display_name": student,
+        "space": (str(body.get("space")).strip() or None) if body.get("space") else None,
+        "registered_by": _email(claims),
+        "registered_at": utc_now_iso(),
+    }
+    try:
+        dynamo_table().put_item(
+            Item=to_dynamo(row), ConditionExpression="attribute_not_exists(pk)"
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise ServiceError(409, f"Student {student!r} is already on the list.")
+        raise
+    return Response(
+        status_code=201,
+        content_type="application/json",
+        body=json.dumps({"student": public_item(row)}),
+    )
+
+
 @app.post("/v1/gradings")
 def post_grading() -> Response:
+    """Queue a grade job: everything (default), one 'task', or a 'tasks' subset.
+
+    A full run (no task/tasks) also refreshes the AI Overall summary; a
+    scoped run only replaces the selected tasks' results in the stored
+    report, appending them if the student was never graded on them before.
+    """
     claims = _require_role(ROLE_ADMIN, ROLE_MENTOR)
     body = app.current_event.json_body or {}
     student = str(body.get("student") or "").strip()
     if not student:
         raise BadRequestError("Body must include a non-empty 'student'.")
     task = (str(body.get("task")).strip() or None) if body.get("task") else None
-    if task:
-        if task not in _known_exercise_slugs():
+    tasks: list[str] | None = None
+    if body.get("tasks") is not None:
+        if task:
+            raise BadRequestError("Provide either 'task' or 'tasks', not both.")
+        raw = body.get("tasks")
+        if not isinstance(raw, list) or not raw:
+            raise BadRequestError("'tasks' must be a non-empty array of exercise folders.")
+        deduped: list[str] = []
+        for entry in raw:
+            slug = str(entry or "").strip()
+            if not slug:
+                raise BadRequestError("'tasks' entries must be non-empty strings.")
+            if slug not in deduped:
+                deduped.append(slug)
+        # A one-element subset IS a single-task grading — collapse it so the
+        # worker and report rows keep their existing single-task semantics.
+        if len(deduped) == 1:
+            task = deduped[0]
+        else:
+            tasks = deduped
+    known = _known_exercise_slugs()
+    for slug in ([task] if task else []) + (tasks or []):
+        if slug not in known:
             raise BadRequestError(
-                f"Unknown exercise folder {task!r}. Omit 'task' to grade everything."
+                f"Unknown exercise folder {slug!r}. Omit 'task'/'tasks' to grade everything."
             )
-        _reject_archived(task, "grade")
+        _reject_archived(slug, "grade")
     payload = {
         "student": student,
         "student_slug": slugify(student),
         "space": (str(body.get("space")).strip() or None) if body.get("space") else None,
         "task": task,
+        "tasks": tasks,
     }
     job = _create_job("grade", slugify(student), payload, _email(claims))
     return Response(
