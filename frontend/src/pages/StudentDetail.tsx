@@ -6,7 +6,7 @@ import { useToken } from "../auth";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/table";
 import { TaskCard, tierForRatio } from "../components/TaskCard";
-import type { Job, Report, StudentMeta, TaskResult } from "../types";
+import type { Exercise, Job, Report, StudentMeta, TaskResult } from "../types";
 
 // Edit target for the AI-written text: the report's Overall paragraph or one
 // task's summary. Saving PATCHes the stored report in place — no re-grade.
@@ -35,6 +35,7 @@ export default function StudentDetail() {
   const token = useToken();
   const [student, setStudent] = useState<StudentMeta | null>(null);
   const [report, setReport] = useState<Report | null>(null);
+  const [exercises, setExercises] = useState<Exercise[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,6 +63,13 @@ export default function StudentDetail() {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    api
+      .listExercises(token)
+      .then(({ exercises }) => setExercises(exercises))
+      .catch(() => setExercises([])); // "not graded" cards degrade gracefully
+  }, [token]);
+
   const name = student?.display_name ?? report?.student ?? slug;
 
   // The backend holds one grade lock per student, so any queued/running
@@ -70,14 +78,14 @@ export default function StudentDetail() {
     (j) => j.status === "queued" || j.status === "running",
   );
 
-  const regradeTask = useCallback(
-    async (taskSlug: string) => {
+  const runGrading = useCallback(
+    async (jobKey: string, tasks?: string) => {
       setError(null);
       try {
-        const { id } = await api.startGrading(token, name, taskSlug);
+        const { id } = await api.startGrading(token, name, tasks);
         const job = await pollJob(
           () => api.getGrading(token, id),
-          (j) => setJobs((prev) => ({ ...prev, [taskSlug]: j })),
+          (j) => setJobs((prev) => ({ ...prev, [jobKey]: j })),
         );
         if (job.status === "succeeded") {
           // Drop any in-progress text edit: the regraded report replaces it.
@@ -90,6 +98,13 @@ export default function StudentDetail() {
     },
     [token, name, refresh],
   );
+
+  const regradeTask = useCallback(
+    (taskSlug: string) => runGrading(taskSlug, taskSlug),
+    [runGrading],
+  );
+
+  const gradeAll = useCallback(() => runGrading("__all__"), [runGrading]);
 
   const startEdit = (target: EditTarget, currentText: string) => {
     setEditing(target);
@@ -149,6 +164,13 @@ export default function StudentDetail() {
   const unprepped = report?.tasks.filter((t) => t.status === "needs_prep") ?? [];
   const needsPrepCount = unprepped.length || (counts?.needs_prep ?? 0);
   const gradedTasks = report?.tasks.filter((t) => t.status !== "needs_prep") ?? [];
+
+  // Registered exercises with no verdict at all for this student — never
+  // graded, or added to the exercise set after the last grading run.
+  const reportSlugs = new Set((report?.tasks ?? []).map((t) => t.slug));
+  const notGradedExercises = exercises.filter(
+    (e) => !e.archived && !e.missing_from_image && !reportSlugs.has(e.slug),
+  );
 
   const overallText = report?.overall_summary ?? student?.overall_summary ?? "";
 
@@ -227,11 +249,20 @@ export default function StudentDetail() {
             Total: {earned}/{possible} pts
             {pct !== null && <span className="pct">({pct}%)</span>}
           </span>
-          {counts && (
+          {(counts || notGradedExercises.length > 0) && (
             <div className="badges">
-              <span className="badge pass">{counts.pass} pass</span>
-              <span className="badge fail">{counts.fail} fail</span>
-              <span className="badge missing">{counts.missing} missing</span>
+              {counts && (
+                <>
+                  <span className="badge pass">{counts.pass} pass</span>
+                  <span className="badge fail">{counts.fail} fail</span>
+                  <span className="badge missing">{counts.missing} missing</span>
+                </>
+              )}
+              {notGradedExercises.length > 0 && (
+                <span className="badge notgraded">
+                  {notGradedExercises.length} not graded
+                </span>
+              )}
             </div>
           )}
           {editing?.kind === "overall" ? (
@@ -254,10 +285,25 @@ export default function StudentDetail() {
       </Panel>
       <Panel
         title="Task Results"
-        hint="Verdict, points, and deductions for every registered exercise. Regrade re-runs just that exercise — cheaper and faster than a full grading."
+        hint="Verdict, points, and deductions for every registered exercise. Exercises never graded for this student show as “not graded” — grade them one at a time, or regrade any graded one."
       >
         <div className="panel-body">
-          {report ? (
+          {!report && (
+            <div className="grade-all-row">
+              <p className="summary" style={{ margin: 0 }}>
+                Nothing graded yet for this student.
+              </p>
+              <button
+                className="btn small primary"
+                onClick={() => void gradeAll()}
+                disabled={anyBusy}
+              >
+                Grade all exercises
+              </button>
+              {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="grade" />}
+            </div>
+          )}
+          {gradedTasks.length > 0 || notGradedExercises.length > 0 ? (
             <div className="tasks">
               {gradedTasks.map((t) => (
                 <TaskCard
@@ -284,9 +330,39 @@ export default function StudentDetail() {
                   }
                 />
               ))}
+              {notGradedExercises.map((e) => (
+                <div className="task v-notgraded" key={e.slug}>
+                  <header>
+                    <span className="verdict-badge notgraded">not graded</span>
+                    <h3>{e.slug}</h3>
+                    <span className="points-pill tier-none">—/10</span>
+                    <span className="actions-cell">
+                      {jobs[e.slug] && <StatusPill job={jobs[e.slug]} kind="grade" />}
+                      {e.prep_status !== "ready" && (
+                        <span
+                          className="warn-chip"
+                          title="Not prepped — grading will skip it until it's prepped on the Exercises page."
+                        >
+                          ⚠
+                        </span>
+                      )}
+                      <button
+                        className="btn small"
+                        onClick={() => void regradeTask(e.slug)}
+                        disabled={anyBusy}
+                      >
+                        Grade
+                      </button>
+                    </span>
+                  </header>
+                  <p className="summary muted">
+                    This exercise has never been graded for this student.
+                  </p>
+                </div>
+              ))}
             </div>
           ) : (
-            <p className="summary">No stored report yet — run a grading first.</p>
+            !report && <p className="summary">No exercises registered yet.</p>
           )}
         </div>
       </Panel>

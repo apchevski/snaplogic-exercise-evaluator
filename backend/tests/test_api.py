@@ -55,6 +55,41 @@ def test_source_ip_outside_allowlist_403(aws, monkeypatch):
     assert resp["statusCode"] == 200
 
 
+# ---------- student registration ----------
+
+
+def test_register_student_then_duplicate_409(aws):
+    resp = _call(api_event("POST", "/v1/students", body={"student": "New Kid"}))
+    assert resp["statusCode"] == 201
+    student = _body(resp)["student"]
+    assert student["slug"] == "new-kid"
+    assert student["display_name"] == "New Kid"
+    assert student["registered_by"] == "mentor@example.com"
+
+    # Shows up on the list endpoint with no grades at all.
+    listed = _body(_call(api_event("GET", "/v1/students")))["students"]
+    assert [s["slug"] for s in listed] == ["new-kid"]
+    assert "points_earned" not in listed[0]
+    assert "graded_at" not in listed[0]
+
+    dup = _call(api_event("POST", "/v1/students", body={"student": "New Kid"}))
+    assert dup["statusCode"] == 409
+
+
+def test_register_student_requires_name(aws):
+    resp = _call(api_event("POST", "/v1/students", body={}))
+    assert resp["statusCode"] == 400
+
+
+def test_registered_student_detail_has_no_report(aws):
+    _call(api_event("POST", "/v1/students", body={"student": "Report Less"}))
+    resp = _call(api_event("GET", "/v1/students/report-less"))
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    assert data["student"]["display_name"] == "Report Less"
+    assert data["report"] is None
+
+
 # ---------- gradings ----------
 
 
@@ -100,6 +135,66 @@ def test_post_grading_with_task_passes_it_to_the_queue(aws, evaluator_dirs):
     payload = json.loads(messages[0]["Body"])
     assert payload["task"] == "api_grade_task"
     assert payload["student"] == "Task Ed"
+
+
+def test_post_grading_with_tasks_subset_dedupes_and_queues(aws, evaluator_dirs):
+    for slug in ("api_sub_a", "api_sub_b"):
+        (evaluator_dirs["exercises"] / slug).mkdir(exist_ok=True)
+
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/gradings",
+            body={"student": "Sub Set", "tasks": ["api_sub_a", "api_sub_b", "api_sub_a"]},
+        )
+    )
+    assert resp["statusCode"] == 202
+    messages = aws["sqs"].receive_message(QueueUrl=os.environ["QUEUE_URL"])["Messages"]
+    payload = json.loads(messages[0]["Body"])
+    assert payload["tasks"] == ["api_sub_a", "api_sub_b"]
+    assert payload["task"] is None
+
+
+def test_post_grading_single_element_tasks_collapses_to_task(aws, evaluator_dirs):
+    (evaluator_dirs["exercises"] / "api_sub_c").mkdir(exist_ok=True)
+
+    resp = _call(
+        api_event(
+            "POST", "/v1/gradings", body={"student": "Sub One", "tasks": ["api_sub_c"]}
+        )
+    )
+    assert resp["statusCode"] == 202
+    messages = aws["sqs"].receive_message(QueueUrl=os.environ["QUEUE_URL"])["Messages"]
+    payload = json.loads(messages[0]["Body"])
+    assert payload["task"] == "api_sub_c"
+    assert payload["tasks"] is None
+
+
+def test_post_grading_tasks_with_unknown_slug_400(aws, evaluator_dirs):
+    (evaluator_dirs["exercises"] / "api_sub_d").mkdir(exist_ok=True)
+
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/gradings",
+            body={"student": "Sub Bad", "tasks": ["api_sub_d", "nope_task"]},
+        )
+    )
+    assert resp["statusCode"] == 400
+    assert "nope_task" in _body(resp)["message"]
+
+
+def test_post_grading_task_and_tasks_together_400(aws, evaluator_dirs):
+    (evaluator_dirs["exercises"] / "api_sub_e").mkdir(exist_ok=True)
+
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/gradings",
+            body={"student": "Sub Both", "task": "api_sub_e", "tasks": ["api_sub_e"]},
+        )
+    )
+    assert resp["statusCode"] == 400
 
 
 def test_get_grading_status(aws):

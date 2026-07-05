@@ -174,20 +174,42 @@ def _synthesize_task_json(folder: str, cfg: dict[str, Any]) -> None:
 # ---------- grade ----------
 
 
+def _merge_usage(usages: list[dict[str, Any]]) -> dict[str, Any]:
+    """Combine per-run usage dicts (multi-task jobs): sum numbers, keep labels."""
+    if len(usages) == 1:
+        return usages[0]
+    merged: dict[str, Any] = {}
+    for u in usages:
+        for k, v in (u or {}).items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                merged[k] = merged.get(k, 0) + v
+            else:
+                merged.setdefault(k, v)
+    return merged
+
+
 def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
     from evaluator.runner import run_grade
 
     student = job["student"]
     student_slug = job.get("student_slug") or slugify(student)
-    if job.get("task"):
-        # Single-task re-grade merges into the previous report, which on
-        # Lambda must be pulled from S3 first (fresh /tmp every job).
-        meta = (
-            dynamo_table()
-            .get_item(Key={"pk": f"STUDENT#{student_slug}", "sk": "META"})
-            .get("Item")
-            or {}
-        )
+    # Scope: None = full grading; otherwise the exercise slugs to (re)grade.
+    scope: list[str] | None = None
+    if job.get("tasks"):
+        scope = [str(t) for t in job["tasks"]]
+    elif job.get("task"):
+        scope = [str(job["task"])]
+    meta = from_dynamo(
+        dynamo_table()
+        .get_item(Key={"pk": f"STUDENT#{student_slug}", "sk": "META"})
+        .get("Item")
+        or {}
+    )
+    if scope:
+        # Scoped runs merge into the previous report, which on Lambda must
+        # be pulled from S3 first (fresh /tmp every job). A never-graded
+        # student has no keys — nothing downloads and a fresh report grows
+        # task by task.
         store.materialize_report(
             student,
             {
@@ -196,60 +218,66 @@ def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
                 "report_json_key": meta.get("report_json_key") or meta.get("report_json"),
             },
         )
-    result = run_grade(
-        student,
-        project_space=job.get("space"),
-        task_slug=job.get("task"),
-    )
+    if scope is None:
+        results = [run_grade(student, project_space=job.get("space"), task_slug=None)]
+    else:
+        # One run per slug; each merges into report.{md,json} on disk, so
+        # the last result carries the accumulated counts and points.
+        results = [
+            run_grade(student, project_space=job.get("space"), task_slug=slug)
+            for slug in scope
+        ]
+    result = results[-1]
 
     version = utc_now_iso().replace("+00:00", "Z")
     keys = store.upload_report(student, student_slug, version)
-    usage = result.usage.to_dict()
+    usage = _merge_usage([r.usage.to_dict() for r in results])
+    judged_count = sum(r.judged_count for r in results)
     now = utc_now_iso()
 
-    dynamo_table().put_item(
-        Item=to_dynamo(
-            {
-                "pk": f"STUDENT#{student_slug}",
-                "sk": f"REPORT#{version}",
-                "version": version,
-                "graded_at": now,
-                "single_task_only": job.get("task"),
-                "counts": result.counts,
-                "points_earned": result.points_earned,
-                "points_possible": result.points_possible,
-                "requested_by": job.get("requested_by"),
-                "usage": usage,
-                **keys,
-            }
-        )
-    )
-    dynamo_table().put_item(
-        Item=to_dynamo(
-            {
-                "pk": f"STUDENT#{student_slug}",
-                "sk": "META",
-                "entity": "student",
-                "slug": student_slug,
-                "display_name": student,
-                "space": job.get("space"),
-                "counts": result.counts,
-                "points_earned": result.points_earned,
-                "points_possible": result.points_possible,
-                "overall_summary": result.report.get("overall_summary"),
-                "graded_at": now,
-                "latest_version": version,
-                "requested_by": job.get("requested_by"),
-                **keys,
-            }
-        )
-    )
+    report_row = {
+        "pk": f"STUDENT#{student_slug}",
+        "sk": f"REPORT#{version}",
+        "version": version,
+        "graded_at": now,
+        "single_task_only": job.get("task"),
+        "counts": result.counts,
+        "points_earned": result.points_earned,
+        "points_possible": result.points_possible,
+        "requested_by": job.get("requested_by"),
+        "usage": usage,
+        **keys,
+    }
+    if scope is not None and len(scope) > 1:
+        report_row["tasks_scope"] = scope
+    dynamo_table().put_item(Item=to_dynamo(report_row))
+    student_row = {
+        "pk": f"STUDENT#{student_slug}",
+        "sk": "META",
+        "entity": "student",
+        "slug": student_slug,
+        "display_name": student,
+        "space": job.get("space") or meta.get("space"),
+        "counts": result.counts,
+        "points_earned": result.points_earned,
+        "points_possible": result.points_possible,
+        "overall_summary": result.report.get("overall_summary"),
+        "graded_at": now,
+        "latest_version": version,
+        "requested_by": job.get("requested_by"),
+        **keys,
+    }
+    # Registration audit fields survive the card refresh (see POST /v1/students).
+    for carry in ("registered_by", "registered_at"):
+        if meta.get(carry):
+            student_row[carry] = meta[carry]
+    dynamo_table().put_item(Item=to_dynamo(student_row))
     return {
         "version": version,
         "counts": result.counts,
         "points_earned": result.points_earned,
         "points_possible": result.points_possible,
-        "judged_count": result.judged_count,
+        "judged_count": judged_count,
         "usage": usage,
         **keys,
     }

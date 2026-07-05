@@ -494,3 +494,27 @@ tr.row-archived td:last-child { opacity: 1; }
 .login-card .brand { justify-content: center; margin-bottom: 14px; }
 .login-card h1 { margin: 0 0 6px; font-size: 19px; color: #22394f; }
 .login-card p { color: var(--sl-muted); margin: 0 0 20px; }
+
+/* ---------- grade-scope modal + not-graded surfaces ---------- */
+.modal-narrow { max-width: 440px; }
+.check-list {
+  max-height: 280px; overflow-y: auto; border: 1px solid var(--sl-input-border);
+  border-radius: 3px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;
+}
+.check-item { display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer; }
+.check-item input { margin: 0; }
+.check-list-links { float: right; font-weight: 400; }
+.link-btn {
+  background: none; border: none; padding: 0; color: var(--sl-blue);
+  font-size: 12px; cursor: pointer; text-decoration: underline;
+}
+.ungraded-chip {
+  margin-left: 6px; color: var(--sl-muted); cursor: help;
+  font-size: 11.5px; white-space: nowrap;
+}
+.badge.notgraded { background: #eef1f4; color: #5b6771; border-color: var(--sl-border); }
+.verdict-badge.notgraded { background: #9aa7b1; }
+.task.v-notgraded { border-left-color: #c3ccd4; }
+.task.v-notgraded h3 { color: var(--sl-muted); }
+.summary.muted { color: var(--sl-muted); font-style: italic; }
+.grade-all-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; }

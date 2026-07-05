@@ -20,16 +20,29 @@ Mentors and admins log into a VPN-restricted web dashboard (styled after the
 classic SnapLogic Dashboard: navy panel headers, sortable/paginated data
 tables, tabbed sub-nav):
 
-- **Grade** (mentor or admin): click Grade on a student's row (or type a new
-  student's project name). A job queues, a worker Lambda runs the
-  deterministic hard gates against SnapLogic, sends each surviving exercise
-  to Claude (Sonnet 4.6, ~$0.95 per full run), renders the report, and the
-  row refreshes live with points and per-task detail.
+- **Grade** (mentor or admin): click **Grade…** on a student's row (or type a
+  new student's project name). A scope picker opens with every active
+  exercise preselected — keep them all for a full run, or check just the
+  exercises you want. A job queues, a worker Lambda runs the deterministic
+  hard gates against SnapLogic, sends each surviving exercise to Claude
+  (Sonnet 4.6, ~$0.95 per full run), renders the report, and the row
+  refreshes live with points and per-task detail. A full run also refreshes
+  the AI Overall summary; a subset run only replaces the selected exercises'
+  results.
+- **Register without grading** (mentor or admin): the same scope picker has a
+  **Register only** button for new students — it adds the student to the list
+  with zero exercises graded (and $0 spent), so grading can happen exercise
+  by exercise later.
 - **Regrade one exercise** (mentor or admin): on a student's detail page,
   every task card has a **Regrade** button that re-runs just that exercise
   (one Claude call instead of one per exercise — faster and cheaper than a
   full run). The result is merged into the student's existing report; all
   other task results, and the Overall summary, are left untouched.
+- **Not-graded visibility**: exercises a student has never been graded on
+  (registered-only students, or exercises added after their last run) show
+  as **not graded** cards on the detail page — each with its own **Grade**
+  button — plus an "N not graded" chip on the dashboard row and a badge in
+  the grade summary.
 - **Edit report text** (mentor or admin): next to each task card's Regrade
   button — and beside the Overall summary — a pencil button opens an inline
   editor to rewrite the AI's summary text. Edits are saved into the stored
@@ -60,7 +73,8 @@ Browser (VPN/office IPs only)
   ├─► CloudFront ── CF Function (IP allowlist) ──► S3 (React SPA, frontend/)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
         ├─ GET  students / reports / exercises / job status   (any logged-in user)
-        ├─ POST /v1/gradings {student, task?}                 (mentor or admin)
+        ├─ POST /v1/students {student} — register, no grading (mentor or admin)
+        ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
         ├─ PATCH /v1/students/{slug}/report — edit AI text    (mentor or admin)
         ├─ POST /v1/preps {slug?}                             (admin only)
         └─ POST/PUT /v1/exercises — create / edit / archive   (admin only)

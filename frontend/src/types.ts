@@ -56,6 +56,9 @@ export interface StudentMeta {
   latest_version?: string;
   requested_by?: string;
   report_json_key?: string;
+  // Set when the student was added via "register without grading".
+  registered_by?: string;
+  registered_at?: string;
 }
 
 export interface Job {

@@ -200,6 +200,82 @@ def test_single_task_grade_without_previous_meta_still_runs(aws, monkeypatch):
     ]
 
 
+def test_multi_task_grade_runs_each_slug_and_merges_usage(aws, monkeypatch):
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+    import evaluator.runner as runner_mod
+
+    seen_slugs = []
+
+    def fake_run(student, **kw):
+        seen_slugs.append(kw["task_slug"])
+        return _fake_run_result(student)
+
+    monkeypatch.setattr(runner_mod, "run_grade", fake_run)
+
+    job = _seed_job(
+        "job-grade-multi", "grade", "jane-doe",
+        student="Jane Doe", student_slug="jane-doe",
+        tasks=["task_01_orders", "task_02_currency"],
+    )
+    worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
+
+    item = _get_job("job-grade-multi")
+    assert item["status"] == "succeeded"
+    assert seen_slugs == ["task_01_orders", "task_02_currency"]
+    # One previous-report pull for the whole job, not one per task.
+    assert len(store.materialized_reports) == 1
+    # Usage and judged_count are summed across the per-task runs.
+    assert item["result"]["usage"]["calls"] == 14
+    assert float(item["result"]["usage"]["est_cost_usd"]) == 1.9
+    assert item["result"]["usage"]["model"] == "claude-sonnet-4-6"
+    assert item["result"]["judged_count"] == 12
+    # The REPORT history row records which exercises the run covered.
+    version = item["result"]["version"]
+    row = dynamo_table().get_item(
+        Key={"pk": "STUDENT#jane-doe", "sk": f"REPORT#{version}"}
+    )["Item"]
+    assert row["tasks_scope"] == ["task_01_orders", "task_02_currency"]
+
+
+def test_grade_preserves_registration_fields_on_student_card(aws, monkeypatch):
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+    import evaluator.runner as runner_mod
+
+    monkeypatch.setattr(
+        runner_mod, "run_grade", lambda student, **kw: _fake_run_result(student)
+    )
+
+    # Registered from the UI without grading (POST /v1/students).
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#reg-kid",
+            "sk": "META",
+            "entity": "student",
+            "slug": "reg-kid",
+            "display_name": "Reg Kid",
+            "space": "Space X",
+            "registered_by": "mentor@x.io",
+            "registered_at": "2026-07-01T00:00:00+00:00",
+        }
+    )
+
+    job = _seed_job(
+        "job-grade-reg", "grade", "reg-kid",
+        student="Reg Kid", student_slug="reg-kid",
+    )
+    worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
+
+    assert _get_job("job-grade-reg")["status"] == "succeeded"
+    meta = dynamo_table().get_item(Key={"pk": "STUDENT#reg-kid", "sk": "META"})["Item"]
+    assert meta["points_earned"] == 52
+    assert meta["registered_by"] == "mentor@x.io"
+    assert meta["registered_at"] == "2026-07-01T00:00:00+00:00"
+    # The job carried no space, so the registered one survives.
+    assert meta["space"] == "Space X"
+
+
 def test_grade_job_failure_marks_failed_and_releases_lock(aws, monkeypatch):
     monkeypatch.setattr(worker, "_make_store", lambda: StubStore())
     import evaluator.runner as runner_mod
