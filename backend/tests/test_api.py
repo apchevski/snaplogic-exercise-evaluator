@@ -90,6 +90,26 @@ def test_registered_student_detail_has_no_report(aws):
     data = _body(resp)
     assert data["student"]["display_name"] == "Report Less"
     assert data["report"] is None
+    # No SnapLogic env configured (fixture scrubs it) → path can't be built.
+    assert data["student"]["student_project_path"] is None
+
+
+def test_never_graded_student_detail_has_project_path(aws, monkeypatch):
+    from evaluator.snaplogic_client import SnapLogicClient
+
+    _snaplogic_env(monkeypatch)  # TestOrg / IWC_Support
+    monkeypatch.setattr(
+        SnapLogicClient, "list_assets", lambda self, org, ps, project: []
+    )
+    _call(api_event("POST", "/v1/students", body={"student": "Path Kid"}))
+    resp = _call(api_event("GET", "/v1/students/path-kid"))
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    assert data["report"] is None
+    # Computed server-side so the detail view shows it before the first grade.
+    assert (
+        data["student"]["student_project_path"] == "TestOrg/IWC_Support/Path Kid"
+    )
 
 
 def _snaplogic_env(monkeypatch):

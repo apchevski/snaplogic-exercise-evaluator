@@ -51,6 +51,9 @@ export interface StudentMeta {
   // SnapLogic project holding the student's pipelines; unset/null means
   // the project is named exactly after the student.
   project?: string | null;
+  // Full org/space/project path, computed server-side so the detail view can
+  // show it even for students who've never been graded (no report yet).
+  student_project_path?: string | null;
   counts?: Counts;
   points_earned?: number;
   points_possible?: number;

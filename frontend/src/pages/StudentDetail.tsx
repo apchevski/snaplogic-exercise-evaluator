@@ -176,6 +176,12 @@ export default function StudentDetail() {
 
   const overallText = report?.overall_summary ?? student?.overall_summary ?? "";
 
+  // The report is authoritative once graded; before the first grade we fall
+  // back to the meta so the path still shows (with no date — nothing graded).
+  const projectPath =
+    report?.student_project_path ?? student?.student_project_path;
+  const gradedAt = report?.graded_at ?? student?.graded_at;
+
   // Shared inline editor rendered in place of whichever text is being edited.
   const editorNode = (
     <div className="summary-editor">
@@ -238,15 +244,14 @@ export default function StudentDetail() {
       >
         <div className="panel-body">
           <div className="detail-meta">
-            {report?.student_project_path && (
+            {projectPath && <span className="ps">{projectPath}</span>}
+            {/* Never graded: show the project path alone, no "graded" date. */}
+            {gradedAt && (
               <>
-                <span className="ps">{report.student_project_path}</span>
-                {" · "}
+                {projectPath && " · "}
+                <span>graded {gradedAt}</span>
               </>
             )}
-            <span>
-              graded {report?.graded_at ?? student?.graded_at ?? "never"}
-            </span>
           </div>
           <span className={`total-badge tier-${tier}`}>
             Total: {earned}/{possible} pts
