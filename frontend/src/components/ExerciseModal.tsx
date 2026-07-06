@@ -227,7 +227,9 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
           {error && <div className="error-banner">{error}</div>}
 
           <div className="modal-field">
-            <label htmlFor="ex-description">description.md (required)</label>
+            <label htmlFor="ex-description">
+              description.md<span className="req-star">*</span>
+            </label>
             <textarea
               id="ex-description"
               value={description}
@@ -244,7 +246,9 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
 
           {!isEdit && (
             <div className="modal-field">
-              <label htmlFor="ex-slug">Folder name (required)</label>
+              <label htmlFor="ex-slug">
+                Folder name<span className="req-star">*</span>
+              </label>
               <input
                 id="ex-slug"
                 type="text"
@@ -262,7 +266,7 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
           )}
 
           <div className="modal-field">
-            <label htmlFor="ex-notes">notes.md (optional)</label>
+            <label htmlFor="ex-notes">notes.md</label>
             <textarea
               id="ex-notes"
               value={notes}
@@ -290,7 +294,9 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
           {taskType === "file_writer" && (
             <>
               <div className="modal-field">
-                <label htmlFor="ex-outputs">Output filenames (comma-separated)</label>
+                <label htmlFor="ex-outputs">
+                  Output filenames<span className="req-star">*</span> (comma-separated)
+                </label>
                 <input
                   id="ex-outputs"
                   type="text"
@@ -319,7 +325,9 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
           {taskType === "triggered_task" && (
             <>
               <div className="modal-field">
-                <label htmlFor="ex-ttname">Triggered Task name</label>
+                <label htmlFor="ex-ttname">
+                  Triggered Task name<span className="req-star">*</span>
+                </label>
                 <input
                   id="ex-ttname"
                   type="text"
@@ -333,7 +341,9 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
                 </div>
               </div>
               <div className="modal-field">
-                <label>Request scenarios</label>
+                <label>
+                  Request scenarios<span className="req-star">*</span>
+                </label>
                 {scenarios.map((s, i) => (
                   <div className="scenario-row" key={i}>
                     <input
@@ -379,7 +389,7 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
           )}
 
           <div className="modal-field">
-            <label htmlFor="ex-files">Input files {isEdit ? "" : "(optional)"}</label>
+            <label htmlFor="ex-files">Input files</label>
             {existing.length > 0 && (
               <span className="resource-list" style={{ marginBottom: 6 }}>
                 {existing.map((r) => {
