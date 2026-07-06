@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Header brand: "Exercise Evaluator" now matches the "SnapLogic" wordmark.** Same font size, weight, and color (was smaller, muted text); the divider between the two stays.
+
+- **Dashboard polish: cleaner button labels, a dedicated Not Graded column, and a quieter Last Graded fallback.** The **Add Student**, **Grade**, **Remove**, and (Exercises page) **Delete** buttons drop their trailing "…". The "N not graded" chip inside the Total Points cell is gone; never-graded exercise counts now get their own sortable **Not Graded** column between Missing and Last Graded (same hover explanation as the old chip). Students who have never been graded show "—" in Last Graded instead of "never graded".
+
 - **Permanently remove students and exercises from the UI (admin only, red buttons, confirmation dialogs).** Complements Archive (which stays the reversible option) with true deletion that leaves no data behind in AWS:
   - **Remove a student.** A red **Remove…** button on each dashboard row (admins only; mentors never see it) opens a confirmation dialog spelling out the blast radius. Confirming calls the new `DELETE /v1/students/{slug}`, which deletes the student card and all REPORT history rows from DynamoDB, their grade-job rows and lock, and every object under `students/<slug>/` in S3 — **all versions**, since the bucket's versioning would otherwise keep recoverable copies for 90 days. 409 while a grading for that student is queued/running.
   - **Delete an exercise.** A red **Delete…** button next to Archive (admins only) confirms, then calls the new `DELETE /v1/exercises/{slug}`: purges `exercises/<slug>/` and `exercise-resources/<slug>/` from S3 (all versions), deletes the EXERCISE row, prep-job rows and lock, and **scrubs the exercise's result out of every student's live report** — task entry removed from `report.json`, its section dropped from `report.md`, counts/points recomputed with the same rules grading uses, and the denormalized student card refreshed. Older report versions are left alone (they're the students' grading history). 409 while a prep is queued/running.
