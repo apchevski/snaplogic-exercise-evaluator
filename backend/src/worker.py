@@ -249,8 +249,10 @@ def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
         "requested_by": job.get("requested_by"),
         **keys,
     }
-    # Registration audit fields survive the card refresh (see POST /v1/students).
-    for carry in ("registered_by", "registered_at"):
+    # Registration fields survive the card refresh (see POST /v1/students).
+    # "email" marks the student's web login — losing it on a regrade would
+    # orphan the Cognito user when the student is later deleted.
+    for carry in ("registered_by", "registered_at", "email"):
         if meta.get(carry):
             student_row[carry] = meta[carry]
     dynamo_table().put_item(Item=to_dynamo(student_row))

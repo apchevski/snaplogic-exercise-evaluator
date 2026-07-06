@@ -88,7 +88,7 @@ function Login({ onLogin, error }: { onLogin: () => void; error?: string }) {
       <div className="login-card">
         <Brand />
         <h1>Exercise Grades</h1>
-        <p>Sign in with your mentor or admin account to continue.</p>
+        <p>Sign in with your admin, mentor, or student account to continue.</p>
         {error && <div className="error-banner">{error}</div>}
         <button className="btn primary" onClick={onLogin}>
           Sign in

@@ -1,6 +1,6 @@
 # Cognito: one user pool, admin-created users only (invite-based, no
-# self-signup), groups admin/mentor, and the SPA app client (Authorization
-# Code + PKCE via the Hosted UI).
+# self-signup), groups admin/mentor/student, and the SPA app client
+# (Authorization Code + PKCE via the Hosted UI).
 
 data "aws_region" "current" {}
 
@@ -60,6 +60,15 @@ resource "aws_cognito_user_group" "mentor" {
   user_pool_id = aws_cognito_user_pool.main.id
   description  = "Grade + view."
   precedence   = 2
+}
+
+# Members are created by the API Lambda when a student is registered with an
+# email (POST /v1/students) — never by hand alongside admin/mentor invites.
+resource "aws_cognito_user_group" "student" {
+  name         = "student"
+  user_pool_id = aws_cognito_user_pool.main.id
+  description  = "View only: exercises and grades. No grading, no edits."
+  precedence   = 3
 }
 
 resource "aws_cognito_user_pool_client" "spa" {

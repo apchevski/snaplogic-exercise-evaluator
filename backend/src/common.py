@@ -83,11 +83,19 @@ def sqs_client():
     return boto3.client("sqs")
 
 
+@lru_cache(maxsize=1)
+def cognito_client():
+    import boto3
+
+    return boto3.client("cognito-idp")
+
+
 def reset_cached_clients() -> None:
     """Test hook: drop cached boto3 resources so moto fixtures apply."""
     dynamo_table.cache_clear()
     s3_client.cache_clear()
     sqs_client.cache_clear()
+    cognito_client.cache_clear()
 
 
 def utc_now_iso() -> str:

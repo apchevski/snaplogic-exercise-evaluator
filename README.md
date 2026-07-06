@@ -37,7 +37,15 @@ tables, tabbed sub-nav):
   project exists at that location (a typo gets a clear "no project named …"
   error instead of a card that every grading run would fail on), then
   registers the student with zero exercises graded (and $0 spent) — grading
-  starts later from the row's **Grade** button.
+  starts later from the row's **Grade** button. An optional **student email**
+  additionally creates a read-only web login for the student: Cognito emails
+  them a temporary password, they change it on first sign-in, and from then
+  on they can watch their grades (see the `student` role below).
+- **Student sign-in** (read-only): users in the `student` Cognito group see
+  the same Students and Exercises pages mentors see — grades, summaries,
+  task descriptions, downloadable input files — but every action is gone
+  (and 403s server-side): no grading, no registering, no report edits, no
+  instructor notes.
 - **Regrade one exercise** (mentor or admin): on a student's detail page,
   every task card has a **Regrade** button that re-runs just that exercise
   (one Claude call instead of one per exercise — faster and cheaper than a
@@ -59,7 +67,8 @@ tables, tabbed sub-nav):
 - **Remove a student** (admin only): a red **Remove** button on the
   student's row opens a confirmation dialog, then permanently deletes the
   student from AWS — dashboard card, full report history (every S3 version),
-  and their grading-job records. Their SnapLogic project is untouched.
+  their grading-job records, and the web login their registration created
+  (if any). Their SnapLogic project is untouched.
 - **Delete an exercise** (admin only): a red **Delete** button next to
   Archive opens a confirmation dialog, then permanently deletes the exercise
   from AWS — authored content, prep artifacts and input files (every S3
@@ -90,11 +99,12 @@ python -m evaluator run <student>   # local twin of the cloud grade job
 Browser (VPN/office IPs only)
   ├─► CloudFront ── CF Function (IP allowlist) ──► S3 (React SPA, frontend/)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
-        ├─ GET  students / reports / exercises / job status   (any logged-in user)
-        ├─ GET  /v1/config — non-secret SnapLogic defaults     (any logged-in user)
-        ├─ POST /v1/students {student, space?, project?} — register, no
+        ├─ GET  students / reports / exercises / files  (any role, students too)
+        ├─ GET  /v1/config, job status, authored content       (mentor or admin)
+        ├─ POST /v1/students {student, space?, project?, email?} — register, no
         │        grading; 400 unless the SnapLogic project exists; the stored
-        │        space/project dictate later grading runs (mentor or admin)
+        │        space/project dictate later grading runs; an email creates a
+        │        read-only Cognito login for the student      (mentor or admin)
         ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
         ├─ PATCH /v1/students/{slug}/report — edit AI text    (mentor or admin)
         ├─ POST /v1/preps {slug?}                             (admin only)
@@ -122,8 +132,11 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
 | CI/CD (GitHub OIDC, no stored keys) | `.github/workflows/` |
 
 **Roles** (Cognito groups; the API enforces, the UI only hides buttons):
-admins prep + grade + view; mentors grade + view. Users are invite-only
-(admin-created in the Cognito console — no self-signup).
+admins prep + grade + view; mentors grade + view; students view only (no
+grading, no edits, no instructor notes). Admin/mentor users are invite-only
+(admin-created in the Cognito console — no self-signup); student logins are
+created by the app itself when a registration includes an email — never add
+someone to the `student` group by hand alongside an admin/mentor invite.
 
 ### Deploying (one-time, in order)
 
@@ -136,7 +149,8 @@ admins prep + grade + view; mentors grade + view. Users are invite-only
    then run a full `terraform apply`.
 3. Put the secret value (SnapLogic creds + Anthropic key) into Secrets
    Manager — the exact CLI command is in `infra/modules/secrets-manager/main.tf`.
-4. Create users in the Cognito console and add them to `admin` / `mentor`.
+4. Create users in the Cognito console and add them to `admin` / `mentor`
+   (the third group, `student`, is populated by the app — see Roles above).
 5. Fill the blank values in `.github/deploy.vars` from `terraform output` (the
    deploy workflows load that file — no GitHub Variables to set by hand; there
    are no CI secrets, auth is OIDC). Commit, then deploy: push to `main`

@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api, pollJob } from "../api";
-import { useIsAdmin, useToken } from "../auth";
+import { useCanGrade, useIsAdmin, useToken } from "../auth";
 import { AddStudentModal } from "../components/AddStudentModal";
 import { ConfirmDeleteModal } from "../components/ConfirmDeleteModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
@@ -55,6 +55,8 @@ function Count({ n, kind }: { n: number; kind: string }) {
 export default function Dashboard() {
   const token = useToken();
   const isAdmin = useIsAdmin();
+  // Students see the same table, minus every action (backend-enforced too).
+  const canGrade = useCanGrade();
   const [students, setStudents] = useState<StudentMeta[]>([]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
@@ -97,12 +99,14 @@ export default function Dashboard() {
   }, [token]);
 
   // Default student project space, prefilled in the Add Student dialog.
+  // Students can't open that dialog (and /v1/config 403s them) — skip.
   useEffect(() => {
+    if (!canGrade) return;
     api
       .getConfig(token)
       .then(({ config }) => setDefaultSpace(config.student_project_space ?? ""))
       .catch(() => setDefaultSpace("")); // dialog still works, field just empty
-  }, [token]);
+  }, [token, canGrade]);
 
   const activeExercises = useMemo(
     () => exercises.filter((e) => !e.archived && !e.missing_from_image),
@@ -131,8 +135,8 @@ export default function Dashboard() {
   // matching SnapLogic project exists, then creates the card ($0 spent).
   // Errors propagate to the dialog, which stays open and shows them.
   const registerOnly = useCallback(
-    async (studentName: string, space?: string, project?: string) => {
-      await api.registerStudent(token, studentName, space, project);
+    async (studentName: string, space?: string, project?: string, email?: string) => {
+      await api.registerStudent(token, studentName, space, project, email);
       void refresh();
     },
     [token, refresh],
@@ -184,6 +188,7 @@ export default function Dashboard() {
   const jobEntries = Object.entries(jobs);
   const nameFor = (key: string) =>
     students.find((s) => s.slug === key || s.display_name === key)?.display_name ?? key;
+  const colCount = canGrade ? 10 : 9; // Actions column hidden for students
 
   return (
     <main className="page">
@@ -228,9 +233,11 @@ export default function Dashboard() {
               placeholder="Search by student or project space"
             />
             <span className="toolbar-spacer" />
-            <button className="btn primary" onClick={() => setAdding(true)}>
-              Add Student
-            </button>
+            {canGrade && (
+              <button className="btn primary" onClick={() => setAdding(true)}>
+                Add Student
+              </button>
+            )}
             <label className="field">
               Entries per Page:
               <select
@@ -270,7 +277,7 @@ export default function Dashboard() {
                 <SortableTh label="Missing" sortKey="missing" sort={sort} onSort={onSort} />
                 <SortableTh label="Not Graded" sortKey="notgraded" sort={sort} onSort={onSort} />
                 <SortableTh label="Last Graded" sortKey="graded" sort={sort} onSort={onSort} />
-                <th className="plain">Actions</th>
+                {canGrade && <th className="plain">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -353,32 +360,34 @@ export default function Dashboard() {
                       <td className={`${sc("graded")} cell-muted`}>
                         {s.graded_at ?? "—"}
                       </td>
-                      <td>
-                        <span className="actions-cell">
-                          <button
-                            className="btn small"
-                            onClick={() =>
-                              setScopeFor({ name: s.display_name, slug: s.slug })
-                            }
-                            disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
-                          >
-                            Grade
-                          </button>
-                          {isAdmin && (
+                      {canGrade && (
+                        <td>
+                          <span className="actions-cell">
                             <button
-                              className="btn small danger"
-                              onClick={() => setRemoving(s)}
+                              className="btn small"
+                              onClick={() =>
+                                setScopeFor({ name: s.display_name, slug: s.slug })
+                              }
                               disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
                             >
-                              Remove
+                              Grade
                             </button>
-                          )}
-                        </span>
-                      </td>
+                            {isAdmin && (
+                              <button
+                                className="btn small danger"
+                                onClick={() => setRemoving(s)}
+                                disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </span>
+                        </td>
+                      )}
                     </tr>
                     {isOpen && s.overall_summary && (
                       <tr className="expand-row">
-                        <td colSpan={10}>{s.overall_summary}</td>
+                        <td colSpan={colCount}>{s.overall_summary}</td>
                       </tr>
                     )}
                   </Fragment>
@@ -386,17 +395,23 @@ export default function Dashboard() {
               })}
               {!loading && visible.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="empty-cell">
+                  <td colSpan={colCount} className="empty-cell">
                     <h3>No students yet</h3>
-                    Use “Add Student” above to register a student (their
-                    SnapLogic project must already exist), then start a grading
-                    with the row&rsquo;s Grade button.
+                    {canGrade ? (
+                      <>
+                        Use “Add Student” above to register a student (their
+                        SnapLogic project must already exist), then start a
+                        grading with the row&rsquo;s Grade button.
+                      </>
+                    ) : (
+                      <>Nothing has been graded yet — check back later.</>
+                    )}
                   </td>
                 </tr>
               )}
               {loading && (
                 <tr>
-                  <td colSpan={10} className="empty-cell">
+                  <td colSpan={colCount} className="empty-cell">
                     Loading…
                   </td>
                 </tr>

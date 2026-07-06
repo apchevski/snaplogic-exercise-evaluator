@@ -129,10 +129,22 @@ plan → judge → report loop the skill used to drive interactively.
   only). There is deliberately no student-edit endpoint yet — a wrong
   space/project at registration is caught by the SnapLogic
   project-existence check; changing it later needs a new registration.
-- **Auth**: Cognito (admin-created users; groups `admin`/`mentor`) + API
-  Gateway JWT authorizer; the Lambda re-checks source IP and enforces the
-  role matrix (mentors get 403 on /v1/preps). IP allowlist also runs at
-  the edge via a CloudFront Function.
+- **Auth**: Cognito (admin-created users; groups `admin`/`mentor`/`student`)
+  + API Gateway JWT authorizer; the Lambda re-checks source IP and enforces
+  the role matrix (mentors get 403 on /v1/preps; `student` is read-only —
+  student/exercise dashboards yes, but 403 on every action and on
+  config/job-polling/`GET /v1/exercises/{slug}`, the last because it carries
+  notes.md, i.e. instructor hints). IP allowlist also runs at the edge via a
+  CloudFront Function.
+  **Student logins (July 2026)** are app-created, never console-created: an
+  optional email on POST /v1/students makes the API `AdminCreateUser` the
+  student into the `student` group — Cognito emails the temporary password
+  and the hosted UI forces a change on first sign-in, so the API never
+  handles a password. Registration with an email fails as a unit (Cognito
+  refusal rolls the card put back). The email lives on the STUDENT card and
+  the worker's card refresh carries it forward; the admin-only student hard
+  delete also removes the Cognito login, so a purged student can't keep
+  signing in.
 
 ## Canonical pipeline form
 

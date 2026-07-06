@@ -198,6 +198,135 @@ def test_register_student_snaplogic_unreachable_502(aws, monkeypatch):
     assert _body(_call(api_event("GET", "/v1/students")))["students"] == []
 
 
+# ---------- student logins (email on registration) + the student role ----------
+
+
+def _user_pool(monkeypatch):
+    """Moto-backed user pool + student group, wired into USER_POOL_ID."""
+    import boto3
+
+    cognito = boto3.client("cognito-idp")
+    pool_id = cognito.create_user_pool(PoolName="evaluator-test-users")["UserPool"]["Id"]
+    cognito.create_group(GroupName="student", UserPoolId=pool_id)
+    monkeypatch.setenv("USER_POOL_ID", pool_id)
+    return cognito, pool_id
+
+
+def test_register_student_with_email_creates_login(aws, monkeypatch):
+    cognito, pool_id = _user_pool(monkeypatch)
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/students",
+            body={"student": "Login Kid", "email": "Login.Kid@Example.com"},
+        )
+    )
+    assert resp["statusCode"] == 201
+    assert _body(resp)["student"]["email"] == "login.kid@example.com"
+    user = cognito.admin_get_user(
+        UserPoolId=pool_id, Username="login.kid@example.com"
+    )
+    attrs = {a["Name"]: a["Value"] for a in user["UserAttributes"]}
+    assert attrs["email"] == "login.kid@example.com"
+    assert attrs["email_verified"] == "true"
+    assert attrs["name"] == "Login Kid"
+    groups = cognito.admin_list_groups_for_user(
+        Username="login.kid@example.com", UserPoolId=pool_id
+    )["Groups"]
+    assert [g["GroupName"] for g in groups] == ["student"]
+    # The card carries the email so delete_student can remove the login later.
+    listed = _body(_call(api_event("GET", "/v1/students")))["students"]
+    assert listed[0]["email"] == "login.kid@example.com"
+
+
+def test_register_student_without_email_creates_no_login(aws, monkeypatch):
+    cognito, pool_id = _user_pool(monkeypatch)
+    resp = _call(api_event("POST", "/v1/students", body={"student": "Offline Kid"}))
+    assert resp["statusCode"] == 201
+    assert cognito.list_users(UserPoolId=pool_id)["Users"] == []
+
+
+def test_register_student_invalid_email_400(aws, monkeypatch):
+    _user_pool(monkeypatch)
+    resp = _call(
+        api_event(
+            "POST", "/v1/students", body={"student": "Typo Kid", "email": "not-an-email"}
+        )
+    )
+    assert resp["statusCode"] == 400
+    assert _body(_call(api_event("GET", "/v1/students")))["students"] == []
+
+
+def test_register_student_email_without_pool_503(aws, monkeypatch):
+    monkeypatch.delenv("USER_POOL_ID", raising=False)
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/students",
+            body={"student": "Pool Less", "email": "kid@example.com"},
+        )
+    )
+    assert resp["statusCode"] == 503
+    # The request fails as a unit — the card put was rolled back.
+    assert _body(_call(api_event("GET", "/v1/students")))["students"] == []
+
+
+def test_register_student_duplicate_login_409_rolls_back_card(aws, monkeypatch):
+    cognito, pool_id = _user_pool(monkeypatch)
+    cognito.admin_create_user(
+        UserPoolId=pool_id,
+        Username="taken@example.com",
+        UserAttributes=[{"Name": "email", "Value": "taken@example.com"}],
+    )
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/students",
+            body={"student": "Second Owner", "email": "taken@example.com"},
+        )
+    )
+    assert resp["statusCode"] == 409
+    assert _body(_call(api_event("GET", "/v1/students")))["students"] == []
+
+
+def test_delete_student_removes_login(aws, monkeypatch):
+    cognito, pool_id = _user_pool(monkeypatch)
+    _call(
+        api_event(
+            "POST",
+            "/v1/students",
+            body={"student": "Gone Kid", "email": "gone@example.com"},
+        )
+    )
+    resp = _call(api_event("DELETE", "/v1/students/gone-kid", groups=("admin",)))
+    assert resp["statusCode"] == 200
+    assert _body(resp)["deleted"]["login"] is True
+    assert cognito.list_users(UserPoolId=pool_id)["Users"] == []
+
+
+def test_student_role_is_read_only(aws, evaluator_dirs):
+    # The reads the student dashboard needs all answer.
+    for path in ("/v1/students", "/v1/exercises"):
+        resp = _call(api_event("GET", path, groups=("student",)))
+        assert resp["statusCode"] == 200, path
+    # Every action — and reads that carry instructor-only data — is 403.
+    denied = [
+        ("GET", "/v1/config", None),
+        ("GET", "/v1/exercises/some-slug", None),  # authored content incl. notes.md
+        ("GET", "/v1/gradings/some-id", None),
+        ("POST", "/v1/students", {"student": "X"}),
+        ("POST", "/v1/gradings", {"student": "X"}),
+        ("POST", "/v1/preps", {}),
+        ("POST", "/v1/exercises", {}),
+        ("PATCH", "/v1/students/x/report", {"overall_summary": "hi"}),
+        ("DELETE", "/v1/students/x", None),
+        ("DELETE", "/v1/exercises/x", None),
+    ]
+    for method, path, body in denied:
+        resp = _call(api_event(method, path, groups=("student",), body=body))
+        assert resp["statusCode"] == 403, f"{method} {path}"
+
+
 # ---------- config ----------
 
 
