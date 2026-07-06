@@ -406,6 +406,8 @@ def get_student(slug: str) -> dict[str, Any]:
     if not item:
         raise NotFoundError(f"No graded student {slug!r}.")
     meta = public_item(item)
+    # So the detail view can show the project path even before the first grade.
+    meta["student_project_path"] = _student_project_path(meta)
     report = None
     # "report_json" is the legacy attribute name written before the store
     # labels were fixed; keep reading it so old gradings stay viewable.
@@ -614,6 +616,21 @@ def _default_student_space() -> str | None:
     """The configured default student project space, if any."""
     load_secrets_into_env()
     return os.environ.get("SNAPLOGIC_STUDENT_PROJECT_SPACE", "").strip() or None
+
+
+def _student_project_path(meta: dict[str, Any]) -> str | None:
+    """The SnapLogic path to the student's project — ``org/space/project`` —
+    mirroring the manifest grade.py writes. Lets the UI show the project path
+    even for students who've never been graded (no report to read it from).
+    Returns None when org/space can't be resolved (e.g. credential-less env)."""
+    load_secrets_into_env()
+    org = os.environ.get("SNAPLOGIC_ORG_NAME", "").strip()
+    space = (meta.get("space") or "").strip() or _default_student_space()
+    # The project defaults to the student name (same rule as grade.py).
+    project = (meta.get("project") or "").strip() or meta.get("display_name")
+    if not (org and space and project):
+        return None
+    return f"{org}/{space}/{project}"
 
 
 def _opt_str(body: dict[str, Any], key: str) -> str | None:
