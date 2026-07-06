@@ -1101,3 +1101,243 @@ def test_list_exercises_s3_description_wins_over_image_copy(aws, evaluator_dirs)
     exercises = {e["slug"]: e for e in _body(resp)["exercises"]}
     assert exercises["api_s3_wins"]["title"] == "Task 62 – Edited In UI"
     assert "Fresh." in exercises["api_s3_wins"]["description"]
+
+
+# ---------- hard deletes (admin only) ----------
+
+
+def _seed_student_jobs_and_lock(slug: str, *, expired: bool = True):
+    """A grade JOB row + lock for the student, as a finished run leaves them."""
+    import time
+
+    dynamo_table().put_item(
+        Item={
+            "pk": "JOB#job-for-" + slug,
+            "sk": "META",
+            "entity": "job",
+            "slug": "job-for-" + slug,
+            "job_id": "job-for-" + slug,
+            "job_type": "grade",
+            "status": "succeeded",
+            "target": slug,
+        }
+    )
+    dynamo_table().put_item(
+        Item={
+            "pk": f"LOCK#grade#{slug}",
+            "sk": "META",
+            "job_id": "job-for-" + slug,
+            "ttl": int(time.time()) + (-100 if expired else 600),
+        }
+    )
+
+
+def test_mentor_cannot_delete_student_403(aws):
+    _seed_student_report(aws, slug="del-403", name="Del Fourothree")
+    resp = _call(api_event("DELETE", "/v1/students/del-403", groups=("mentor",)))
+    assert resp["statusCode"] == 403
+    # Nothing was touched.
+    assert dynamo_table().get_item(Key={"pk": "STUDENT#del-403", "sk": "META"}).get("Item")
+
+
+def test_delete_unknown_student_404(aws):
+    resp = _call(api_event("DELETE", "/v1/students/nobody", groups=("admin",)))
+    assert resp["statusCode"] == 404
+
+
+def test_delete_student_purges_rows_jobs_and_s3(aws):
+    slug, json_key, md_key = _seed_student_report(aws, slug="del-me", name="Del Me")
+    dynamo_table().put_item(
+        Item={
+            "pk": f"STUDENT#{slug}",
+            "sk": "REPORT#2026-01-01T00:00:00Z",
+            "version": "2026-01-01T00:00:00Z",
+        }
+    )
+    _seed_student_jobs_and_lock(slug)
+
+    resp = _call(api_event("DELETE", f"/v1/students/{slug}", groups=("admin",)))
+    assert resp["statusCode"] == 200
+    deleted = _body(resp)["deleted"]
+    assert deleted["student"] == slug
+    assert deleted["rows"] == 2  # META + one REPORT row
+    assert deleted["jobs"] == 1
+    assert deleted["objects"] >= 2  # report.json + report.md (all versions)
+
+    table = dynamo_table()
+    assert "Item" not in table.get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"})
+    assert "Item" not in table.get_item(
+        Key={"pk": f"STUDENT#{slug}", "sk": "REPORT#2026-01-01T00:00:00Z"}
+    )
+    assert "Item" not in table.get_item(Key={"pk": "JOB#job-for-" + slug, "sk": "META"})
+    assert "Item" not in table.get_item(Key={"pk": f"LOCK#grade#{slug}", "sk": "META"})
+    bucket = os.environ["DATA_BUCKET"]
+    listed = aws["s3"].list_object_versions(Bucket=bucket, Prefix=f"students/{slug}/")
+    assert not listed.get("Versions") and not listed.get("DeleteMarkers")
+    # Gone from the dashboard list too.
+    assert _body(_call(api_event("GET", "/v1/students")))["students"] == []
+
+
+def test_delete_student_with_active_grade_lock_409(aws):
+    slug, *_ = _seed_student_report(aws, slug="del-busy", name="Del Busy")
+    _seed_student_jobs_and_lock(slug, expired=False)
+    resp = _call(api_event("DELETE", f"/v1/students/{slug}", groups=("admin",)))
+    assert resp["statusCode"] == 409
+    assert dynamo_table().get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"}).get("Item")
+
+
+def test_mentor_cannot_delete_exercise_403(aws, evaluator_dirs):
+    _create_exercise("api_del_role")
+    resp = _call(api_event("DELETE", "/v1/exercises/api_del_role", groups=("mentor",)))
+    assert resp["statusCode"] == 403
+
+
+def test_delete_unknown_exercise_404(aws, evaluator_dirs):
+    resp = _call(api_event("DELETE", "/v1/exercises/api_del_ghost", groups=("admin",)))
+    assert resp["statusCode"] == 404
+
+
+def test_delete_s3_authored_exercise_purges_everything(aws, evaluator_dirs):
+    _create_exercise("api_del_s3")
+    bucket = os.environ["DATA_BUCKET"]
+    aws["s3"].put_object(
+        Bucket=bucket, Key="exercises/api_del_s3/resources/Input.zip", Body=b"zip"
+    )
+    aws["s3"].put_object(
+        Bucket=bucket, Key="exercises/api_del_s3/solution.json", Body=b"{}"
+    )
+    aws["s3"].put_object(
+        Bucket=bucket, Key="exercise-resources/api_del_s3/Input.zip", Body=b"zip"
+    )
+
+    resp = _call(api_event("DELETE", "/v1/exercises/api_del_s3", groups=("admin",)))
+    assert resp["statusCode"] == 200
+    deleted = _body(resp)["deleted"]
+    assert deleted["tombstoned"] is False
+
+    # No row, no S3 objects, gone from the listing, 404 on direct GET.
+    assert "Item" not in dynamo_table().get_item(
+        Key={"pk": "EXERCISE#api_del_s3", "sk": "META"}
+    )
+    for prefix in ("exercises/api_del_s3/", "exercise-resources/api_del_s3/"):
+        listed = aws["s3"].list_object_versions(Bucket=bucket, Prefix=prefix)
+        assert not listed.get("Versions") and not listed.get("DeleteMarkers")
+    slugs = {e["slug"] for e in _body(_call(api_event("GET", "/v1/exercises")))["exercises"]}
+    assert "api_del_s3" not in slugs
+    assert _call(api_event("GET", "/v1/exercises/api_del_s3"))["statusCode"] == 404
+
+
+def test_delete_image_shipped_exercise_leaves_tombstone(aws, evaluator_dirs):
+    folder = evaluator_dirs["exercises"] / "api_del_img"
+    folder.mkdir(exist_ok=True)
+    (folder / "description.md").write_text("# Task 77 – Baked In\n", encoding="utf-8")
+
+    resp = _call(api_event("DELETE", "/v1/exercises/api_del_img", groups=("admin",)))
+    assert resp["statusCode"] == 200
+    assert _body(resp)["deleted"]["tombstoned"] is True
+
+    item = dynamo_table().get_item(Key={"pk": "EXERCISE#api_del_img", "sk": "META"})["Item"]
+    assert item["deleted"] is True
+
+    # The image folder must not resurrect it anywhere.
+    slugs = {e["slug"] for e in _body(_call(api_event("GET", "/v1/exercises")))["exercises"]}
+    assert "api_del_img" not in slugs
+    assert _call(api_event("GET", "/v1/exercises/api_del_img"))["statusCode"] == 404
+    resp = _call(
+        api_event("POST", "/v1/preps", groups=("admin",), body={"slug": "api_del_img"})
+    )
+    assert resp["statusCode"] == 400 and "deleted" in _body(resp)["message"]
+    resp = _call(
+        api_event("POST", "/v1/gradings", body={"student": "X", "task": "api_del_img"})
+    )
+    assert resp["statusCode"] == 400
+    resp = _call(
+        api_event(
+            "PUT", "/v1/exercises/api_del_img", groups=("admin",),
+            body={"archived": True},
+        )
+    )
+    assert resp["statusCode"] == 404
+    # Deleting it again is a 404, not a second purge.
+    resp = _call(api_event("DELETE", "/v1/exercises/api_del_img", groups=("admin",)))
+    assert resp["statusCode"] == 404
+
+    # Re-creating the slug replaces the tombstone with a fresh exercise.
+    resp = _create_exercise("api_del_img", description="# Task 77 – Reborn\n\nAgain.\n")
+    assert resp["statusCode"] == 201
+    item = dynamo_table().get_item(Key={"pk": "EXERCISE#api_del_img", "sk": "META"})["Item"]
+    assert "deleted" not in item and item["title"] == "Task 77 – Reborn"
+
+
+def test_delete_tombstoned_exercise_blocks_resource_download(aws, evaluator_dirs):
+    folder = evaluator_dirs["exercises"] / "api_del_res"
+    (folder / "resources").mkdir(parents=True, exist_ok=True)
+    (folder / "description.md").write_text("# Task 78 – Res\n", encoding="utf-8")
+    (folder / "resources" / "Input.zip").write_bytes(b"zip-bytes")
+
+    _call(api_event("DELETE", "/v1/exercises/api_del_res", groups=("admin",)))
+    resp = _call(api_event("GET", "/v1/exercises/api_del_res/resources/Input.zip"))
+    assert resp["statusCode"] == 404
+    # The lazy image-to-S3 mirror must not have run.
+    listed = aws["s3"].list_object_versions(
+        Bucket=os.environ["DATA_BUCKET"], Prefix="exercise-resources/api_del_res/"
+    )
+    assert not listed.get("Versions") and not listed.get("DeleteMarkers")
+
+
+def test_delete_exercise_with_active_prep_lock_409(aws, evaluator_dirs):
+    import time
+
+    _create_exercise("api_del_lock")
+    dynamo_table().put_item(
+        Item={
+            "pk": "LOCK#prep#all",
+            "sk": "META",
+            "job_id": "j1",
+            "ttl": int(time.time()) + 600,
+        }
+    )
+    resp = _call(api_event("DELETE", "/v1/exercises/api_del_lock", groups=("admin",)))
+    assert resp["statusCode"] == 409
+
+
+def test_delete_exercise_scrubs_student_reports(aws, evaluator_dirs):
+    _create_exercise("task_a", description="# Task A\n\nDo A.\n")
+    slug, json_key, md_key = _seed_student_report(aws, slug="scrub-me", name="Scrub Me")
+
+    resp = _call(api_event("DELETE", "/v1/exercises/task_a", groups=("admin",)))
+    assert resp["statusCode"] == 200
+    assert _body(resp)["deleted"]["reports_scrubbed"] == 1
+
+    bucket = os.environ["DATA_BUCKET"]
+    report = json.loads(aws["s3"].get_object(Bucket=bucket, Key=json_key)["Body"].read())
+    assert [t["slug"] for t in report["tasks"]] == ["task_b"]
+    # task_a was a 10-point pass; task_b (missing) remains: 0/10.
+    assert report["counts"] == {"pass": 0, "fail": 0, "missing": 1, "needs_prep": 0, "total": 1}
+    assert report["points_earned"] == 0
+    assert report["points_possible"] == 10
+    # report.md lost the task's section but kept the head block.
+    md = aws["s3"].get_object(Bucket=bucket, Key=md_key)["Body"].read().decode()
+    assert "AI summary for task_a." not in md
+    assert "## Overall" in md
+    # The denormalized student card was refreshed to match.
+    card = dynamo_table().get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"})["Item"]
+    assert int(card["points_earned"]) == 0
+    assert int(card["points_possible"]) == 10
+    assert int(card["counts"]["missing"]) == 1
+
+
+def test_delete_exercise_leaves_unrelated_reports_alone(aws, evaluator_dirs):
+    _create_exercise("api_del_other")
+    slug, json_key, _ = _seed_student_report(aws, slug="untouched", name="Untouched")
+    before = aws["s3"].get_object(
+        Bucket=os.environ["DATA_BUCKET"], Key=json_key
+    )["Body"].read()
+
+    resp = _call(api_event("DELETE", "/v1/exercises/api_del_other", groups=("admin",)))
+    assert resp["statusCode"] == 200
+    assert _body(resp)["deleted"]["reports_scrubbed"] == 0
+    after = aws["s3"].get_object(
+        Bucket=os.environ["DATA_BUCKET"], Key=json_key
+    )["Body"].read()
+    assert after == before

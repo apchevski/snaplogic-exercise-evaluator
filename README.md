@@ -56,6 +56,19 @@ tables, tabbed sub-nav):
   AI text.
 - **Prep** (admin only): click Prep on an exercise to refresh its solution
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
+- **Remove a student** (admin only): a red **Remove…** button on the
+  student's row opens a confirmation dialog, then permanently deletes the
+  student from AWS — dashboard card, full report history (every S3 version),
+  and their grading-job records. Their SnapLogic project is untouched.
+- **Delete an exercise** (admin only): a red **Delete…** button next to
+  Archive opens a confirmation dialog, then permanently deletes the exercise
+  from AWS — authored content, prep artifacts and input files (every S3
+  version) plus its DynamoDB and job records — and scrubs its result out of
+  every student's live report (points, counts and totals are recalculated;
+  older report versions keep their history). Archive remains the reversible
+  alternative. Exercises that still ship in the container image keep a
+  minimal tombstone row so the image copy can't resurrect them; re-creating
+  the same folder name later replaces the tombstone.
 - **Exercises** (mentor or admin): the exercise list shows prep status per
   task; click a task name to expand its full description (rendered from the
   exercise's `description.md`). Exercises that ship input data (zips, CSVs
@@ -85,7 +98,9 @@ Browser (VPN/office IPs only)
         ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
         ├─ PATCH /v1/students/{slug}/report — edit AI text    (mentor or admin)
         ├─ POST /v1/preps {slug?}                             (admin only)
-        └─ POST/PUT /v1/exercises — create / edit / archive   (admin only)
+        ├─ POST/PUT /v1/exercises — create / edit / archive   (admin only)
+        ├─ DELETE /v1/students/{slug} — purge everything      (admin only)
+        └─ DELETE /v1/exercises/{slug} — purge + report scrub (admin only)
                   │ JOB item (DynamoDB) + SQS message
                   ▼
 SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-retry)

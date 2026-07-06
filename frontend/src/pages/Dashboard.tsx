@@ -2,8 +2,9 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api, pollJob } from "../api";
-import { useToken } from "../auth";
+import { useIsAdmin, useToken } from "../auth";
 import { AddStudentModal } from "../components/AddStudentModal";
+import { ConfirmDeleteModal } from "../components/ConfirmDeleteModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
 import { StatusPill } from "../components/StatusPill";
 import {
@@ -43,6 +44,7 @@ function Count({ n, kind }: { n: number; kind: string }) {
 
 export default function Dashboard() {
   const token = useToken();
+  const isAdmin = useIsAdmin();
   const [students, setStudents] = useState<StudentMeta[]>([]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
@@ -54,6 +56,8 @@ export default function Dashboard() {
   const [defaultSpace, setDefaultSpace] = useState("");
   // Grade-scope picker: which student a grading is being configured for.
   const [scopeFor, setScopeFor] = useState<{ name: string; slug: string } | null>(null);
+  // Confirmation dialog target for the admin-only permanent Remove.
+  const [removing, setRemoving] = useState<StudentMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -119,6 +123,18 @@ export default function Dashboard() {
   const registerOnly = useCallback(
     async (studentName: string, space?: string, project?: string) => {
       await api.registerStudent(token, studentName, space, project);
+      void refresh();
+    },
+    [token, refresh],
+  );
+
+  // Permanent removal (admin only): the API purges the card, report history,
+  // job rows, and every stored report file. Errors propagate to the
+  // confirmation dialog, which stays open and shows them.
+  const removeStudent = useCallback(
+    async (slug: string) => {
+      await api.deleteStudent(token, slug);
+      setRemoving(null);
       void refresh();
     },
     [token, refresh],
@@ -335,6 +351,15 @@ export default function Dashboard() {
                           >
                             Grade…
                           </button>
+                          {isAdmin && (
+                            <button
+                              className="btn small danger"
+                              onClick={() => setRemoving(s)}
+                              disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
+                            >
+                              Remove…
+                            </button>
+                          )}
                         </span>
                       </td>
                     </tr>
@@ -387,6 +412,23 @@ export default function Dashboard() {
           }}
           onClose={() => setScopeFor(null)}
         />
+      )}
+
+      {removing && isAdmin && (
+        <ConfirmDeleteModal
+          title="Remove Student"
+          confirmLabel={`Remove ${removing.display_name}`}
+          onConfirm={() => removeStudent(removing.slug)}
+          onClose={() => setRemoving(null)}
+        >
+          <p>
+            Permanently remove <strong>{removing.display_name}</strong>? This
+            deletes their dashboard card, every stored grade report (including
+            history), and their grading-job records from AWS. Their SnapLogic
+            project is not touched.
+          </p>
+          <p className="hint">This cannot be undone.</p>
+        </ConfirmDeleteModal>
       )}
     </main>
   );

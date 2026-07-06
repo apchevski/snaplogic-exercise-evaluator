@@ -5,6 +5,8 @@
 :root {
   --sl-navy: #1c4e80;        /* panel headers, primary buttons */
   --sl-navy-dark: #163f68;
+  --sl-red: #b42525;         /* destructive (delete) buttons */
+  --sl-red-dark: #9c1f1f;
   --sl-blue: #1173b3;        /* links, active tab, sort arrow */
   --sl-page-bg: #eef0f2;
   --sl-border: #d5dbe0;
@@ -153,6 +155,8 @@ button.btn:hover:not(:disabled) { background: #f1f4f6; border-color: #9fb0bf; }
 button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 button.btn.primary { background: var(--sl-navy); border-color: var(--sl-navy); color: white; }
 button.btn.primary:hover:not(:disabled) { background: var(--sl-navy-dark); }
+button.btn.danger { background: var(--sl-red); border-color: var(--sl-red); color: white; }
+button.btn.danger:hover:not(:disabled) { background: var(--sl-red-dark); border-color: var(--sl-red-dark); }
 button.btn.small { padding: 3px 10px; font-size: 12.5px; }
 button.btn.icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -459,7 +463,8 @@ tr.expand-row:hover td { background: #f8f9fb; }
   font-family: var(--mono); font-size: 12px; line-height: 1.5;
   min-height: 140px; resize: vertical;
 }
-.modal-field .hint { color: var(--sl-muted); font-size: 11.5px; margin-top: 3px; }
+.modal-body .hint { color: var(--sl-muted); font-size: 11.5px; margin-top: 3px; }
+.modal-body p { margin: 0; }
 .modal-field input[type="file"] { font-size: 12.5px; color: #4a5560; display: block; }
 .modal > footer {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
