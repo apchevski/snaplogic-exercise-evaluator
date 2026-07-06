@@ -30,6 +30,9 @@ const gradedTotal = (s: StudentMeta) => {
 const COMPARE: Record<string, (a: StudentMeta, b: StudentMeta) => number> = {
   student: (a, b) => a.display_name.localeCompare(b.display_name),
   space: (a, b) => (a.space ?? "").localeCompare(b.space ?? ""),
+  // Project defaults to the student name when unset, so sort by the effective value.
+  project: (a, b) =>
+    (a.project ?? a.display_name).localeCompare(b.project ?? b.display_name),
   points: (a, b) => (a.points_earned ?? 0) - (b.points_earned ?? 0),
   pass: (a, b) => (a.counts?.pass ?? 0) - (b.counts?.pass ?? 0),
   fail: (a, b) => (a.counts?.fail ?? 0) - (b.counts?.fail ?? 0),
@@ -40,6 +43,7 @@ const COMPARE: Record<string, (a: StudentMeta, b: StudentMeta) => number> = {
 const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   student: "asc",
   space: "asc",
+  project: "asc",
   points: "desc",
   pass: "desc",
   fail: "desc",
@@ -188,7 +192,7 @@ export default function Dashboard() {
   const jobEntries = Object.entries(jobs);
   const nameFor = (key: string) =>
     students.find((s) => s.slug === key || s.display_name === key)?.display_name ?? key;
-  const colCount = canGrade ? 10 : 9; // Actions column hidden for students
+  const colCount = canGrade ? 11 : 10; // Actions column hidden for students
 
   return (
     <main className="page">
@@ -271,6 +275,7 @@ export default function Dashboard() {
                 <th className="plain" aria-label="Expand" />
                 <SortableTh label="Student" sortKey="student" sort={sort} onSort={onSort} />
                 <SortableTh label="Project Space" sortKey="space" sort={sort} onSort={onSort} />
+                <SortableTh label="Project" sortKey="project" sort={sort} onSort={onSort} />
                 <SortableTh label="Total Points" sortKey="points" sort={sort} onSort={onSort} />
                 <SortableTh label="Pass" sortKey="pass" sort={sort} onSort={onSort} />
                 <SortableTh label="Fail" sortKey="fail" sort={sort} onSort={onSort} />
@@ -314,16 +319,18 @@ export default function Dashboard() {
                         <Link to={`/students/${encodeURIComponent(s.slug)}`}>
                           {s.display_name}
                         </Link>
-                        {s.project && s.project !== s.display_name && (
-                          <div
-                            className="cell-muted cell-mono cell-sub"
-                            title="SnapLogic project grading looks in (differs from the student name)"
-                          >
-                            {s.project}
-                          </div>
-                        )}
                       </td>
                       <td className={`${sc("space")} cell-mono`}>{s.space ?? "—"}</td>
+                      <td
+                        className={`${sc("project")} cell-mono`}
+                        title={
+                          s.project && s.project !== s.display_name
+                            ? "SnapLogic project grading looks in (differs from the student name)"
+                            : "Defaults to the student name"
+                        }
+                      >
+                        {s.project ?? s.display_name}
+                      </td>
                       <td className={sc("points")}>
                         <span className={`pts-chip tier-${tier}`}>
                           {earned}/{possible} pts

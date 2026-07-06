@@ -163,10 +163,6 @@ button.btn.icon-btn {
   padding: 4px 7px; color: #4a5560; line-height: 1;
 }
 
-/* Secondary line under a table cell's main value (e.g. the SnapLogic
-   project under a student whose project name differs from their name). */
-.cell-sub { font-size: 11.5px; margin-top: 2px; }
-
 /* ---------- data tables ---------- */
 .table-wrap { overflow-x: auto; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -455,7 +451,9 @@ tr.expand-row:hover td { background: #f8f9fb; }
 .modal-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 13px; }
 .modal-body .error-banner { margin-bottom: 0; }
 .modal-field label { display: block; font-size: 12.5px; font-weight: 600; color: #4a5560; margin-bottom: 4px; }
+.modal-field label .req-star { color: var(--sl-red); margin-left: 2px; }
 .modal-field input[type="text"],
+.modal-field input[type="email"],
 .modal-field textarea {
   width: 100%; padding: 6px 8px; border: 1px solid var(--sl-input-border);
   border-radius: 3px; font-size: 13px; color: inherit;

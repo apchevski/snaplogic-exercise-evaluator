@@ -291,6 +291,7 @@ silently route to the wrong task.
 ```
 .
 ├── README.md
+├── SOLUTION_OVERVIEW.md        # one-read map of the whole solution (for new contributors, human or AI)
 ├── CHANGELOG.md
 ├── LICENSE
 ├── requirements.txt
@@ -653,6 +654,11 @@ No Python edits needed — both skills auto-discover any folder with a
 `task.json`.
 
 ## Architecture & design notes
+
+New to the project? Start with [SOLUTION_OVERVIEW.md](SOLUTION_OVERVIEW.md) —
+a single-file map of the whole solution (architecture diagram, data model,
+auth, key flows, CI/CD, and the invariants not to break), written so a new
+contributor — human or AI — can onboard from one read.
 
 See [.claude/architecture.md](.claude/architecture.md) and
 [.claude/project.md](.claude/project.md) for the design rationale, plus
