@@ -6,6 +6,8 @@ import type {
   AppConfig,
   CreateExercisePayload,
   CreateExerciseResult,
+  DeleteExerciseSummary,
+  DeleteStudentSummary,
   Exercise,
   ExerciseDetail,
   Job,
@@ -26,7 +28,7 @@ export class ApiError extends Error {
 
 async function request<T>(
   token: string,
-  method: "GET" | "POST" | "PUT" | "PATCH",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -121,6 +123,25 @@ export const api = {
       "PUT",
       `/v1/exercises/${encodeURIComponent(slug)}`,
       payload,
+    ),
+
+  // Admin only. Permanently removes the student everywhere: card, report
+  // history, job rows, and every stored report file in S3 (all versions).
+  deleteStudent: (token: string, slug: string) =>
+    request<{ deleted: DeleteStudentSummary }>(
+      token,
+      "DELETE",
+      `/v1/students/${encodeURIComponent(slug)}`,
+    ),
+
+  // Admin only. Permanently removes the exercise everywhere: S3 content and
+  // artifacts (all versions), DynamoDB row, prep-job rows — and scrubs its
+  // result out of every student's live report.
+  deleteExercise: (token: string, slug: string) =>
+    request<{ deleted: DeleteExerciseSummary }>(
+      token,
+      "DELETE",
+      `/v1/exercises/${encodeURIComponent(slug)}`,
     ),
 
   // Add a student to the list without grading anything. The optional

@@ -71,10 +71,31 @@ data "aws_iam_policy_document" "api" {
       "${var.bucket_arn}/exercises/*/resources/*",
     ]
   }
+  # PUT /v1/exercises removes single input files; DELETE /v1/students/{slug}
+  # and DELETE /v1/exercises/{slug} purge every object VERSION under the
+  # entity's prefixes — the bucket is versioned, and a hard delete must
+  # leave nothing recoverable behind.
   statement {
-    sid       = "S3DeleteExerciseInputFiles"
-    actions   = ["s3:DeleteObject"]
-    resources = ["${var.bucket_arn}/exercises/*/resources/*"]
+    sid     = "S3HardDelete"
+    actions = ["s3:DeleteObject", "s3:DeleteObjectVersion"]
+    resources = [
+      "${var.bucket_arn}/students/*",
+      "${var.bucket_arn}/exercises/*",
+      "${var.bucket_arn}/exercise-resources/*",
+    ]
+  }
+  # ListObjectVersions for the purge (authorized by s3:ListBucketVersions on
+  # the bucket). students/* becomes enumerable here — unavoidable: a student
+  # delete has to find every report version it must remove.
+  statement {
+    sid       = "S3ListVersionsForHardDelete"
+    actions   = ["s3:ListBucketVersions"]
+    resources = [var.bucket_arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["students/*", "exercises/*", "exercise-resources/*"]
+    }
   }
   # Without ListBucket, S3 answers HeadObject on a missing key with 403
   # instead of 404, which broke the first download of every resource file.
@@ -166,7 +187,7 @@ resource "aws_apigatewayv2_api" "main" {
 
   cors_configuration {
     allow_origins = var.cors_allow_origins
-    allow_methods = ["GET", "POST", "PUT", "PATCH", "OPTIONS"]
+    allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     allow_headers = ["authorization", "content-type"]
     max_age       = 3600
   }

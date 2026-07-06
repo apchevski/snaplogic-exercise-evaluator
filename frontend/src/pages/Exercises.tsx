@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 
 import { api, pollJob } from "../api";
 import { useIsAdmin, useToken } from "../auth";
+import { ConfirmDeleteModal } from "../components/ConfirmDeleteModal";
 import { ExerciseModal } from "../components/ExerciseModal";
 import { StatusPill } from "../components/StatusPill";
 import {
@@ -79,6 +80,8 @@ export default function Exercises() {
   const [editing, setEditing] = useState<ExerciseDetail | null>(null);
   const [editLoading, setEditLoading] = useState<string | null>(null);
   const [archiving, setArchiving] = useState<string | null>(null);
+  // Confirmation dialog target for the admin-only permanent Delete.
+  const [deleting, setDeleting] = useState<Exercise | null>(null);
 
   const toggleExpanded = (slug: string) =>
     setExpanded((prev) => {
@@ -161,6 +164,18 @@ export default function Exercises() {
       } finally {
         setArchiving(null);
       }
+    },
+    [token, refresh],
+  );
+
+  // Permanent removal (admin only): the API purges the exercise's S3 content
+  // and records and scrubs its result from every student's report. Errors
+  // propagate to the confirmation dialog, which stays open and shows them.
+  const deleteExercise = useCallback(
+    async (slug: string) => {
+      await api.deleteExercise(token, slug);
+      setDeleting(null);
+      await refresh();
     },
     [token, refresh],
   );
@@ -367,6 +382,13 @@ export default function Exercises() {
                             >
                               {ex.archived ? "Unarchive" : "Archive"}
                             </button>
+                            <button
+                              className="btn small danger"
+                              onClick={() => setDeleting(ex)}
+                              disabled={anyBusy}
+                            >
+                              Delete…
+                            </button>
                             {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="prep" />}
                           </span>
                         </td>
@@ -415,6 +437,23 @@ export default function Exercises() {
           onClose={() => setEditing(null)}
           onSaved={() => void refresh()}
         />
+      )}
+      {deleting && isAdmin && (
+        <ConfirmDeleteModal
+          title="Delete Exercise"
+          confirmLabel={`Delete ${deleting.title ?? deleting.slug}`}
+          onConfirm={() => deleteExercise(deleting.slug)}
+          onClose={() => setDeleting(null)}
+        >
+          <p>
+            Permanently delete <strong>{deleting.title ?? deleting.slug}</strong>?
+            This removes its description, input files and grading artifacts
+            from AWS, and erases its result from every student&rsquo;s report
+            (points and totals are recalculated). To keep it around without
+            grading it, use Archive instead.
+          </p>
+          <p className="hint">This cannot be undone.</p>
+        </ConfirmDeleteModal>
       )}
     </main>
   );

@@ -36,6 +36,46 @@ describe("api.getExerciseResourceUrl", () => {
   });
 });
 
+describe("api.deleteStudent / api.deleteExercise", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends DELETE to the student route and returns the purge summary", async () => {
+    const payload = { deleted: { student: "jane-doe", rows: 3, jobs: 2, objects: 6 } };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await api.deleteStudent("tok", "jane-doe");
+
+    expect(out).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/students/jane-doe",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({ Authorization: "Bearer tok" }),
+      }),
+    );
+  });
+
+  it("sends DELETE to the exercise route and surfaces API errors", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: "Requires one of roles ['admin']" }), {
+          status: 403,
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.deleteExercise("tok", "task_01")).rejects.toMatchObject({
+      status: 403,
+      message: "Requires one of roles ['admin']",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/exercises/task_01",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+});
+
 describe("pollJob", () => {
   it("returns immediately when the job is already terminal", async () => {
     const done = job("succeeded");

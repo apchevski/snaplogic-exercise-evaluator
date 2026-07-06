@@ -497,6 +497,40 @@ def test_archived_exercise_pruned_from_working_tree(aws, monkeypatch, evaluator_
     # … but nothing in S3 was touched (StubStore has no delete surface at all).
 
 
+def test_deleted_exercise_pruned_from_working_tree(aws, monkeypatch, evaluator_dirs):
+    """A hard-deleted exercise's tombstone row keeps its image folder out of
+    every job's working tree — prep must never re-seed it into S3."""
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+    import evaluator.runner as runner_mod
+
+    monkeypatch.setattr(
+        runner_mod, "run_grade", lambda student, **kw: _fake_run_result(student)
+    )
+
+    folder = evaluator_dirs["exercises"] / "worker_del_slug"
+    folder.mkdir(exist_ok=True)
+    (folder / "description.md").write_text("# Deleted Task", encoding="utf-8")
+    dynamo_table().put_item(
+        Item={
+            "pk": "EXERCISE#worker_del_slug",
+            "sk": "META",
+            "entity": "exercise",
+            "slug": "worker_del_slug",
+            "deleted": True,
+        }
+    )
+
+    job = _seed_job(
+        "job-grade-del", "grade", "del-student",
+        student="Del Student", student_slug="del-student",
+    )
+    worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
+
+    assert _get_job("job-grade-del")["status"] == "succeeded"
+    assert not folder.exists()
+
+
 def test_unknown_job_type_fails_cleanly(aws, monkeypatch):
     monkeypatch.setattr(worker, "_make_store", lambda: StubStore())
     job = _seed_job("job-x-1", "mystery", "whatever")

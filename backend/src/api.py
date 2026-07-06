@@ -15,6 +15,8 @@ Defense layers (outer → inner):
        | POST /v1/preps                    |  ✅   |  ❌ 403|
        | POST /v1/exercises                |  ✅   |  ❌ 403|
        | PUT  /v1/exercises/{slug}         |  ✅   |  ❌ 403|
+       | DELETE /v1/students/{slug}        |  ✅   |  ❌ 403|
+       | DELETE /v1/exercises/{slug}       |  ✅   |  ❌ 403|
 
 POSTs never do the work inline — they write a JOB item + an SQS message and
 return 202; the worker Lambda owns execution. A conditional-put LOCK item
@@ -341,6 +343,10 @@ def _exercise_row(slug: str) -> dict[str, Any] | None:
 
 def _reject_archived(slug: str, action: str) -> None:
     row = _exercise_row(slug)
+    if row and row.get("deleted"):
+        # Tombstone of a hard-deleted exercise whose folder still ships in
+        # the image (see delete_exercise) — the slug looks "known" but is gone.
+        raise BadRequestError(f"Exercise {slug!r} was deleted.")
     if row and row.get("archived"):
         raise BadRequestError(
             f"Exercise {slug!r} is archived; unarchive it before you {action} it."
@@ -427,9 +433,16 @@ def list_exercises() -> dict[str, Any]:
         IndexName="gsi1", KeyConditionExpression=Key("entity").eq("exercise")
     )
     by_slug = {str(i.get("slug")): public_item(i) for i in resp.get("Items", [])}
+    # Hard-deleted exercises whose folder still ships in the image keep a
+    # tombstone row (see delete_exercise); they must not resurface anywhere.
+    deleted_slugs = {s for s, e in by_slug.items() if e.get("deleted")}
+    by_slug = {s: e for s, e in by_slug.items() if s not in deleted_slugs}
     authored = _scan_authored_s3()
     exercises = []
     for folder in list_exercise_folders():
+        if folder in deleted_slugs:
+            authored.pop(folder, None)
+            continue
         # S3 is the canonical authored store: once an exercise exists there
         # (UI-created, or seeded from the image by a prep job), its S3
         # description wins over the image copy — a UI edit must show even
@@ -459,6 +472,8 @@ def list_exercises() -> dict[str, Any]:
     # Exercises authored in S3 with no image folder at all (the normal case
     # for UI-created exercises).
     for slug in sorted(authored):
+        if slug in deleted_slugs:
+            continue
         entry = by_slug.pop(slug, None) or {
             "slug": slug,
             "prep_status": "never_prepped",
@@ -520,6 +535,11 @@ def get_exercise_resource(slug: str, filename: str) -> dict[str, Any]:
     _require_role(ROLE_ADMIN, ROLE_MENTOR)
     from evaluator.tasks import exercise_resource_path
 
+    row = _exercise_row(slug)
+    if row and row.get("deleted"):
+        # Hard-deleted exercise (image copy tombstoned) — without this check
+        # the lazy mirror below would resurrect its files into S3.
+        raise NotFoundError(f"No exercise {slug!r}.")
     path = exercise_resource_path(slug, filename)
     if path is not None:
         name = path.name
@@ -928,7 +948,11 @@ def post_exercise() -> Response:
     filenames: list[str] = []
     for r in raw_resources:
         _clean_filename((r or {}).get("filename"), label="resource filename", seen=filenames)
-    if slug in _known_exercise_slugs():
+    row = _exercise_row(slug)
+    # A tombstoned slug (hard-deleted, folder still in the image) may be
+    # re-created — the fresh row below simply replaces the tombstone.
+    tombstoned = bool(row and row.get("deleted"))
+    if slug in _known_exercise_slugs() and not tombstoned:
         raise ServiceError(409, f"Exercise folder {slug!r} already exists.")
 
     s3 = s3_client()
@@ -1009,6 +1033,8 @@ def get_exercise(slug: str) -> dict[str, Any]:
     row = _exercise_row(slug)
     if slug not in authored and not in_image and row is None:
         raise NotFoundError(f"No exercise {slug!r}.")
+    if row and row.get("deleted"):
+        raise NotFoundError(f"No exercise {slug!r}.")
 
     meta = {k: v for k, v in (row or {}).items() if k not in ("pk", "sk", "ttl")}
     description_md = _s3_text(f"{AUTHORED_PREFIX}{slug}/description.md")
@@ -1056,6 +1082,8 @@ def put_exercise(slug: str) -> dict[str, Any]:
         raise NotFoundError(f"No exercise {slug!r}.")
     row = _exercise_row(slug)
     if slug not in _known_exercise_slugs() and row is None:
+        raise NotFoundError(f"No exercise {slug!r}.")
+    if row and row.get("deleted"):
         raise NotFoundError(f"No exercise {slug!r}.")
 
     s3 = s3_client()
@@ -1130,6 +1158,242 @@ def put_exercise(slug: str) -> dict[str, Any]:
         for name in filenames
     ]
     return {"exercise": public_item(merged), "uploads": uploads}
+
+
+# ---------- hard deletes (admin only) ----------
+#
+# Deletes are permanent and leave nothing behind on purpose: the data bucket
+# is versioned (overwrite insurance), so a hard delete purges every object
+# VERSION under the entity's prefixes, not just the current one. What a
+# delete cannot reach: CloudWatch log lines (they age out with the group's
+# retention) and the nightly exercises-backup/ snapshot in git, which drops
+# the exercise on its next run but keeps prior states in git history.
+
+
+def _purge_s3_prefix(prefix: str) -> int:
+    """Permanently delete every object under a prefix — all versions and
+    delete markers, so the versioned bucket keeps no recoverable copy."""
+    s3 = s3_client()
+    bucket = data_bucket()
+    deleted = 0
+    paginator = s3.get_paginator("list_object_versions")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        targets = [
+            {"Key": v["Key"], "VersionId": v["VersionId"]}
+            for group in ("Versions", "DeleteMarkers")
+            for v in page.get(group, [])
+        ]
+        for i in range(0, len(targets), 1000):  # delete_objects batch ceiling
+            batch = targets[i : i + 1000]
+            s3.delete_objects(Bucket=bucket, Delete={"Objects": batch, "Quiet": True})
+            deleted += len(batch)
+    return deleted
+
+
+def _delete_jobs_for_target(job_type: str, target: str) -> int:
+    """Drop the JOB rows a deleted entity leaves behind (its job history)."""
+    from boto3.dynamodb.conditions import Attr
+
+    table = dynamo_table()
+    resp = table.query(
+        IndexName="gsi1",
+        KeyConditionExpression=Key("entity").eq("job"),
+        FilterExpression=Attr("target").eq(target) & Attr("job_type").eq(job_type),
+    )
+    items = resp.get("Items", [])
+    for item in items:
+        table.delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
+    return len(items)
+
+
+def _reject_active_job(job_type: str, target: str) -> None:
+    """409 while a job for the target is queued or running.
+
+    The job system's own LOCK row is the source of truth; deleting under a
+    live job would race the worker, which rewrites cards/reports/artifacts
+    when it finishes. An expired-but-unswept lock (DynamoDB TTL cleanup is
+    lazy) does not block.
+    """
+    item = (
+        dynamo_table()
+        .get_item(Key={"pk": lock_key(job_type, target), "sk": "META"})
+        .get("Item")
+    )
+    if item and int(item.get("ttl", 0)) > epoch_in(0):
+        raise ServiceError(
+            409,
+            f"A {job_type} job for this target is queued or running — "
+            "wait for it to finish before deleting.",
+        )
+
+
+def _scrub_exercise_from_reports(slug: str) -> int:
+    """Remove one exercise's result from every student's live report.
+
+    Rewrites report.json with counts/points recomputed by the same rules a
+    grading run uses, drops the task's section from report.md, and refreshes
+    the denormalized student card. Older report versions under
+    students/<slug>/<version>/ are left alone — they are the students'
+    grading history, not the exercise's data.
+    """
+    from evaluator.grade import (
+        MAX_POINTS_PER_EXERCISE,
+        _counts_from_tasks,
+        _section_matches_slug,
+        _split_report_sections,
+        _sum_points,
+    )
+
+    table = dynamo_table()
+    s3 = s3_client()
+    resp = table.query(
+        IndexName="gsi1", KeyConditionExpression=Key("entity").eq("student")
+    )
+    scrubbed = 0
+    for item in resp.get("Items", []):
+        meta = from_dynamo(item)
+        # "report_json" is the legacy attribute name (see get_student).
+        report_key = meta.get("report_json_key") or meta.get("report_json")
+        if not report_key:
+            continue
+        obj = s3.get_object(Bucket=data_bucket(), Key=str(report_key))
+        report = json.loads(obj["Body"].read().decode("utf-8"))
+        tasks = list(report.get("tasks") or [])
+        remaining = [t for t in tasks if t.get("slug") != slug]
+        if len(remaining) == len(tasks):
+            continue
+        counts = _counts_from_tasks(remaining)
+        total = sum(counts.values())
+        report["tasks"] = remaining
+        report["counts"] = {**counts, "total": total}
+        report["points_earned"] = _sum_points(remaining)
+        report["points_possible"] = total * MAX_POINTS_PER_EXERCISE
+        s3.put_object(
+            Bucket=data_bucket(),
+            Key=str(report_key),
+            Body=json.dumps(report, indent=2).encode("utf-8"),
+            ContentType="application/json; charset=utf-8",
+        )
+        md_key = meta.get("report_md_key")
+        md_text = _s3_text(str(md_key)) if md_key else None
+        if md_text is not None:
+            head, sections = _split_report_sections(md_text)
+            kept = [s for s in sections if not _section_matches_slug(s, slug)]
+            if len(kept) != len(sections):
+                merged = (
+                    head.rstrip("\n")
+                    if not kept
+                    else head + "\n\n---\n\n" + "\n\n---\n\n".join(kept).rstrip("\n")
+                )
+                s3.put_object(
+                    Bucket=data_bucket(),
+                    Key=str(md_key),
+                    Body=(merged + "\n").encode("utf-8"),
+                    ContentType="text/markdown; charset=utf-8",
+                )
+        table.update_item(
+            Key={"pk": item["pk"], "sk": "META"},
+            UpdateExpression=(
+                "SET #c = :c, points_earned = :e, points_possible = :p"
+            ),
+            ExpressionAttributeNames={"#c": "counts"},
+            ExpressionAttributeValues={
+                ":c": to_dynamo({**counts, "total": total}),
+                ":e": report["points_earned"],
+                ":p": report["points_possible"],
+            },
+        )
+        scrubbed += 1
+    return scrubbed
+
+
+@app.delete("/v1/students/<slug>")
+def delete_student(slug: str) -> dict[str, Any]:
+    """Hard-delete a student and every trace of them (admin only).
+
+    Removes the student card, all REPORT history rows, their grade-job rows,
+    the grade lock, and every stored report object under students/<slug>/
+    (all S3 versions). 409 while a grading for them is queued or running.
+    """
+    _require_role(ROLE_ADMIN)
+    table = dynamo_table()
+    if not table.get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"}).get("Item"):
+        raise NotFoundError(f"No student {slug!r}.")
+    _reject_active_job("grade", slug)
+
+    resp = table.query(KeyConditionExpression=Key("pk").eq(f"STUDENT#{slug}"))
+    rows = resp.get("Items", [])
+    for item in rows:
+        table.delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
+    jobs = _delete_jobs_for_target("grade", slug)
+    table.delete_item(Key={"pk": lock_key("grade", slug), "sk": "META"})
+    objects = _purge_s3_prefix(f"students/{slug}/")
+    return {
+        "deleted": {
+            "student": slug,
+            "rows": len(rows),
+            "jobs": jobs,
+            "objects": objects,
+        }
+    }
+
+
+@app.delete("/v1/exercises/<slug>")
+def delete_exercise(slug: str) -> dict[str, Any]:
+    """Hard-delete an exercise and every trace of it (admin only).
+
+    Removes all its S3 content (authored files, prep artifacts, mirrored
+    input files — all versions), the EXERCISE row, its prep-job rows and
+    lock, and scrubs its result out of every student's live report. When
+    the folder still ships inside the container image, a minimal tombstone
+    row (slug + deleted flag) replaces the EXERCISE row — without it the
+    image copy would resurrect the exercise on the next listing or prep.
+    409 while a prep involving it is queued or running.
+    """
+    claims = _require_role(ROLE_ADMIN)
+    from evaluator.tasks import list_exercise_folders
+
+    if not _SLUG_RE.match(slug):
+        raise NotFoundError(f"No exercise {slug!r}.")
+    row = _exercise_row(slug)
+    if row and row.get("deleted"):
+        raise NotFoundError(f"No exercise {slug!r}.")
+    in_image = slug in list_exercise_folders()
+    if row is None and not in_image and slug not in _scan_authored_s3():
+        raise NotFoundError(f"No exercise {slug!r}.")
+    _reject_active_job("prep", slug)
+    _reject_active_job("prep", "all")
+
+    objects = _purge_s3_prefix(f"{AUTHORED_PREFIX}{slug}/")
+    objects += _purge_s3_prefix(f"exercise-resources/{slug}/")
+
+    table = dynamo_table()
+    if in_image:
+        table.put_item(
+            Item={
+                "pk": f"EXERCISE#{slug}",
+                "sk": "META",
+                "entity": "exercise",
+                "slug": slug,
+                "deleted": True,
+                "deleted_by": _email(claims),
+                "deleted_at": utc_now_iso(),
+            }
+        )
+    else:
+        table.delete_item(Key={"pk": f"EXERCISE#{slug}", "sk": "META"})
+    jobs = _delete_jobs_for_target("prep", slug)
+    table.delete_item(Key={"pk": lock_key("prep", slug), "sk": "META"})
+    reports = _scrub_exercise_from_reports(slug)
+    return {
+        "deleted": {
+            "exercise": slug,
+            "objects": objects,
+            "jobs": jobs,
+            "reports_scrubbed": reports,
+            "tombstoned": in_image,
+        }
+    }
 
 
 # ---------- entry point ----------

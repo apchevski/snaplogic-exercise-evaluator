@@ -81,12 +81,30 @@ plan → judge → report loop the skill used to drive interactively.
   authored slugs by the presence of `exercises/<slug>/description.md` in
   S3 (prep never uploads one). Input files travel browser ↔ S3 via
   presigned URLs (bucket CORS allows PUT from the SPA origins).
-  **Archive is the only delete**: a soft flag on the row; the worker
+  **Archive is the reversible delete**: a soft flag on the row; the worker
   prunes archived folders from its working tree after materialize (out of
   prep, grading, and the points denominator) while S3 keeps everything.
   Durability: bucket versioning (noncurrent 90 days) + table PITR +
   `prevent_destroy` on both, plus the nightly one-way
   `backup-exercises.yml` snapshot into `exercises-backup/` in the repo.
+- **Hard deletes (July 2026): admin-only, purge every trace.** The user's
+  requirement was "no tracks left in AWS", so `DELETE /v1/students/{slug}`
+  and `DELETE /v1/exercises/{slug}` purge **all S3 object versions** under
+  the entity's prefixes (the versioning insurance is deliberately bypassed
+  for an explicit delete; the UI confirmation dialog is the safety), all
+  DynamoDB rows (card + report history / exercise row), the entity's job
+  rows and lock, with a 409 while a job for the target is in flight.
+  Exercise deletion also scrubs the task from every student's **live**
+  report (json + md section, counts/points recomputed with grade.py's own
+  helpers, card refreshed); historical report versions are the students'
+  grading history and are kept. **Tombstones:** an exercise whose folder
+  still ships in the image keeps a minimal `deleted: true` row — without
+  it the image copy would resurface in listings and be re-seeded to S3 by
+  the next prep (`worker._prune_excluded_exercises` prunes tombstoned
+  slugs like archived ones). S3-authored-only exercises delete cleanly
+  with no tombstone. `POST /v1/exercises` on a tombstoned slug re-creates
+  it. Out of reach by design: CloudWatch log lines (retention handles
+  them) and prior `exercises-backup/` snapshots in git history.
 - **Student input files** (`exercises/<slug>/resources/` — see
   `conventions/exercise-resources-folder.md`) are authored content, but
   they're too big to stream through a Lambda response (base64 + the 6 MB

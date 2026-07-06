@@ -168,3 +168,20 @@ export interface CreateExerciseResult {
   exercise: Exercise;
   uploads: ExerciseUpload[];
 }
+
+/** DELETE /v1/students/{slug} — what the purge removed. */
+export interface DeleteStudentSummary {
+  student: string;
+  rows: number; // DynamoDB rows (card + report history)
+  jobs: number; // grade-job rows
+  objects: number; // S3 object versions
+}
+
+/** DELETE /v1/exercises/{slug} — what the purge removed. */
+export interface DeleteExerciseSummary {
+  exercise: string;
+  objects: number; // S3 object versions
+  jobs: number; // prep-job rows
+  reports_scrubbed: number; // student reports the result was removed from
+  tombstoned: boolean; // folder still ships in the image; marker row kept
+}

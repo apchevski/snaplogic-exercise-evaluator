@@ -84,17 +84,20 @@ def _exercise_rows() -> dict[str, dict[str, Any]]:
     return {str(i.get("slug")): from_dynamo(i) for i in resp.get("Items", [])}
 
 
-def _prune_archived_exercises(rows: dict[str, dict[str, Any]]) -> list[str]:
-    """Drop archived exercises from the merged /tmp tree (S3 is untouched).
+def _prune_excluded_exercises(rows: dict[str, dict[str, Any]]) -> list[str]:
+    """Drop archived and hard-deleted exercises from the merged /tmp tree.
 
-    Runs after materialize for BOTH job types: prep skips them, and grading
-    no longer counts them toward the points denominator.
+    Runs after materialize for BOTH job types: prep skips them (so a deleted
+    exercise's image copy is never re-seeded into S3), and grading no longer
+    counts them toward the points denominator. Archived exercises keep their
+    S3 content; deleted ones only exist as an image folder plus the tombstone
+    row that carries the `deleted` flag (see api.delete_exercise).
     """
     from evaluator.config import EXERCISES_DIR
 
     pruned = []
     for slug, row in rows.items():
-        if row.get("archived") and (EXERCISES_DIR / slug).is_dir():
+        if (row.get("archived") or row.get("deleted")) and (EXERCISES_DIR / slug).is_dir():
             shutil.rmtree(EXERCISES_DIR / slug)
             pruned.append(slug)
     return pruned
@@ -345,11 +348,11 @@ def _process_job(job: dict[str, Any]) -> None:
         load_secrets_into_env()
         store = _make_store()
         store.materialize_exercises()
-        # Archived exercises stay in S3 (nothing is ever deleted there) but
-        # are dropped from the working tree, so prep skips them and grading
-        # stops counting them toward the points denominator.
+        # Archived and hard-deleted exercises are dropped from the working
+        # tree, so prep skips them (and never re-seeds a deleted one) and
+        # grading stops counting them toward the points denominator.
         rows = _exercise_rows()
-        _prune_archived_exercises(rows)
+        _prune_excluded_exercises(rows)
         if job_type == "grade":
             result = _run_grade_job(job, store)
         elif job_type == "prep":
