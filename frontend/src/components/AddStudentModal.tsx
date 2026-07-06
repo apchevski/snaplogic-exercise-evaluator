@@ -28,7 +28,7 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
 
   const submit = async () => {
     const student = name.trim();
-    if (!student || busy) return;
+    if (!student || !space.trim() || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -72,7 +72,9 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
         <div className="modal-body">
           {error && <div className="error-banner">{error}</div>}
           <div className="modal-field">
-            <label>Student name</label>
+            <label>
+              Student name<span className="req-star">*</span>
+            </label>
             <input
               type="text"
               value={name}
@@ -82,7 +84,7 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
             />
           </div>
           <div className="modal-field">
-            <label>Student email (optional)</label>
+            <label>Student email</label>
             <input
               type="email"
               value={email}
@@ -96,7 +98,9 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
             </p>
           </div>
           <div className="modal-field">
-            <label>Project space</label>
+            <label>
+              Project space<span className="req-star">*</span>
+            </label>
             <input
               type="text"
               value={space}
@@ -134,7 +138,7 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
           <button
             type="submit"
             className="btn primary"
-            disabled={!name.trim() || busy}
+            disabled={!name.trim() || !space.trim() || busy}
           >
             {busy ? "Adding…" : "Add Student"}
           </button>
