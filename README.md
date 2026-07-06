@@ -20,7 +20,7 @@ Mentors and admins log into a VPN-restricted web dashboard (styled after the
 classic SnapLogic Dashboard: navy panel headers, sortable/paginated data
 tables, tabbed sub-nav):
 
-- **Grade** (mentor or admin): click **Grade…** on a student's row. A scope
+- **Grade** (mentor or admin): click **Grade** on a student's row. A scope
   picker opens with every active exercise preselected — keep them all for a
   full run, or check just the exercises you want. A job queues, a worker
   Lambda runs the deterministic hard gates against SnapLogic, sends each
@@ -28,7 +28,7 @@ tables, tabbed sub-nav):
   the report, and the row refreshes live with points and per-task detail. A
   full run also refreshes the AI Overall summary; a subset run only replaces
   the selected exercises' results.
-- **Add a student** (mentor or admin): click **Add Student…** in the toolbar.
+- **Add a student** (mentor or admin): click **Add Student** in the toolbar.
   The dialog takes the student's name plus the SnapLogic **project space**
   (prefilled with the configured default, `SNAPLOGIC_STUDENT_PROJECT_SPACE`)
   and optionally a **project** name for when the project isn't named exactly
@@ -37,7 +37,7 @@ tables, tabbed sub-nav):
   project exists at that location (a typo gets a clear "no project named …"
   error instead of a card that every grading run would fail on), then
   registers the student with zero exercises graded (and $0 spent) — grading
-  starts later from the row's **Grade…** button.
+  starts later from the row's **Grade** button.
 - **Regrade one exercise** (mentor or admin): on a student's detail page,
   every task card has a **Regrade** button that re-runs just that exercise
   (one Claude call instead of one per exercise — faster and cheaper than a
@@ -46,8 +46,8 @@ tables, tabbed sub-nav):
 - **Not-graded visibility**: exercises a student has never been graded on
   (registered-only students, or exercises added after their last run) show
   as **not graded** cards on the detail page — each with its own **Grade**
-  button — plus an "N not graded" chip on the dashboard row and a badge in
-  the grade summary.
+  button — plus a **Not Graded** count column on the dashboard (next to
+  Pass/Fail/Missing) and a badge in the grade summary.
 - **Edit report text** (mentor or admin): next to each task card's Regrade
   button — and beside the Overall summary — a pencil button opens an inline
   editor to rewrite the AI's summary text. Edits are saved into the stored
@@ -56,11 +56,11 @@ tables, tabbed sub-nav):
   AI text.
 - **Prep** (admin only): click Prep on an exercise to refresh its solution
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
-- **Remove a student** (admin only): a red **Remove…** button on the
+- **Remove a student** (admin only): a red **Remove** button on the
   student's row opens a confirmation dialog, then permanently deletes the
   student from AWS — dashboard card, full report history (every S3 version),
   and their grading-job records. Their SnapLogic project is untouched.
-- **Delete an exercise** (admin only): a red **Delete…** button next to
+- **Delete an exercise** (admin only): a red **Delete** button next to
   Archive opens a confirmation dialog, then permanently deletes the exercise
   from AWS — authored content, prep artifacts and input files (every S3
   version) plus its DynamoDB and job records — and scrubs its result out of

@@ -19,6 +19,14 @@ import {
 import { tierForRatio } from "../components/TaskCard";
 import type { Exercise, Job, StudentMeta } from "../types";
 
+// Exercises with any verdict at all. "Not graded" is the registered-exercise
+// count minus this, and that count is the same for every row, so sorting by
+// gradedTotal ascending is sorting by "not graded" descending.
+const gradedTotal = (s: StudentMeta) => {
+  const c = s.counts;
+  return (c?.pass ?? 0) + (c?.fail ?? 0) + (c?.missing ?? 0) + (c?.needs_prep ?? 0);
+};
+
 const COMPARE: Record<string, (a: StudentMeta, b: StudentMeta) => number> = {
   student: (a, b) => a.display_name.localeCompare(b.display_name),
   space: (a, b) => (a.space ?? "").localeCompare(b.space ?? ""),
@@ -26,6 +34,7 @@ const COMPARE: Record<string, (a: StudentMeta, b: StudentMeta) => number> = {
   pass: (a, b) => (a.counts?.pass ?? 0) - (b.counts?.pass ?? 0),
   fail: (a, b) => (a.counts?.fail ?? 0) - (b.counts?.fail ?? 0),
   missing: (a, b) => (a.counts?.missing ?? 0) - (b.counts?.missing ?? 0),
+  notgraded: (a, b) => gradedTotal(b) - gradedTotal(a),
   graded: (a, b) => (a.graded_at ?? "").localeCompare(b.graded_at ?? ""),
 };
 const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
@@ -35,6 +44,7 @@ const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   pass: "desc",
   fail: "desc",
   missing: "desc",
+  notgraded: "desc",
   graded: "desc",
 };
 
@@ -219,7 +229,7 @@ export default function Dashboard() {
             />
             <span className="toolbar-spacer" />
             <button className="btn primary" onClick={() => setAdding(true)}>
-              Add Student…
+              Add Student
             </button>
             <label className="field">
               Entries per Page:
@@ -258,6 +268,7 @@ export default function Dashboard() {
                 <SortableTh label="Pass" sortKey="pass" sort={sort} onSort={onSort} />
                 <SortableTh label="Fail" sortKey="fail" sort={sort} onSort={onSort} />
                 <SortableTh label="Missing" sortKey="missing" sort={sort} onSort={onSort} />
+                <SortableTh label="Not Graded" sortKey="notgraded" sort={sort} onSort={onSort} />
                 <SortableTh label="Last Graded" sortKey="graded" sort={sort} onSort={onSort} />
                 <th className="plain">Actions</th>
               </tr>
@@ -319,14 +330,6 @@ export default function Dashboard() {
                             ⚠
                           </span>
                         )}
-                        {notGraded > 0 && (
-                          <span
-                            className="ungraded-chip"
-                            title={`${notGraded} registered exercise${notGraded === 1 ? " has" : "s have"} never been graded for this student. Open the student to grade ${notGraded === 1 ? "it" : "them"} individually.`}
-                          >
-                            {notGraded} not graded
-                          </span>
-                        )}
                       </td>
                       <td className={sc("pass")}>
                         <Count n={c.pass} kind="pass" />
@@ -337,8 +340,18 @@ export default function Dashboard() {
                       <td className={sc("missing")}>
                         <Count n={c.missing} kind="missing" />
                       </td>
+                      <td
+                        className={sc("notgraded")}
+                        title={
+                          notGraded > 0
+                            ? `${notGraded} registered exercise${notGraded === 1 ? " has" : "s have"} never been graded for this student. Open the student to grade ${notGraded === 1 ? "it" : "them"} individually.`
+                            : undefined
+                        }
+                      >
+                        <Count n={notGraded} kind="notgraded" />
+                      </td>
                       <td className={`${sc("graded")} cell-muted`}>
-                        {s.graded_at ?? "never graded"}
+                        {s.graded_at ?? "—"}
                       </td>
                       <td>
                         <span className="actions-cell">
@@ -349,7 +362,7 @@ export default function Dashboard() {
                             }
                             disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
                           >
-                            Grade…
+                            Grade
                           </button>
                           {isAdmin && (
                             <button
@@ -357,7 +370,7 @@ export default function Dashboard() {
                               onClick={() => setRemoving(s)}
                               disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
                             >
-                              Remove…
+                              Remove
                             </button>
                           )}
                         </span>
@@ -365,7 +378,7 @@ export default function Dashboard() {
                     </tr>
                     {isOpen && s.overall_summary && (
                       <tr className="expand-row">
-                        <td colSpan={9}>{s.overall_summary}</td>
+                        <td colSpan={10}>{s.overall_summary}</td>
                       </tr>
                     )}
                   </Fragment>
@@ -373,17 +386,17 @@ export default function Dashboard() {
               })}
               {!loading && visible.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="empty-cell">
+                  <td colSpan={10} className="empty-cell">
                     <h3>No students yet</h3>
-                    Use “Add Student…” above to register a student (their
+                    Use “Add Student” above to register a student (their
                     SnapLogic project must already exist), then start a grading
-                    with the row&rsquo;s Grade… button.
+                    with the row&rsquo;s Grade button.
                   </td>
                 </tr>
               )}
               {loading && (
                 <tr>
-                  <td colSpan={9} className="empty-cell">
+                  <td colSpan={10} className="empty-cell">
                     Loading…
                   </td>
                 </tr>

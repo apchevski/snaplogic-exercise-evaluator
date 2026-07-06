@@ -387,7 +387,7 @@ export default function Exercises() {
                               onClick={() => setDeleting(ex)}
                               disabled={anyBusy}
                             >
-                              Delete…
+                              Delete
                             </button>
                             {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="prep" />}
                           </span>
