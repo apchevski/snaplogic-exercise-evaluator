@@ -146,12 +146,21 @@ export const api = {
 
   // Add a student to the list without grading anything. The optional
   // project space and project name are stored on the student and dictate
-  // where every later grading run looks for their pipelines.
-  registerStudent: (token: string, student: string, space?: string, project?: string) =>
+  // where every later grading run looks for their pipelines. An email
+  // additionally creates a read-only web login for the student (Cognito
+  // sends them a temporary password).
+  registerStudent: (
+    token: string,
+    student: string,
+    space?: string,
+    project?: string,
+    email?: string,
+  ) =>
     request<{ student: StudentMeta }>(token, "POST", "/v1/students", {
       student,
       ...(space ? { space } : {}),
       ...(project ? { project } : {}),
+      ...(email ? { email } : {}),
     }),
 
   // No tasks = full grading (also refreshes the AI Overall summary); a

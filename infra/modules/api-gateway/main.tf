@@ -117,6 +117,18 @@ data "aws_iam_policy_document" "api" {
     actions   = ["sqs:SendMessage"]
     resources = [var.queue_arn]
   }
+  # POST /v1/students with an email invites the student into the pool's
+  # read-only `student` group (Cognito emails the temporary password);
+  # DELETE /v1/students/{slug} removes that login again ("no tracks left").
+  statement {
+    sid = "CognitoStudentLogins"
+    actions = [
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminAddUserToGroup",
+      "cognito-idp:AdminDeleteUser",
+    ]
+    resources = [var.user_pool_arn]
+  }
   # POST /v1/students checks the student's SnapLogic project exists before
   # registering; the SnapLogic credentials live in the app secret.
   statement {
@@ -164,6 +176,7 @@ resource "aws_lambda_function" "api" {
       QUEUE_URL     = var.queue_url
       SECRET_ARN    = var.secret_arn
       ALLOWED_CIDRS = join(",", var.allowed_cidrs)
+      USER_POOL_ID  = var.user_pool_id
     }
   }
 

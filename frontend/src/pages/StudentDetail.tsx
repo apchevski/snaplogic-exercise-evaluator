@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { api, pollJob } from "../api";
-import { useToken } from "../auth";
+import { useCanGrade, useToken } from "../auth";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/table";
 import { TaskCard, tierForRatio } from "../components/TaskCard";
@@ -33,6 +33,8 @@ function PencilIcon() {
 export default function StudentDetail() {
   const { slug = "" } = useParams();
   const token = useToken();
+  // Students get the same report, minus every action (backend-enforced too).
+  const canGrade = useCanGrade();
   const [student, setStudent] = useState<StudentMeta | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [exercises, setExercises] = useState<Exercise[]>([]);
@@ -200,17 +202,18 @@ export default function StudentDetail() {
     </div>
   );
 
-  const editPencil = (title: string, onClick: () => void) => (
-    <button
-      className="btn small icon-btn"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      disabled={anyBusy || savingEdit}
-    >
-      <PencilIcon />
-    </button>
-  );
+  const editPencil = (title: string, onClick: () => void) =>
+    canGrade ? (
+      <button
+        className="btn small icon-btn"
+        title={title}
+        aria-label={title}
+        onClick={onClick}
+        disabled={anyBusy || savingEdit}
+      >
+        <PencilIcon />
+      </button>
+    ) : null;
 
   const taskEditor = (t: TaskResult) =>
     editing?.kind === "task" && editing.slug === t.slug ? editorNode : undefined;
@@ -218,7 +221,7 @@ export default function StudentDetail() {
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
-      {needsPrepCount > 0 && (
+      {canGrade && needsPrepCount > 0 && (
         <div className="warn-banner">
           ⚠ {needsPrepCount} exercise{needsPrepCount === 1 ? " was" : "s were"} skipped
           because {needsPrepCount === 1 ? "its" : "their"} grading artifacts are not
@@ -293,14 +296,18 @@ export default function StudentDetail() {
               <p className="summary" style={{ margin: 0 }}>
                 Nothing graded yet for this student.
               </p>
-              <button
-                className="btn small primary"
-                onClick={() => void gradeAll()}
-                disabled={anyBusy}
-              >
-                Grade all exercises
-              </button>
-              {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="grade" />}
+              {canGrade && (
+                <>
+                  <button
+                    className="btn small primary"
+                    onClick={() => void gradeAll()}
+                    disabled={anyBusy}
+                  >
+                    Grade all exercises
+                  </button>
+                  {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="grade" />}
+                </>
+              )}
             </div>
           )}
           {gradedTasks.length > 0 || notGradedExercises.length > 0 ? (
@@ -311,22 +318,24 @@ export default function StudentDetail() {
                   task={t}
                   summaryEditor={taskEditor(t)}
                   action={
-                    <span className="actions-cell">
-                      {jobs[t.slug] && <StatusPill job={jobs[t.slug]} kind="grade" />}
-                      {editPencil("Edit summary", () =>
-                        startEdit(
-                          { kind: "task", slug: t.slug },
-                          t.summary || t.reason || "",
-                        ),
-                      )}
-                      <button
-                        className="btn small"
-                        onClick={() => void regradeTask(t.slug)}
-                        disabled={anyBusy}
-                      >
-                        Regrade
-                      </button>
-                    </span>
+                    canGrade ? (
+                      <span className="actions-cell">
+                        {jobs[t.slug] && <StatusPill job={jobs[t.slug]} kind="grade" />}
+                        {editPencil("Edit summary", () =>
+                          startEdit(
+                            { kind: "task", slug: t.slug },
+                            t.summary || t.reason || "",
+                          ),
+                        )}
+                        <button
+                          className="btn small"
+                          onClick={() => void regradeTask(t.slug)}
+                          disabled={anyBusy}
+                        >
+                          Regrade
+                        </button>
+                      </span>
+                    ) : undefined
                   }
                 />
               ))}
@@ -336,24 +345,26 @@ export default function StudentDetail() {
                     <span className="verdict-badge notgraded">not graded</span>
                     <h3>{e.slug}</h3>
                     <span className="points-pill tier-none">—/10</span>
-                    <span className="actions-cell">
-                      {jobs[e.slug] && <StatusPill job={jobs[e.slug]} kind="grade" />}
-                      {e.prep_status !== "ready" && (
-                        <span
-                          className="warn-chip"
-                          title="Not prepped — grading will skip it until it's prepped on the Exercises page."
+                    {canGrade && (
+                      <span className="actions-cell">
+                        {jobs[e.slug] && <StatusPill job={jobs[e.slug]} kind="grade" />}
+                        {e.prep_status !== "ready" && (
+                          <span
+                            className="warn-chip"
+                            title="Not prepped — grading will skip it until it's prepped on the Exercises page."
+                          >
+                            ⚠
+                          </span>
+                        )}
+                        <button
+                          className="btn small"
+                          onClick={() => void regradeTask(e.slug)}
+                          disabled={anyBusy}
                         >
-                          ⚠
-                        </span>
-                      )}
-                      <button
-                        className="btn small"
-                        onClick={() => void regradeTask(e.slug)}
-                        disabled={anyBusy}
-                      >
-                        Grade
-                      </button>
-                    </span>
+                          Grade
+                        </button>
+                      </span>
+                    )}
                   </header>
                   <p className="summary muted">
                     This exercise has never been graded for this student.

@@ -35,6 +35,15 @@ variable "secret_arn" {
   type        = string
 }
 
+variable "user_pool_id" {
+  description = "Cognito user pool the API creates student logins in (POST /v1/students with an email)."
+  type        = string
+}
+
+variable "user_pool_arn" {
+  type = string
+}
+
 variable "jwt_issuer" {
   type = string
 }

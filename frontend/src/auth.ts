@@ -32,6 +32,13 @@ export function useIsAdmin(): boolean {
   return useGroups().includes("admin");
 }
 
+/** Admins and mentors can act (grade, register, edit); the `student` group
+ * only views. The backend enforces the same matrix — this is cosmetic. */
+export function useCanGrade(): boolean {
+  const groups = useGroups();
+  return groups.includes("admin") || groups.includes("mentor");
+}
+
 /** Cognito has no end_session in some pool configs — log out via the hosted UI. */
 export function signOut(removeUser: () => Promise<void>): void {
   const domain = (import.meta.env.VITE_COGNITO_DOMAIN ?? "").replace(/\/$/, "");

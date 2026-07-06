@@ -6,17 +6,24 @@ Defense layers (outer → inner):
 3. This handler re-checks the source IP against ALLOWED_CIDRS and enforces
    the role matrix per route (the UI hiding buttons is cosmetic only):
 
-       | Action                            | admin | mentor |
-       |-----------------------------------|-------|--------|
-       | GET  (students/reports/jobs/…)    |  ✅   |  ✅    |
-       | POST /v1/students                 |  ✅   |  ✅    |
-       | POST /v1/gradings                 |  ✅   |  ✅    |
-       | PATCH /v1/students/{slug}/report  |  ✅   |  ✅    |
-       | POST /v1/preps                    |  ✅   |  ❌ 403|
-       | POST /v1/exercises                |  ✅   |  ❌ 403|
-       | PUT  /v1/exercises/{slug}         |  ✅   |  ❌ 403|
-       | DELETE /v1/students/{slug}        |  ✅   |  ❌ 403|
-       | DELETE /v1/exercises/{slug}       |  ✅   |  ❌ 403|
+       | Action                            | admin | mentor | student |
+       |-----------------------------------|-------|--------|---------|
+       | GET  students / reports / exercises / resources | ✅ | ✅ | ✅ |
+       | GET  /v1/config, /v1/exercises/{slug} (authored content incl. notes.md), job polling | ✅ | ✅ | ❌ 403 |
+       | POST /v1/students                 |  ✅   |  ✅    |  ❌ 403 |
+       | POST /v1/gradings                 |  ✅   |  ✅    |  ❌ 403 |
+       | PATCH /v1/students/{slug}/report  |  ✅   |  ✅    |  ❌ 403 |
+       | POST /v1/preps                    |  ✅   |  ❌ 403|  ❌ 403 |
+       | POST /v1/exercises                |  ✅   |  ❌ 403|  ❌ 403 |
+       | PUT  /v1/exercises/{slug}         |  ✅   |  ❌ 403|  ❌ 403 |
+       | DELETE /v1/students/{slug}        |  ✅   |  ❌ 403|  ❌ 403 |
+       | DELETE /v1/exercises/{slug}       |  ✅   |  ❌ 403|  ❌ 403 |
+
+   `student` is the read-only role: members are created by POST /v1/students
+   when a registration carries an email (Cognito emails the temporary
+   password; the hosted UI forces a change on first sign-in). They see the
+   same dashboards mentors see — grades and exercises — but can start or
+   change nothing, and never see instructor notes.
 
 POSTs never do the work inline — they write a JOB item + an SQS message and
 return 202; the worker Lambda owns execution. A conditional-put LOCK item
@@ -43,6 +50,7 @@ from boto3.dynamodb.conditions import Key
 
 from .common import (
     LOCK_TTL_SECONDS,
+    cognito_client,
     data_bucket,
     dynamo_table,
     epoch_in,
@@ -59,6 +67,7 @@ from .common import (
 
 ROLE_ADMIN = "admin"
 ROLE_MENTOR = "mentor"
+ROLE_STUDENT = "student"
 
 app = APIGatewayHttpResolver()
 
@@ -378,7 +387,7 @@ def get_config() -> dict[str, Any]:
 
 @app.get("/v1/students")
 def list_students() -> dict[str, Any]:
-    _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
     resp = dynamo_table().query(
         IndexName="gsi1", KeyConditionExpression=Key("entity").eq("student")
     )
@@ -391,7 +400,7 @@ def list_students() -> dict[str, Any]:
 
 @app.get("/v1/students/<slug>")
 def get_student(slug: str) -> dict[str, Any]:
-    _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
     resp = dynamo_table().get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"})
     item = resp.get("Item")
     if not item:
@@ -409,7 +418,7 @@ def get_student(slug: str) -> dict[str, Any]:
 
 @app.get("/v1/students/<slug>/reports")
 def list_student_reports(slug: str) -> dict[str, Any]:
-    _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
     resp = dynamo_table().query(
         KeyConditionExpression=Key("pk").eq(f"STUDENT#{slug}")
         & Key("sk").begins_with("REPORT#"),
@@ -420,7 +429,9 @@ def list_student_reports(slug: str) -> dict[str, Any]:
 
 @app.get("/v1/exercises")
 def list_exercises() -> dict[str, Any]:
-    _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    # Students may look: the listing carries descriptions and input files but
+    # never notes.md (instructor hints live behind GET /v1/exercises/{slug}).
+    _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
     # Authored folders ship in this image; prep state lives in DynamoDB.
     from evaluator.tasks import (
         list_exercise_folders,
@@ -532,7 +543,7 @@ def get_exercise_resource(slug: str, filename: str) -> dict[str, Any]:
     ceiling once base64-encoded, so the browser downloads straight from S3
     instead: lazily mirror the image's copy there, then presign a GET.
     """
-    _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
     from evaluator.tasks import exercise_resource_path
 
     row = _exercise_row(slug)
@@ -668,6 +679,79 @@ def _verify_student_project(project: str, space: str | None) -> None:
             )
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _create_student_login(student: str, email: str) -> None:
+    """Invite the student into Cognito's read-only `student` group.
+
+    AdminCreateUser with EMAIL delivery makes Cognito send the invitation
+    itself (username + temporary password); the hosted UI then forces a
+    password change on first sign-in — the API never sees or stores a
+    password. The email doubles as the username (the pool signs in by
+    email), and is pre-verified so account recovery works immediately.
+    """
+    from botocore.exceptions import ClientError
+
+    pool_id = os.environ.get("USER_POOL_ID", "").strip()
+    if not pool_id:
+        raise ServiceError(
+            503,
+            "Student logins are not configured on this deployment "
+            "(USER_POOL_ID is unset). Register without an email, or deploy "
+            "the Cognito wiring first.",
+        )
+    cognito = cognito_client()
+    try:
+        cognito.admin_create_user(
+            UserPoolId=pool_id,
+            Username=email,
+            UserAttributes=[
+                {"Name": "email", "Value": email},
+                {"Name": "email_verified", "Value": "true"},
+                {"Name": "name", "Value": student},
+            ],
+            DesiredDeliveryMediums=["EMAIL"],
+        )
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        if code == "UsernameExistsException":
+            raise ServiceError(409, f"A login for {email!r} already exists.")
+        if code == "InvalidParameterException":
+            raise BadRequestError(
+                f"Cognito rejected the login for {email!r}: "
+                f"{e.response['Error'].get('Message', 'invalid parameter')}"
+            )
+        raise ServiceError(502, f"Creating the student login failed: {e}")
+    try:
+        cognito.admin_add_user_to_group(
+            UserPoolId=pool_id, Username=email, GroupName=ROLE_STUDENT
+        )
+    except ClientError as e:
+        # Without the group the login can't pass any role check — remove it
+        # so a retry doesn't hit UsernameExistsException on a broken account.
+        cognito.admin_delete_user(UserPoolId=pool_id, Username=email)
+        raise ServiceError(502, f"Assigning the student role failed: {e}")
+
+
+def _delete_student_login(email: str) -> bool:
+    """Best-effort removal of the login a registration created (see
+    delete_student: a hard delete leaves no trace, and an orphaned login
+    could still sign in and read every grade)."""
+    from botocore.exceptions import ClientError
+
+    pool_id = os.environ.get("USER_POOL_ID", "").strip()
+    if not pool_id:
+        return False
+    try:
+        cognito_client().admin_delete_user(UserPoolId=pool_id, Username=email)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "UserNotFoundException":
+            return False
+        raise
+    return True
+
+
 @app.post("/v1/students")
 def post_student() -> Response:
     """Register a student without grading anything (admin or mentor).
@@ -677,8 +761,10 @@ def post_student() -> Response:
     be started later. Optional body keys 'space' (project space; defaults to
     SNAPLOGIC_STUDENT_PROJECT_SPACE) and 'project' (SnapLogic project name;
     defaults to the student name) are stored on the card and dictate where
-    every later grading run looks for this student's pipelines. 400 if no
-    matching SnapLogic project exists; 409 if the student already exists
+    every later grading run looks for this student's pipelines. Optional
+    'email' additionally creates a read-only web login for the student
+    (Cognito `student` group; Cognito emails the temporary password). 400 if
+    no matching SnapLogic project exists; 409 if the student already exists
     (registered or graded) — nothing about an existing student is
     overwritten.
     """
@@ -689,6 +775,9 @@ def post_student() -> Response:
     student = str(body.get("student") or "").strip()
     if not student:
         raise BadRequestError("Body must include a non-empty 'student'.")
+    email = (_opt_str(body, "email") or "").lower() or None
+    if email and not _EMAIL_RE.match(email):
+        raise BadRequestError(f"{email!r} does not look like an email address.")
     slug = slugify(student)
     # Resolve the space at registration time so the card (and the dashboard
     # column) always carries the value grading will actually use.
@@ -703,6 +792,9 @@ def post_student() -> Response:
         "display_name": student,
         "space": space,
         "project": project,
+        # Present exactly when a login was created — delete_student uses it
+        # to know there is a Cognito user to remove.
+        "email": email,
         "registered_by": _email(claims),
         "registered_at": utc_now_iso(),
     }
@@ -714,6 +806,15 @@ def post_student() -> Response:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             raise ServiceError(409, f"Student {student!r} is already on the list.")
         raise
+    if email:
+        # Card first (the duplicate check must win over login creation), then
+        # the login; if Cognito refuses, roll the card back so the request
+        # fails as a unit and can simply be retried.
+        try:
+            _create_student_login(student, email)
+        except Exception:
+            dynamo_table().delete_item(Key={"pk": row["pk"], "sk": "META"})
+            raise
     return Response(
         status_code=201,
         content_type="application/json",
@@ -1312,12 +1413,15 @@ def delete_student(slug: str) -> dict[str, Any]:
     """Hard-delete a student and every trace of them (admin only).
 
     Removes the student card, all REPORT history rows, their grade-job rows,
-    the grade lock, and every stored report object under students/<slug>/
-    (all S3 versions). 409 while a grading for them is queued or running.
+    the grade lock, every stored report object under students/<slug>/
+    (all S3 versions), and — when the registration created one — the
+    student's Cognito login. 409 while a grading for them is queued or
+    running.
     """
     _require_role(ROLE_ADMIN)
     table = dynamo_table()
-    if not table.get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"}).get("Item"):
+    card = table.get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"}).get("Item")
+    if not card:
         raise NotFoundError(f"No student {slug!r}.")
     _reject_active_job("grade", slug)
 
@@ -1328,12 +1432,16 @@ def delete_student(slug: str) -> dict[str, Any]:
     jobs = _delete_jobs_for_target("grade", slug)
     table.delete_item(Key={"pk": lock_key("grade", slug), "sk": "META"})
     objects = _purge_s3_prefix(f"students/{slug}/")
+    # An orphaned login could still sign in and read every grade — remove it.
+    email = str(card.get("email") or "").strip()
+    login_deleted = _delete_student_login(email) if email else False
     return {
         "deleted": {
             "student": slug,
             "rows": len(rows),
             "jobs": jobs,
             "objects": objects,
+            "login": login_deleted,
         }
     }
 

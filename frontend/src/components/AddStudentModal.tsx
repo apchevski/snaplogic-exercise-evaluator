@@ -5,15 +5,22 @@ interface Props {
   defaultSpace: string;
   /** Registers the student; throws (rejects) on failure so the dialog can
    * stay open and show the error. */
-  onSubmit: (name: string, space?: string, project?: string) => Promise<void>;
+  onSubmit: (
+    name: string,
+    space?: string,
+    project?: string,
+    email?: string,
+  ) => Promise<void>;
   onClose: () => void;
 }
 
 /** Registration dialog: student name plus the SnapLogic project space and
  * project the grader should look in. What's saved here dictates where every
- * later grading run searches for this student's pipelines. */
+ * later grading run searches for this student's pipelines. An optional email
+ * additionally creates a read-only web login for the student. */
 export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [space, setSpace] = useState(defaultSpace);
   const [project, setProject] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25,7 +32,12 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await onSubmit(student, space.trim() || undefined, project.trim() || undefined);
+      await onSubmit(
+        student,
+        space.trim() || undefined,
+        project.trim() || undefined,
+        email.trim() || undefined,
+      );
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -68,6 +80,20 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
               placeholder="e.g. Jane Doe"
               autoFocus
             />
+          </div>
+          <div className="modal-field">
+            <label>Student email (optional)</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="e.g. jane.doe@example.com"
+            />
+            <p className="hint">
+              When set, a read-only login is created and the student is
+              emailed a temporary password — after changing it they can sign
+              in and see the grades, but never grade or edit anything.
+            </p>
           </div>
           <div className="modal-field">
             <label>Project space</label>

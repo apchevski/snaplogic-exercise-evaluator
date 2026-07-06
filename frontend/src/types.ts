@@ -62,6 +62,8 @@ export interface StudentMeta {
   // Set when the student was added via "register without grading".
   registered_by?: string;
   registered_at?: string;
+  // Set when registration also created a read-only web login for the student.
+  email?: string | null;
 }
 
 /** Non-secret SnapLogic settings from GET /v1/config (prefills the Add

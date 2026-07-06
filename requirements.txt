@@ -9,5 +9,5 @@ boto3>=1.34.0
 
 # Development and testing dependencies
 pytest>=8.0
-moto[s3,dynamodb,sqs,secretsmanager]>=5.0
+moto[s3,dynamodb,sqs,secretsmanager,cognitoidp]>=5.0
 ruff>=0.6

@@ -2,6 +2,11 @@ output "user_pool_id" {
   value = aws_cognito_user_pool.main.id
 }
 
+output "user_pool_arn" {
+  description = "Lets the API Lambda's IAM policy scope AdminCreateUser & co. to this pool."
+  value       = aws_cognito_user_pool.main.arn
+}
+
 output "client_id" {
   value = aws_cognito_user_pool_client.spa.id
 }
