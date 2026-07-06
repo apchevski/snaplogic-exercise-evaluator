@@ -543,9 +543,13 @@ an export, not an input.
 Click **Add New Exercise** (next to *Prep All Exercises*), or **Edit** on any
 row. The dialog takes:
 
-- **description.md** (required) — the **first H1 heading** is the canonical
-  pipeline name; the folder name is auto-suggested from it on create.
-- **notes.md** (optional) — instructor hints fed to the AI judge.
+- **Exercise Name** (required) — the human-readable pipeline name (e.g.
+  *Task 07 – Router Basics*). Prep looks the solution pipeline up by it, and on
+  create the exercise's folder id is derived from it automatically — there's no
+  slug to type. Stored as the H1 heading of `description.md` behind the scenes.
+- **Description** (required) — the student-facing prompt body (Markdown); no
+  need to repeat the name as a heading, the dialog adds it for you.
+- **AI Guidance** (optional) — instructor hints fed to the AI judge.
 - **Task type** — this replaces the hand-written `task.json`:
   - *File writer, single output* (the default "auto"): nothing to fill in;
     prep detects the pipeline's lone writer snap and generates everything.

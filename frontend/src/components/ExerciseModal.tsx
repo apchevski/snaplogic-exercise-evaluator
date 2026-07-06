@@ -3,11 +3,10 @@ import { useState, type FormEvent } from "react";
 import { api, uploadToPresignedUrl } from "../api";
 import type { ExerciseDetail, ExerciseResource, TaskConfig } from "../types";
 
-/** "# Task 07 – Router Basics" → "task_07_router_basics" (folder-name style). */
-function suggestSlug(descriptionMd: string): string {
-  const h1 = firstH1(descriptionMd);
-  if (!h1) return "";
-  return h1
+/** "Task 07 – Router Basics" → "task_07_router_basics" — the stable exercise id
+ * we derive from the name, so nobody has to type a folder slug by hand. */
+function slugify(name: string): string {
+  return name
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "") // strip diacritics left by NFKD
     .toLowerCase()
@@ -16,12 +15,20 @@ function suggestSlug(descriptionMd: string): string {
     .slice(0, 64);
 }
 
-function firstH1(markdown: string): string {
-  const line = markdown
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.startsWith("# ") && !l.startsWith("## "));
-  return line ? line.slice(2).trim() : "";
+/** Split authored markdown into its H1 (the exercise / pipeline name) and the
+ * remaining body. S3 still stores one description.md with the name as its H1
+ * on top; the dialog just shows the two parts as separate fields. */
+function splitH1(markdown: string): { name: string; body: string } {
+  const md = markdown ?? "";
+  const lines = md.split("\n");
+  const i = lines.findIndex((l) => {
+    const t = l.trim();
+    return t.startsWith("# ") && !t.startsWith("## ");
+  });
+  if (i === -1) return { name: "", body: md.trim() };
+  const name = lines[i].trim().slice(2).trim();
+  const body = [...lines.slice(0, i), ...lines.slice(i + 1)].join("\n").trim();
+  return { name, body };
 }
 
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -71,9 +78,9 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
   const isEdit = !!initial;
   const cfg = initial?.task_config ?? null;
 
-  const [slug, setSlug] = useState(initial?.slug ?? "");
-  const [slugTouched, setSlugTouched] = useState(isEdit);
-  const [description, setDescription] = useState(initial?.description_md ?? "");
+  const parsed = splitH1(initial?.description_md ?? "");
+  const [exerciseName, setExerciseName] = useState(parsed.name);
+  const [description, setDescription] = useState(parsed.body);
   const [notes, setNotes] = useState(initial?.notes_md ?? "");
   const [taskType, setTaskType] = useState<TaskTypeChoice>(cfg?.task_type ?? "auto");
   const [outputFilenames, setOutputFilenames] = useState(
@@ -96,16 +103,11 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const onDescriptionChange = (text: string) => {
-    setDescription(text);
-    if (!slugTouched) setSlug(suggestSlug(text));
-  };
-
   const onTaskTypeChange = (t: TaskTypeChoice) => {
     setTaskType(t);
     if (t === "triggered_task" && !triggeredName) {
-      const h1 = firstH1(description);
-      if (h1) setTriggeredName(`${h1} Task`);
+      const name = exerciseName.trim();
+      if (name) setTriggeredName(`${name} Task`);
     }
   };
 
@@ -148,18 +150,21 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    const name = exerciseName.trim();
+    if (!name) {
+      setError("Exercise name is required.");
+      return;
+    }
+    // The slug is a stable id derived from the name (never edited after create).
+    const slug = isEdit ? initial!.slug : slugify(name);
     if (!SLUG_RE.test(slug)) {
-      setError(
-        "Folder name must be lowercase letters, digits, '_' or '-' (e.g. task_07_router_basics).",
-      );
+      setError("Give the exercise a name with some letters or numbers in it.");
       return;
     }
-    if (!/^#\s+\S/m.test(description)) {
-      setError(
-        'The description must contain an H1 heading naming the pipeline, e.g. "# Task 07 – Router Basics".',
-      );
-      return;
-    }
+    // S3 keeps a single description.md with the name as its H1 on top; the
+    // dialog just splits that into two fields for editing.
+    const body = description.trim();
+    const descriptionMd = body ? `# ${name}\n\n${body}\n` : `# ${name}\n`;
     let taskConfig: TaskConfig | null;
     try {
       taskConfig = buildTaskConfig();
@@ -174,7 +179,7 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
         : {};
       const { uploads } = isEdit
         ? await api.updateExercise(token, slug, {
-            description_md: description,
+            description_md: descriptionMd,
             notes_md: notes,
             task_config: taskConfig, // null clears back to auto
             ...newResources,
@@ -182,7 +187,7 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
           })
         : await api.createExercise(token, {
             slug,
-            description_md: description,
+            description_md: descriptionMd,
             ...(notes.trim() ? { notes_md: notes } : {}),
             ...(taskConfig ? { task_config: taskConfig } : {}),
             ...newResources,
@@ -212,7 +217,11 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
     >
       <form className="modal" onSubmit={(e) => void submit(e)}>
         <header>
-          <h2>{isEdit ? `Edit Exercise — ${initial?.title ?? slug}` : "Add New Exercise"}</h2>
+          <h2>
+            {isEdit
+              ? `Edit Exercise — ${initial?.title ?? exerciseName ?? initial?.slug}`
+              : "Add New Exercise"}
+          </h2>
           <button
             type="button"
             className="modal-close"
@@ -227,46 +236,38 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
           {error && <div className="error-banner">{error}</div>}
 
           <div className="modal-field">
+            <label htmlFor="ex-name">
+              Exercise Name<span className="req-star">*</span>
+            </label>
+            <input
+              id="ex-name"
+              type="text"
+              value={exerciseName}
+              onChange={(e) => setExerciseName(e.target.value)}
+              placeholder="Task 07 – Router Basics"
+              required
+            />
+            <div className="hint">
+              This is the pipeline name — prep looks the solution pipeline up by it.
+            </div>
+          </div>
+
+          <div className="modal-field">
             <label htmlFor="ex-description">
-              description.md<span className="req-star">*</span>
+              Description<span className="req-star">*</span>
             </label>
             <textarea
               id="ex-description"
               value={description}
-              onChange={(e) => onDescriptionChange(e.target.value)}
-              placeholder={
-                "# Task 07 – Router Basics\n\n### Objective:\n\nDescribe what the student must build…"
-              }
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={"### Objective:\n\nDescribe what the student must build…"}
               required
             />
-            <div className="hint">
-              The H1 heading is the pipeline name — prep looks the solution pipeline up by it.
-            </div>
+            <div className="hint">What the student must build. Markdown supported.</div>
           </div>
 
-          {!isEdit && (
-            <div className="modal-field">
-              <label htmlFor="ex-slug">
-                Folder name<span className="req-star">*</span>
-              </label>
-              <input
-                id="ex-slug"
-                type="text"
-                value={slug}
-                onChange={(e) => {
-                  setSlugTouched(true);
-                  setSlug(e.target.value);
-                }}
-                placeholder="task_07_router_basics"
-                spellCheck={false}
-                required
-              />
-              <div className="hint">Auto-filled from the H1 heading; edit if needed.</div>
-            </div>
-          )}
-
           <div className="modal-field">
-            <label htmlFor="ex-notes">notes.md</label>
+            <label htmlFor="ex-notes">AI Guidance</label>
             <textarea
               id="ex-notes"
               value={notes}
