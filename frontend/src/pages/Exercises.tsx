@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 
 import { api, pollJob } from "../api";
 import { useIsAdmin, useToken } from "../auth";
-import { ConfirmDeleteModal } from "../components/ConfirmDeleteModal";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { ExerciseModal } from "../components/ExerciseModal";
 import { StatusPill } from "../components/StatusPill";
 import {
@@ -80,6 +80,8 @@ export default function Exercises() {
   const [editing, setEditing] = useState<ExerciseDetail | null>(null);
   const [editLoading, setEditLoading] = useState<string | null>(null);
   const [archiving, setArchiving] = useState<string | null>(null);
+  // Confirmation dialog target for archiving (unarchive is immediate).
+  const [archiveTarget, setArchiveTarget] = useState<Exercise | null>(null);
   // Confirmation dialog target for the admin-only permanent Delete.
   const [deleting, setDeleting] = useState<Exercise | null>(null);
 
@@ -142,30 +144,36 @@ export default function Exercises() {
     [token],
   );
 
-  const toggleArchived = useCallback(
-    async (ex: Exercise) => {
-      const archive = !ex.archived;
-      if (
-        archive &&
-        !window.confirm(
-          `Archive "${ex.title ?? ex.slug}"? It stops being prepped, graded and counted ` +
-            `toward student totals. Nothing is deleted — you can unarchive it anytime.`,
-        )
-      ) {
-        return;
-      }
+  // Flip an exercise's archived flag. Throws on failure so the archive
+  // confirmation dialog can stay open and surface the error; the inline
+  // unarchive path catches it into the page banner instead.
+  const setArchived = useCallback(
+    async (ex: Exercise, archived: boolean) => {
       setArchiving(ex.slug);
-      setError(null);
       try {
-        await api.updateExercise(token, ex.slug, { archived: archive });
+        await api.updateExercise(token, ex.slug, { archived });
         await refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
       } finally {
         setArchiving(null);
       }
     },
     [token, refresh],
+  );
+
+  // The Archive button confirms first (archiving hides an exercise from
+  // grading and student totals); Unarchive is harmless, so it runs inline.
+  const onArchiveClick = useCallback(
+    (ex: Exercise) => {
+      if (ex.archived) {
+        setError(null);
+        void setArchived(ex, false).catch((e) =>
+          setError(e instanceof Error ? e.message : String(e)),
+        );
+      } else {
+        setArchiveTarget(ex);
+      }
+    },
+    [setArchived],
   );
 
   // Permanent removal (admin only): the API purges the exercise's S3 content
@@ -377,7 +385,7 @@ export default function Exercises() {
                             </button>
                             <button
                               className="btn small"
-                              onClick={() => void toggleArchived(ex)}
+                              onClick={() => onArchiveClick(ex)}
                               disabled={archiving === ex.slug || anyBusy}
                             >
                               {ex.archived ? "Unarchive" : "Archive"}
@@ -438,8 +446,28 @@ export default function Exercises() {
           onSaved={() => void refresh()}
         />
       )}
+      {archiveTarget && isAdmin && (
+        <ConfirmModal
+          title="Archive Exercise"
+          confirmLabel="Archive"
+          confirmClassName="btn primary"
+          busyLabel="Archiving…"
+          onConfirm={() =>
+            setArchived(archiveTarget, true).then(() => setArchiveTarget(null))
+          }
+          onClose={() => setArchiveTarget(null)}
+        >
+          <p>
+            Archive <strong>{archiveTarget.title ?? archiveTarget.slug}</strong>?
+            It stops being prepped, graded and counted toward student totals.
+          </p>
+          <p className="hint">
+            Nothing is deleted — you can unarchive it anytime.
+          </p>
+        </ConfirmModal>
+      )}
       {deleting && isAdmin && (
-        <ConfirmDeleteModal
+        <ConfirmModal
           title="Delete Exercise"
           confirmLabel={`Delete ${deleting.title ?? deleting.slug}`}
           onConfirm={() => deleteExercise(deleting.slug)}
@@ -453,7 +481,7 @@ export default function Exercises() {
             grading it, use Archive instead.
           </p>
           <p className="hint">This cannot be undone.</p>
-        </ConfirmDeleteModal>
+        </ConfirmModal>
       )}
     </main>
   );

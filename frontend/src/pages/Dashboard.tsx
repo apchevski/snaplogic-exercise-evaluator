@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { api, pollJob } from "../api";
 import { useCanGrade, useIsAdmin, useToken } from "../auth";
 import { AddStudentModal } from "../components/AddStudentModal";
-import { ConfirmDeleteModal } from "../components/ConfirmDeleteModal";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
 import { StatusPill } from "../components/StatusPill";
 import {
@@ -450,9 +450,10 @@ export default function Dashboard() {
       )}
 
       {removing && isAdmin && (
-        <ConfirmDeleteModal
+        <ConfirmModal
           title="Remove Student"
           confirmLabel={`Remove ${removing.display_name}`}
+          busyLabel="Removing…"
           onConfirm={() => removeStudent(removing.slug)}
           onClose={() => setRemoving(null)}
         >
@@ -463,7 +464,7 @@ export default function Dashboard() {
             project is not touched.
           </p>
           <p className="hint">This cannot be undone.</p>
-        </ConfirmDeleteModal>
+        </ConfirmModal>
       )}
     </main>
   );
