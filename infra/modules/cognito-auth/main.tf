@@ -7,9 +7,13 @@ data "aws_region" "current" {}
 resource "aws_cognito_user_pool" "main" {
   name = "${var.name_prefix}-users"
 
-  # Optional TOTP (authenticator app) MFA. Users self-enroll through the hosted
-  # UI: it walks them associate -> verify -> enabled. Software token MFA must be
-  # enabled here before a user can register or set it as their MFA preference.
+  # Optional TOTP (authenticator app) MFA. With OPTIONAL MFA the hosted UI does
+  # NOT prompt users to enroll (that only happens when MFA is "ON"), so the SPA
+  # drives enrollment itself from the in-app Settings dialog: associate -> verify
+  # -> set-preference, via the Cognito self-service API authorized by the user's
+  # access token (needs the aws.cognito.signin.user.admin scope on the client
+  # below). Software-token MFA must be enabled here before any user can register
+  # it. Flip to "ON" to require a second factor for everyone.
   mfa_configuration = "OPTIONAL"
   software_token_mfa_configuration {
     enabled = true
@@ -87,8 +91,13 @@ resource "aws_cognito_user_pool_client" "spa" {
 
   allowed_oauth_flows_user_pool_client = true
   allowed_oauth_flows                  = ["code"]
-  allowed_oauth_scopes                 = ["openid", "email", "profile"]
-  supported_identity_providers         = ["COGNITO"]
+  # aws.cognito.signin.user.admin lets the SPA call the Cognito self-service API
+  # (change password, update attributes, associate/verify a TOTP authenticator,
+  # set MFA preference) with the signed-in user's access token — powers the
+  # in-app Settings dialog. Existing sessions must sign out and back in once
+  # after this is deployed to receive an access token carrying the new scope.
+  allowed_oauth_scopes         = ["openid", "email", "profile", "aws.cognito.signin.user.admin"]
+  supported_identity_providers = ["COGNITO"]
 
   callback_urls = var.callback_urls
   logout_urls   = var.logout_urls
