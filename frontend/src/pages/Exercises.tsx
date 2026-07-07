@@ -84,6 +84,9 @@ export default function Exercises() {
   const [archiveTarget, setArchiveTarget] = useState<Exercise | null>(null);
   // Confirmation dialog target for the admin-only permanent Delete.
   const [deleting, setDeleting] = useState<Exercise | null>(null);
+  // Confirmation dialog target for prep: "all" = Prep All Exercises,
+  // otherwise the single exercise being prepped.
+  const [prepConfirm, setPrepConfirm] = useState<Exercise | "all" | null>(null);
 
   const toggleExpanded = (slug: string) =>
     setExpanded((prev) => {
@@ -263,7 +266,7 @@ export default function Exercises() {
                 </button>
                 <button
                   className="btn primary"
-                  onClick={() => void startPrep()}
+                  onClick={() => setPrepConfirm("all")}
                   disabled={anyBusy}
                 >
                   Prep All Exercises
@@ -371,7 +374,7 @@ export default function Exercises() {
                           <span className="actions-cell">
                             <button
                               className="btn small"
-                              onClick={() => void startPrep(ex.slug)}
+                              onClick={() => setPrepConfirm(ex)}
                               disabled={anyBusy || ex.archived}
                             >
                               Prep
@@ -445,6 +448,34 @@ export default function Exercises() {
           onClose={() => setEditing(null)}
           onSaved={() => void refresh()}
         />
+      )}
+      {prepConfirm && isAdmin && (
+        <ConfirmModal
+          title={prepConfirm === "all" ? "Prep All Exercises" : "Prep Exercise"}
+          confirmLabel={prepConfirm === "all" ? "Prep all" : "Prep"}
+          confirmClassName="btn primary"
+          busyLabel="Starting…"
+          onConfirm={async () => {
+            const target = prepConfirm;
+            setPrepConfirm(null);
+            if (target) void startPrep(target === "all" ? undefined : target.slug);
+          }}
+          onClose={() => setPrepConfirm(null)}
+        >
+          {prepConfirm === "all" ? (
+            <p>
+              Prep <strong>all active exercises</strong>? This rebuilds every
+              exercise&rsquo;s grading artifacts from its current files. It can
+              take a while and runs in the background.
+            </p>
+          ) : (
+            <p>
+              Prep <strong>{prepConfirm.title ?? prepConfirm.slug}</strong>?
+              This rebuilds its grading artifacts from its current files and
+              runs in the background.
+            </p>
+          )}
+        </ConfirmModal>
       )}
       {archiveTarget && isAdmin && (
         <ConfirmModal

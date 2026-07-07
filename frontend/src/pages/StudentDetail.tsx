@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { api, pollJob } from "../api";
 import { useCanGrade, useToken } from "../auth";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/table";
 import { TaskCard, tierForRatio } from "../components/TaskCard";
@@ -47,6 +48,11 @@ export default function StudentDetail() {
   // Rendered inside the editor — the page-top error banner can be scrolled
   // out of view when editing a task card further down.
   const [editError, setEditError] = useState<string | null>(null);
+  // Confirmation dialog target for a grading run: "all" = Grade all exercises,
+  // otherwise a single task (regrade = it already has a result to replace).
+  const [gradeConfirm, setGradeConfirm] = useState<
+    { kind: "all" } | { kind: "task"; slug: string; regrade: boolean } | null
+  >(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -305,7 +311,7 @@ export default function StudentDetail() {
                 <>
                   <button
                     className="btn small primary"
-                    onClick={() => void gradeAll()}
+                    onClick={() => setGradeConfirm({ kind: "all" })}
                     disabled={anyBusy}
                   >
                     Grade all exercises
@@ -334,7 +340,9 @@ export default function StudentDetail() {
                         )}
                         <button
                           className="btn small"
-                          onClick={() => void regradeTask(t.slug)}
+                          onClick={() =>
+                            setGradeConfirm({ kind: "task", slug: t.slug, regrade: true })
+                          }
                           disabled={anyBusy}
                         >
                           Regrade
@@ -363,7 +371,9 @@ export default function StudentDetail() {
                         )}
                         <button
                           className="btn small"
-                          onClick={() => void regradeTask(e.slug)}
+                          onClick={() =>
+                            setGradeConfirm({ kind: "task", slug: e.slug, regrade: false })
+                          }
                           disabled={anyBusy}
                         >
                           Grade
@@ -382,6 +392,52 @@ export default function StudentDetail() {
           )}
         </div>
       </Panel>
+      {gradeConfirm && canGrade && (
+        <ConfirmModal
+          title={
+            gradeConfirm.kind === "all"
+              ? "Grade All Exercises"
+              : gradeConfirm.regrade
+                ? "Regrade Exercise"
+                : "Grade Exercise"
+          }
+          confirmLabel={
+            gradeConfirm.kind === "all"
+              ? "Grade all"
+              : gradeConfirm.regrade
+                ? "Regrade"
+                : "Grade"
+          }
+          confirmClassName="btn primary"
+          busyLabel="Starting…"
+          onConfirm={async () => {
+            const target = gradeConfirm;
+            setGradeConfirm(null);
+            if (!target) return;
+            if (target.kind === "all") void gradeAll();
+            else void regradeTask(target.slug);
+          }}
+          onClose={() => setGradeConfirm(null)}
+        >
+          {gradeConfirm.kind === "all" ? (
+            <p>
+              Grade <strong>all exercises</strong> for {name}? This runs the AI
+              grader over every registered exercise and refreshes the overall
+              summary. It runs in the background.
+            </p>
+          ) : (
+            <p>
+              {gradeConfirm.regrade ? "Regrade" : "Grade"}{" "}
+              <strong>{gradeConfirm.slug}</strong> for {name}? This runs the AI
+              grader{" "}
+              {gradeConfirm.regrade
+                ? "and replaces this exercise’s current result"
+                : "and records a result for this exercise"}
+              . It runs in the background.
+            </p>
+          )}
+        </ConfirmModal>
+      )}
     </main>
   );
 }
