@@ -164,7 +164,8 @@ export default function Dashboard() {
       (s) =>
         !q ||
         s.display_name.toLowerCase().includes(q) ||
-        (s.space ?? "").toLowerCase().includes(q),
+        (s.space ?? "").toLowerCase().includes(q) ||
+        (s.project ?? "").toLowerCase().includes(q),
     );
     const cmp = COMPARE[sort.key] ?? COMPARE.points;
     const sign = sort.dir === "asc" ? 1 : -1;
@@ -234,7 +235,7 @@ export default function Dashboard() {
             <SearchBox
               value={search}
               onChange={setSearch}
-              placeholder="Search by student or project space"
+              placeholder="Search by student, project space, or project"
             />
             <span className="toolbar-spacer" />
             {canGrade && (
