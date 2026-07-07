@@ -145,6 +145,23 @@ plan → judge → report loop the skill used to drive interactively.
   the worker's card refresh carries it forward; the admin-only student hard
   delete also removes the Cognito login, so a purged student can't keep
   signing in.
+  **Self-service settings + MFA (July 2026)**: the pool is `mfa_configuration =
+  "OPTIONAL"` with software-token MFA on. With OPTIONAL MFA the hosted UI never
+  prompts anyone to enroll a TOTP authenticator (that auto-prompt only fires when
+  MFA is `"ON"`), and no admin API can register a TOTP device for another user
+  (associate/verify needs the shared secret + a live code) — so the SPA drives
+  enrollment itself from an in-app **Settings** dialog (`components/SettingsModal`,
+  `src/cognito.ts`): associate → QR/secret → verify → set-preference, all via the
+  Cognito user-pools JSON API authorized by the signed-in user's **access token**
+  (plain fetch, no AWS SDK/SigV4). The same dialog changes the password and sets a
+  **display name** (the `name` attribute — Cognito usernames are immutable, so
+  there's no true rename; login email is unchanged). All of this requires the
+  `aws.cognito.signin.user.admin` scope on the SPA app client + `oidcConfig`; the
+  scope only lands in freshly issued tokens, so after adding it every existing
+  session must sign out and back in once (the dialog reads the access-token
+  `scope` claim and shows a notice if it's absent). Flip the pool to `"ON"` to
+  require a second factor for everyone (then the hosted UI handles enrollment and
+  the in-app flow is unnecessary).
 
 ## Canonical pipeline form
 
