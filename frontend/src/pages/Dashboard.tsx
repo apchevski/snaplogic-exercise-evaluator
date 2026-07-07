@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { api, pollJob } from "../api";
 import { useCanGrade, useIsAdmin, useToken } from "../auth";
 import { AddStudentModal } from "../components/AddStudentModal";
-import { ConfirmDeleteModal } from "../components/ConfirmDeleteModal";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
 import { StatusPill } from "../components/StatusPill";
 import {
@@ -164,7 +164,8 @@ export default function Dashboard() {
       (s) =>
         !q ||
         s.display_name.toLowerCase().includes(q) ||
-        (s.space ?? "").toLowerCase().includes(q),
+        (s.space ?? "").toLowerCase().includes(q) ||
+        (s.project ?? "").toLowerCase().includes(q),
     );
     const cmp = COMPARE[sort.key] ?? COMPARE.points;
     const sign = sort.dir === "asc" ? 1 : -1;
@@ -234,7 +235,7 @@ export default function Dashboard() {
             <SearchBox
               value={search}
               onChange={setSearch}
-              placeholder="Search by student or project space"
+              placeholder="Search by student, project space, or project"
             />
             <span className="toolbar-spacer" />
             {canGrade && (
@@ -450,9 +451,10 @@ export default function Dashboard() {
       )}
 
       {removing && isAdmin && (
-        <ConfirmDeleteModal
+        <ConfirmModal
           title="Remove Student"
           confirmLabel={`Remove ${removing.display_name}`}
+          busyLabel="Removing…"
           onConfirm={() => removeStudent(removing.slug)}
           onClose={() => setRemoving(null)}
         >
@@ -463,7 +465,7 @@ export default function Dashboard() {
             project is not touched.
           </p>
           <p className="hint">This cannot be undone.</p>
-        </ConfirmDeleteModal>
+        </ConfirmModal>
       )}
     </main>
   );
