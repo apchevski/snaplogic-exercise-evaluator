@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- **Modals now scroll inside the dialog, fixing a close-on-scrollbar bug on small screens.** On a laptop-height screen the Add/Edit Exercise dialog was taller than the viewport and the scrollbar belonged to the backdrop; clicking that scrollbar registered as a click outside the dialog and closed it. The dialog is now capped to the viewport (`max-height`) with the body as the scroll region, so the scrollbar lives inside the dialog and clicking it no longer dismisses it. Applies to every modal (Add/Edit Exercise, Add Student, delete confirmations, grade scope) since they share the `.modal` layout; the short ones are unaffected because their content still fits.
+
 - **Add/Edit Exercise dialog: friendlier, UI-first fields — no more folder slugs or `# Header` boilerplate.** The dialog stopped mirroring the on-disk file names now that S3 (not the git `exercises/` folders) is the source of truth:
   - **New "Exercise Name" field** replaces writing a literal `# Task 07 – Router Basics` H1 inside the description. It's the human-readable pipeline name; the dialog stores it as `description.md`'s H1 for you, so prep's pipeline lookup is unchanged.
   - **The "Folder name" (slug) field is gone from create.** The stable exercise id is derived from the name automatically (`slugify`) — nobody types `task_07_router_basics` anymore. The slug is still the permanent id and is still immutable after create.
