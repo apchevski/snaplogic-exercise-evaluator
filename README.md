@@ -137,6 +137,10 @@ grading, no edits, no instructor notes). Admin/mentor users are invite-only
 (admin-created in the Cognito console — no self-signup); student logins are
 created by the app itself when a registration includes an email — never add
 someone to the `student` group by hand alongside an admin/mentor invite.
+**MFA** is optional TOTP (authenticator app): the pool is `mfa_configuration =
+"OPTIONAL"` with software-token MFA on, and users self-enroll through the hosted
+UI (you can't pre-register someone's authenticator from the console). Set the
+pool to `"ON"` to require a second factor for everyone.
 
 ### Deploying (one-time, in order)
 
