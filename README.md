@@ -138,9 +138,17 @@ grading, no edits, no instructor notes). Admin/mentor users are invite-only
 created by the app itself when a registration includes an email — never add
 someone to the `student` group by hand alongside an admin/mentor invite.
 **MFA** is optional TOTP (authenticator app): the pool is `mfa_configuration =
-"OPTIONAL"` with software-token MFA on, and users self-enroll through the hosted
-UI (you can't pre-register someone's authenticator from the console). Set the
-pool to `"ON"` to require a second factor for everyone.
+"OPTIONAL"` with software-token MFA on. With OPTIONAL MFA the hosted UI does
+**not** prompt anyone to enroll, and you can't pre-register someone's
+authenticator from the console — so users enroll themselves from the in-app
+**Account menu → Settings → Two-factor authentication** (scan the QR, enter a
+code, done; next sign-in then asks for a code). That Settings dialog also lets
+users change their password and set a display name, and it relies on the
+`aws.cognito.signin.user.admin` scope granted to the SPA app client — after
+deploying that scope, existing sessions must sign out and back in once before
+Settings works. Set the pool to `"ON"` to require a second factor for everyone
+(then the hosted UI drives enrollment at sign-in and the in-app flow isn't
+needed).
 
 ### Deploying (one-time, in order)
 

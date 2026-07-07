@@ -1,5 +1,11 @@
 import { useAuth } from "react-oidc-context";
 
+import { accessTokenScopes } from "./cognito";
+
+/** Cognito-reserved scope that authorizes access-token self-service calls
+ * (change password, update attributes, TOTP MFA). */
+export const SELF_SERVICE_SCOPE = "aws.cognito.signin.user.admin";
+
 // Cognito hosted UI + Authorization Code + PKCE. The authority is the user
 // pool issuer; oidc-client-ts discovers the hosted-UI endpoints from its
 // /.well-known/openid-configuration.
@@ -8,7 +14,10 @@ export const oidcConfig = {
   client_id: import.meta.env.VITE_COGNITO_CLIENT_ID ?? "",
   redirect_uri: `${window.location.origin}/`,
   response_type: "code",
-  scope: "openid email profile",
+  // aws.cognito.signin.user.admin authorizes the in-app Settings dialog to call
+  // the Cognito self-service API (password, profile, TOTP MFA) with the access
+  // token. Must also be allowed on the app client (cognito-auth Terraform).
+  scope: "openid email profile aws.cognito.signin.user.admin",
   // Strip ?code=&state= from the URL after the redirect completes.
   onSigninCallback: () => {
     window.history.replaceState({}, document.title, window.location.pathname);
@@ -18,6 +27,28 @@ export const oidcConfig = {
 export function useToken(): string {
   const auth = useAuth();
   return auth.user?.id_token ?? "";
+}
+
+/** The Cognito self-service API (Settings dialog) is authorized by the access
+ * token, not the id token the REST API uses. */
+export function useAccessToken(): string {
+  const auth = useAuth();
+  return auth.user?.access_token ?? "";
+}
+
+/** The friendly display name (the `name` attribute) if the user set one in
+ * Settings, otherwise their email. */
+export function useDisplayName(): string {
+  const auth = useAuth();
+  const name = (auth.user?.profile?.name ?? "").trim();
+  return name || (auth.user?.profile?.email ?? "");
+}
+
+/** Whether the current access token carries the self-service scope. Sessions
+ * signed in before the scope was added won't have it until they re-login. */
+export function useHasSelfServiceScope(): boolean {
+  const auth = useAuth();
+  return accessTokenScopes(auth.user?.access_token ?? "").includes(SELF_SERVICE_SCOPE);
 }
 
 export function useGroups(): string[] {

@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 
-import { signOut, useGroups } from "./auth";
+import { signOut, useDisplayName, useGroups } from "./auth";
+import { SettingsModal } from "./components/SettingsModal";
 import Dashboard from "./pages/Dashboard";
 import Exercises from "./pages/Exercises";
 import StudentDetail from "./pages/StudentDetail";
@@ -30,15 +31,18 @@ function Brand() {
   );
 }
 
-function initialsFor(email: string): string {
-  const parts = email.split("@")[0].split(/[^a-zA-Z0-9]+/).filter(Boolean);
+/** Initials from a display name ("Jane Doe" → "JD") or an email
+ * ("jane.doe@acme.com" → "JD"). */
+function initialsFor(label: string): string {
+  const parts = label.split("@")[0].split(/[^a-zA-Z0-9]+/).filter(Boolean);
   const letters = parts.slice(0, 2).map((p) => p[0]);
   return (letters.join("") || "U").toUpperCase();
 }
 
-function UserMenu() {
+function UserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
   const auth = useAuth();
   const groups = useGroups();
+  const displayName = useDisplayName();
   const email = auth.user?.profile?.email ?? "";
   const [open, setOpen] = useState(false);
   return (
@@ -49,8 +53,8 @@ function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <span className="avatar">{initialsFor(email)}</span>
-        <span className="user-email">{email}</span>
+        <span className="avatar">{initialsFor(displayName)}</span>
+        <span className="user-email">{displayName}</span>
         <span className="caret" aria-hidden="true">
           ▼
         </span>
@@ -59,6 +63,9 @@ function UserMenu() {
         <>
           <div className="menu-backdrop" onClick={() => setOpen(false)} />
           <div className="user-menu" role="menu">
+            {email && displayName !== email && (
+              <div className="user-menu-email">{email}</div>
+            )}
             {groups.length > 0 && (
               <div className="user-menu-roles">
                 {groups.map((g) => (
@@ -68,6 +75,16 @@ function UserMenu() {
                 ))}
               </div>
             )}
+            <button
+              className="user-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onOpenSettings();
+              }}
+            >
+              Settings
+            </button>
             <button
               className="user-menu-item"
               role="menuitem"
@@ -99,14 +116,24 @@ function Login({ onLogin, error }: { onLogin: () => void; error?: string }) {
 }
 
 function Shell() {
+  const auth = useAuth();
   const { pathname } = useLocation();
   const studentsActive = pathname === "/" || pathname.startsWith("/students");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <>
       <header className="topbar">
         <Brand />
-        <UserMenu />
+        <UserMenu onOpenSettings={() => setSettingsOpen(true)} />
       </header>
+      {settingsOpen && (
+        <SettingsModal
+          // Refresh tokens so a new display name shows in the header. Best
+          // effort — it still updates on the next sign-in if this fails.
+          onProfileChanged={() => void auth.signinSilent().catch(() => {})}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
       <nav className="subnav">
         <NavLink to="/" className={studentsActive ? "active" : ""}>
           Students
