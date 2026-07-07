@@ -7,6 +7,14 @@ data "aws_region" "current" {}
 resource "aws_cognito_user_pool" "main" {
   name = "${var.name_prefix}-users"
 
+  # Optional TOTP (authenticator app) MFA. Users self-enroll through the hosted
+  # UI: it walks them associate -> verify -> enabled. Software token MFA must be
+  # enabled here before a user can register or set it as their MFA preference.
+  mfa_configuration = "OPTIONAL"
+  software_token_mfa_configuration {
+    enabled = true
+  }
+
   admin_create_user_config {
     allow_admin_create_user_only = true # invite-based; no self-signup
   }
