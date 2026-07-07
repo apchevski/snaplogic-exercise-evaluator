@@ -158,7 +158,11 @@ function Shell() {
 export default function App() {
   const auth = useAuth();
 
-  if (auth.isLoading) {
+  // Only take over the whole screen on the initial sign-in. A background
+  // silent token renew (e.g. after a display-name change) also flips
+  // isLoading, and blanking the app there would unmount the Settings dialog
+  // mid-edit — so keep the shell mounted while we already have a session.
+  if (auth.isLoading && !auth.isAuthenticated) {
     return (
       <div className="login-page">
         <div className="login-card">

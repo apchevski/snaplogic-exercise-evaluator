@@ -235,7 +235,7 @@ export default function Dashboard() {
             <SearchBox
               value={search}
               onChange={setSearch}
-              placeholder="Search by student, project space, or project"
+              placeholder="Search by student or project"
             />
             <span className="toolbar-spacer" />
             {canGrade && (

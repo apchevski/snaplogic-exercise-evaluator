@@ -177,6 +177,10 @@ function PasswordSection({ accessToken }: { accessToken: string }) {
 
   const submit = async () => {
     if (!ready) return;
+    if (next === current) {
+      setNote({ ok: false, text: "Your new password must be different from your current password." });
+      return;
+    }
     if (next !== confirm) {
       setNote({ ok: false, text: "The new passwords don't match." });
       return;
@@ -295,9 +299,6 @@ function MfaSection({
       <p className="section-hint">Protect your account with a time-based code from an authenticator app.</p>
 
       <div className="settings-actions">
-        <span className={`mfa-status ${enabled ? "on" : "off"}`}>
-          {enabled ? "● Enabled" : "○ Not enabled"}
-        </span>
         {!enabled && !secret && (
           <button type="button" className="btn primary" onClick={() => void beginEnroll()} disabled={busy}>
             {busy ? "Starting…" : "Set up authenticator app"}
@@ -308,6 +309,9 @@ function MfaSection({
             {busy ? "Working…" : "Turn off"}
           </button>
         )}
+        <span className={`mfa-status ${enabled ? "on" : "off"}`}>
+          {enabled ? "● Enabled" : "○ Not enabled"}
+        </span>
       </div>
 
       {secret && (
