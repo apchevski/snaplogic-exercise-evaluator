@@ -67,23 +67,23 @@ plan → judge → report loop the skill used to drive interactively.
   `exercises/<slug>/` — authored files (`description.md`, `notes.md`,
   `resources/*`, written by the API's create/edit routes) and generated
   artifacts (`task.json`, `solution.json`, `expected/`, written only by
-  prep jobs; the API's PutObject IAM is scoped to exactly the authored
+  sync jobs; the API's PutObject IAM is scoped to exactly the authored
   filename patterns, DeleteObject to `resources/*` only). Type-specific
   config that used to be a hand-written task.json is structured data on
   the EXERCISE DynamoDB row (`task_config`); the worker synthesizes
-  task.json from it before every prep sync. The repo's `exercises/`
-  folders are a **create-only seed**: prep jobs additively migrate their
+  task.json from it before every sync. The repo's `exercises/`
+  folders are a **create-only seed**: sync jobs additively migrate their
   authored files to S3 (`S3Store.seed_authored_files`, never overwrites,
   never deletes) and the S3 copy wins everywhere afterwards — both in the
   materialize overlay and in the Exercises listing. `evaluator/store.py`
   still materializes the merged tree under /tmp (image → S3 overlay)
   because the Lambda image filesystem is read-only. The API detects
   authored slugs by the presence of `exercises/<slug>/description.md` in
-  S3 (prep never uploads one). Input files travel browser ↔ S3 via
+  S3 (sync never uploads one). Input files travel browser ↔ S3 via
   presigned URLs (bucket CORS allows PUT from the SPA origins).
   **Archive is the reversible delete**: a soft flag on the row; the worker
   prunes archived folders from its working tree after materialize (out of
-  prep, grading, and the points denominator) while S3 keeps everything.
+  sync, grading, and the points denominator) while S3 keeps everything.
   Durability: bucket versioning (noncurrent 90 days) + table PITR +
   `prevent_destroy` on both, plus the nightly one-way
   `backup-exercises.yml` snapshot into `exercises-backup/` in the repo.
@@ -100,7 +100,7 @@ plan → judge → report loop the skill used to drive interactively.
   grading history and are kept. **Tombstones:** an exercise whose folder
   still ships in the image keeps a minimal `deleted: true` row — without
   it the image copy would resurface in listings and be re-seeded to S3 by
-  the next prep (`worker._prune_excluded_exercises` prunes tombstoned
+  the next sync (`worker._prune_excluded_exercises` prunes tombstoned
   slugs like archived ones). S3-authored-only exercises delete cleanly
   with no tombstone. `POST /v1/exercises` on a tombstoned slug re-creates
   it. Out of reach by design: CloudWatch log lines (retention handles
@@ -115,7 +115,7 @@ plan → judge → report loop the skill used to drive interactively.
   browser downloads directly.
 - **Reports are immutable versions** in S3 (`students/<slug>/<ver>/`);
   DynamoDB single table holds student cards, report history, job
-  lifecycle, conditional-put locks (TTL 30 min), and exercise prep state.
+  lifecycle, conditional-put locks (TTL 30 min), and exercise sync state.
 - **The STUDENT card is the source of truth for where grading looks
   (July 2026).** Registration (the Add Student dialog) stores `space`
   (project space, resolved to the env default if left blank) and
@@ -131,7 +131,7 @@ plan → judge → report loop the skill used to drive interactively.
   project-existence check; changing it later needs a new registration.
 - **Auth**: Cognito (admin-created users; groups `admin`/`mentor`/`student`)
   + API Gateway JWT authorizer; the Lambda re-checks source IP and enforces
-  the role matrix (mentors get 403 on /v1/preps; `student` is read-only —
+  the role matrix (mentors get 403 on /v1/syncs; `student` is read-only —
   student/exercise dashboards yes, but 403 on every action and on
   config/job-polling/`GET /v1/exercises/{slug}`, the last because it carries
   notes.md, i.e. instructor hints). IP allowlist also runs at the edge via a
@@ -192,7 +192,7 @@ The client is **GET-only** by construction. Endpoints validated against
   the default `application/json` triggers a 406) → file content from SLDB.
 - `GET /api/1/rest/slsched/feed/{org}/{ps}/{project}/{task_name}` →
   invoke a Triggered Task with basic auth + query-string params; body
-  is the pipeline's output (typically JSON). Used by /prep to capture
+  is the pipeline's output (typically JSON). Used by sync to capture
   solution responses for `triggered_task` exercises.
 
 The Public-API `/catalog/...` endpoint is a paid feature; we don't use it.
@@ -206,11 +206,11 @@ Two execution models, selected per-exercise via `task_type` in
   earlier; we fetch the already-produced CSV from SLDB for both
   solution and student. No execution at evaluation time.
 - `triggered_task` (Task 02 onward) — pipeline is exposed as a
-  SnapLogic Triggered Task. /prep invokes the solution task once per
+  SnapLogic Triggered Task. sync invokes the solution task once per
   scenario in `task.json.requests` and saves each JSON response to
   `expected/<scenario_name>.json`. /grade does the same against the
   student's task. This DOES execute the pipeline server-side and
-  counts against execution quota; the prep cache (sidecar keyed off
+  counts against execution quota; the sync cache (sidecar keyed off
   the pipeline's `time_updated`) ensures re-runs are no-ops unless
   the pipeline definition changed.
 
@@ -244,9 +244,9 @@ materialized tree.
 only): description.md + notes.md text, input-file uploads, and a task
 type selector whose structured config (`task_config` on the EXERCISE
 row) replaces the hand-written task.json — the worker synthesizes
-task.json from it at prep time ("auto" = single-output file_writer,
-where prep detects the lone writer as always). Dropping a folder in git
-still works as a **create-only fallback**: the next prep seeds its
+task.json from it at sync time ("auto" = single-output file_writer,
+where sync detects the lone writer as always). Dropping a folder in git
+still works as a **create-only fallback**: the next sync seeds its
 authored files into S3, after which the UI owns the content (git edits
 no longer propagate — S3 wins).
 
@@ -269,7 +269,7 @@ Outputs:
 - `exercises/<slug>/expected/...` — golden output cache.
   - csv_writer: one CSV named by `output_csv_filename`.
   - triggered_task: one JSON file per scenario, `<request_name>.json`.
-  /prep deletes any other files in `expected/` during reconcile, so
+  sync deletes any other files in `expected/` during reconcile, so
   stale outputs from renamed writers or removed scenarios don't
   accumulate.
 - `grades/<student>/report.md` — **persistent** aggregated human-readable
@@ -320,7 +320,7 @@ Consequences that the design leans on:
 - `task.json` is **committed** (env-neutral intent: `output_filename(s)`,
   `triggered_task_name`, `requests`); its one env-specific field
   (`solution_pipeline_path`) is rebuilt from `.env` + the description.md heading
-  by `_proposed_path` on the next `prep sync`. The genuinely env-specific caches
+  by `_proposed_path` on the next sync. The genuinely env-specific caches
   (`solution.json`, `solution.cache.json`, `expected/`, plus `grades/`, `ui/`,
   `.tmp/`, `.env`) stay `.dockerignore`d / gitignored and arrive via bind mounts
   or a live fetch.

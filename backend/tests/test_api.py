@@ -27,21 +27,21 @@ def test_no_jwt_claims_is_401(aws):
 
 
 def test_mentor_cannot_prep_403(aws):
-    resp = _call(api_event("POST", "/v1/preps", groups=("mentor",), body={}))
+    resp = _call(api_event("POST", "/v1/syncs", groups=("mentor",), body={}))
     assert resp["statusCode"] == 403
 
 
 def test_admin_can_prep_202(aws, evaluator_dirs):
     resp = _call(
-        api_event("POST", "/v1/preps", groups=("admin",), email="a@x.io", body={})
+        api_event("POST", "/v1/syncs", groups=("admin",), email="a@x.io", body={})
     )
     assert resp["statusCode"] == 202
     job = _body(resp)
-    assert job["job_type"] == "prep" and job["status"] == "queued"
+    assert job["job_type"] == "sync" and job["status"] == "queued"
     # SQS got the message
     messages = aws["sqs"].receive_message(QueueUrl=os.environ["QUEUE_URL"])["Messages"]
     payload = json.loads(messages[0]["Body"])
-    assert payload["job_type"] == "prep" and payload["requested_by"] == "a@x.io"
+    assert payload["job_type"] == "sync" and payload["requested_by"] == "a@x.io"
     # JOB item exists
     item = dynamo_table().get_item(Key={"pk": f"JOB#{job['id']}", "sk": "META"})["Item"]
     assert item["status"] == "queued"
@@ -336,7 +336,7 @@ def test_student_role_is_read_only(aws, evaluator_dirs):
         ("GET", "/v1/gradings/some-id", None),
         ("POST", "/v1/students", {"student": "X"}),
         ("POST", "/v1/gradings", {"student": "X"}),
-        ("POST", "/v1/preps", {}),
+        ("POST", "/v1/syncs", {}),
         ("POST", "/v1/exercises", {}),
         ("PATCH", "/v1/students/x/report", {"overall_summary": "hi"}),
         ("DELETE", "/v1/students/x", None),
@@ -529,12 +529,12 @@ def test_get_unknown_job_404(aws):
     assert resp["statusCode"] == 404
 
 
-# ---------- preps ----------
+# ---------- syncs ----------
 
 
 def test_prep_unknown_slug_400(aws, evaluator_dirs):
     resp = _call(
-        api_event("POST", "/v1/preps", groups=("admin",), body={"slug": "no_such_folder"})
+        api_event("POST", "/v1/syncs", groups=("admin",), body={"slug": "no_such_folder"})
     )
     assert resp["statusCode"] == 400
 
@@ -544,7 +544,7 @@ def test_prep_known_slug_202(aws, evaluator_dirs):
     folder.mkdir(exist_ok=True)
     (folder / "description.md").write_text("# API Prep Slug", encoding="utf-8")
     resp = _call(
-        api_event("POST", "/v1/preps", groups=("admin",), body={"slug": "api_prep_slug"})
+        api_event("POST", "/v1/syncs", groups=("admin",), body={"slug": "api_prep_slug"})
     )
     assert resp["statusCode"] == 202
     assert _body(resp)["target"] == "api_prep_slug"
@@ -632,13 +632,15 @@ def test_list_exercises_merges_image_and_dynamo(aws, evaluator_dirs):
             "sk": "META",
             "entity": "exercise",
             "slug": "api_ex_merge",
+            # Seeded with the legacy attribute name; the API must surface it
+            # under the post-rename name (back-compat normalization).
             "prep_status": "ready",
         }
     )
     resp = _call(api_event("GET", "/v1/exercises"))
     assert resp["statusCode"] == 200
     exercises = {e["slug"]: e for e in _body(resp)["exercises"]}
-    assert exercises["api_ex_merge"]["prep_status"] == "ready"
+    assert exercises["api_ex_merge"]["sync_status"] == "ready"
     assert exercises["api_ex_merge"]["title"] == "Task Merge"
     assert "Build the merge pipeline." in exercises["api_ex_merge"]["description"]
 
@@ -785,7 +787,7 @@ def test_create_exercise_writes_s3_dynamo_and_presigns_uploads(aws, evaluator_di
     item = dynamo_table().get_item(
         Key={"pk": "EXERCISE#api_ui_create", "sk": "META"}
     )["Item"]
-    assert item["prep_status"] == "never_prepped"
+    assert item["sync_status"] == "never_synced"
     assert item["authored_in"] == "s3"
     assert item["created_by"] == "mentor@example.com"
 
@@ -880,7 +882,7 @@ def test_list_exercises_merges_s3_authored_into_bare_image_folder(aws, evaluator
 def test_prep_and_grade_accept_s3_authored_slug(aws, evaluator_dirs):
     _create_exercise("api_ui_prep")
     resp = _call(
-        api_event("POST", "/v1/preps", groups=("admin",), body={"slug": "api_ui_prep"})
+        api_event("POST", "/v1/syncs", groups=("admin",), body={"slug": "api_ui_prep"})
     )
     assert resp["statusCode"] == 202
     resp = _call(
@@ -1067,7 +1069,7 @@ def test_archived_exercise_blocks_prep_and_single_task_grade(aws, evaluator_dirs
 
     resp = _call(
         api_event(
-            "POST", "/v1/preps", groups=("admin",), body={"slug": "api_arch_guard"}
+            "POST", "/v1/syncs", groups=("admin",), body={"slug": "api_arch_guard"}
         )
     )
     assert resp["statusCode"] == 400
@@ -1095,7 +1097,7 @@ def test_archived_exercise_blocks_prep_and_single_task_grade(aws, evaluator_dirs
     )
     resp = _call(
         api_event(
-            "POST", "/v1/preps", groups=("admin",), body={"slug": "api_arch_guard"}
+            "POST", "/v1/syncs", groups=("admin",), body={"slug": "api_arch_guard"}
         )
     )
     assert resp["statusCode"] == 202
@@ -1107,7 +1109,7 @@ def test_archived_exercise_blocks_prep_and_single_task_grade(aws, evaluator_dirs
 def _seed_student_report(aws, slug="edit-me", name="Edit Me"):
     report = {
         "student": name,
-        "counts": {"pass": 1, "fail": 0, "missing": 1, "needs_prep": 0, "total": 2},
+        "counts": {"pass": 1, "fail": 0, "missing": 1, "needs_sync": 0, "total": 2},
         "points_earned": 10,
         "points_possible": 20,
         "overall_summary": "AI overall text.",
@@ -1393,7 +1395,7 @@ def test_delete_image_shipped_exercise_leaves_tombstone(aws, evaluator_dirs):
     assert "api_del_img" not in slugs
     assert _call(api_event("GET", "/v1/exercises/api_del_img"))["statusCode"] == 404
     resp = _call(
-        api_event("POST", "/v1/preps", groups=("admin",), body={"slug": "api_del_img"})
+        api_event("POST", "/v1/syncs", groups=("admin",), body={"slug": "api_del_img"})
     )
     assert resp["statusCode"] == 400 and "deleted" in _body(resp)["message"]
     resp = _call(
@@ -1462,7 +1464,7 @@ def test_delete_exercise_scrubs_student_reports(aws, evaluator_dirs):
     report = json.loads(aws["s3"].get_object(Bucket=bucket, Key=json_key)["Body"].read())
     assert [t["slug"] for t in report["tasks"]] == ["task_b"]
     # task_a was a 10-point pass; task_b (missing) remains: 0/10.
-    assert report["counts"] == {"pass": 0, "fail": 0, "missing": 1, "needs_prep": 0, "total": 1}
+    assert report["counts"] == {"pass": 0, "fail": 0, "missing": 1, "needs_sync": 0, "total": 1}
     assert report["points_earned"] == 0
     assert report["points_possible"] == 10
     # report.md lost the task's section but kept the head block.

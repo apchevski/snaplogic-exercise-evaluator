@@ -169,7 +169,7 @@ main {
 .badge.pass { background: #d1fae5; color: #047857; }
 .badge.fail { background: #fee2e2; color: #991b1b; }
 .badge.missing { background: #f3f4f6; color: #374151; }
-.badge.needs-prep { background: #dbeafe; color: #1e40af; }
+.badge.needs-sync { background: #dbeafe; color: #1e40af; }
 .overall {
   margin: 0 0 1rem;
   padding: 0.875rem 1rem;
@@ -235,7 +235,7 @@ details[open] summary { margin-bottom: 1rem; }
 .verdict-badge.pass { background: #10b981; }
 .verdict-badge.fail, .verdict-badge.config_error, .verdict-badge.missing_evaluation { background: #ef4444; }
 .verdict-badge.missing { background: #6b7280; }
-.verdict-badge.needs_prep { background: #3b82f6; }
+.verdict-badge.needs_sync { background: #3b82f6; }
 .points-pill {
   margin-left: auto;
   padding: 0.125rem 0.5rem;
@@ -521,7 +521,8 @@ function renderCard(r) {
   badges.appendChild(el('span', {class: 'badge pass', text: (c.pass || 0) + ' pass'}));
   if (c.fail) badges.appendChild(el('span', {class: 'badge fail', text: c.fail + ' fail'}));
   if (c.missing) badges.appendChild(el('span', {class: 'badge missing', text: c.missing + ' missing'}));
-  if (c.needs_prep) badges.appendChild(el('span', {class: 'badge needs-prep', text: c.needs_prep + ' needs prep'}));
+  var needsSync = c.needs_sync != null ? c.needs_sync : c.needs_prep;
+  if (needsSync) badges.appendChild(el('span', {class: 'badge needs-sync', text: needsSync + ' needs sync'}));
   card.appendChild(badges);
 
   if (r.overall_summary) {

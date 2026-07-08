@@ -72,7 +72,7 @@ interface Props {
 
 /** Create/edit dialog for an exercise. Authored markdown + input files go to
  * S3 (files browser → S3 via presigned PUTs); the task-type config is stored
- * as structured data and the worker generates task.json from it at prep time
+ * as structured data and the worker generates task.json from it at sync time
  * — nobody hand-writes JSON. */
 export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
   const isEdit = !!initial;
@@ -248,7 +248,7 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
               required
             />
             <div className="hint">
-              This is the pipeline name — prep looks the solution pipeline up by it.
+              This is the pipeline name — sync looks the solution pipeline up by it.
             </div>
           </div>
 
@@ -283,12 +283,12 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
               value={taskType}
               onChange={(e) => onTaskTypeChange(e.target.value as TaskTypeChoice)}
             >
-              <option value="auto">File writer — single output (auto-detected by prep)</option>
+              <option value="auto">File writer — single output (auto-detected by sync)</option>
               <option value="file_writer">File writer — multiple / custom outputs</option>
               <option value="triggered_task">Triggered task (HTTP scenarios)</option>
             </select>
             <div className="hint">
-              Prep generates the task config from this — no task.json to hand-write.
+              Sync generates the task config from this — no task.json to hand-write.
             </div>
           </div>
 

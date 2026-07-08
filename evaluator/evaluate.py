@@ -5,8 +5,8 @@ Flow (file_writer):
      `exercises/<task>/solution.json` (plus its sidecar and expected output file(s)).
      If anything is missing or the sidecar signature does not match the
      remote pipeline's timestamp, raise SolutionNotReadyError — the
-     caller (grade or CLI) surfaces this as `needs_prep`. Refreshing the
-     cache is /prep's job, not /grade's.
+     caller (grade or CLI) surfaces this as `needs_sync`. Refreshing the
+     cache is sync's job, not /grade's.
   2. Fetch the student pipeline definition from SnapLogic.
   3. Hard gate: pipeline names must match (procedural — fail = 0 pts, no AI).
   4. Hard gate: the student's output file(s) exist in SLDB. If the 404
@@ -632,7 +632,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         print(
-            "Run `python -m evaluator.prep sync` first to refresh the solution cache.",
+            "Run `python -m evaluator.sync sync` first to refresh the solution cache.",
             file=sys.stderr,
         )
         return 3

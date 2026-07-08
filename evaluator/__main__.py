@@ -59,7 +59,8 @@ def _run_subcommand(argv: list[str]) -> int:
     counts = result.counts
     print(
         f"Pass {counts.get('pass', 0)} · Fail {counts.get('fail', 0)} · "
-        f"Missing {counts.get('missing', 0)} · Needs prep {counts.get('needs_prep', 0)}"
+        f"Missing {counts.get('missing', 0)} · "
+        f"Needs sync {counts.get('needs_sync', counts.get('needs_prep', 0))}"
     )
     print(f"Points: {result.points_earned}/{result.points_possible}")
     u = result.usage

@@ -24,7 +24,7 @@ import type { Exercise, Job, StudentMeta } from "../types";
 // gradedTotal ascending is sorting by "not graded" descending.
 const gradedTotal = (s: StudentMeta) => {
   const c = s.counts;
-  return (c?.pass ?? 0) + (c?.fail ?? 0) + (c?.missing ?? 0) + (c?.needs_prep ?? 0);
+  return (c?.pass ?? 0) + (c?.fail ?? 0) + (c?.missing ?? 0) + (c?.needs_sync ?? c?.needs_prep ?? 0);
 };
 
 const COMPARE: Record<string, (a: StudentMeta, b: StudentMeta) => number> = {
@@ -288,7 +288,8 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {pageItems.map((s) => {
-                const c = s.counts ?? { pass: 0, fail: 0, missing: 0, needs_prep: 0 };
+                const c = s.counts ?? { pass: 0, fail: 0, missing: 0, needs_sync: 0 };
+                const needsSync = c.needs_sync ?? c.needs_prep ?? 0;
                 const earned = s.points_earned ?? 0;
                 const possible = s.points_possible ?? 0;
                 const tier = tierForRatio(earned, possible);
@@ -296,7 +297,7 @@ export default function Dashboard() {
                 const isOpen = expanded.has(s.slug);
                 // Registered exercises this student has no verdict for at
                 // all — never graded, or the exercise was added later.
-                const gradedCount = c.pass + c.fail + c.missing + (c.needs_prep ?? 0);
+                const gradedCount = c.pass + c.fail + c.missing + needsSync;
                 const notGraded =
                   activeExercises.length > 0
                     ? Math.max(0, activeExercises.length - gradedCount)
@@ -337,10 +338,10 @@ export default function Dashboard() {
                           {earned}/{possible} pts
                           {pct !== null && <span className="pct">({pct}%)</span>}
                         </span>
-                        {c.needs_prep > 0 && (
+                        {needsSync > 0 && (
                           <span
                             className="warn-chip"
-                            title={`${c.needs_prep} exercise${c.needs_prep === 1 ? " was" : "s were"} skipped because its grading artifacts are not prepped. Prep them on the Exercises page, then regrade.`}
+                            title={`${needsSync} exercise${needsSync === 1 ? " was" : "s were"} skipped because its grading artifacts are not synced. Sync them on the Exercises page, then regrade.`}
                           >
                             ⚠
                           </span>

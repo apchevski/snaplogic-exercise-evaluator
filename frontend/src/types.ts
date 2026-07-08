@@ -12,7 +12,7 @@ export interface Difference {
 
 export interface TaskResult {
   slug: string;
-  status: string; // evaluated | missing | needs_prep | config_error | missing_evaluation
+  status: string; // evaluated | missing | needs_sync | config_error | missing_evaluation
   verdict: string | null; // pass | fail | null
   points?: number | null;
   summary?: string | null;
@@ -28,7 +28,10 @@ export interface Counts {
   pass: number;
   fail: number;
   missing: number;
-  needs_prep: number;
+  needs_sync?: number;
+  // Pre-rename reports (before prep→sync) carry this instead of needs_sync;
+  // read `needs_sync ?? needs_prep` when displaying historical grades.
+  needs_prep?: number;
   total?: number;
 }
 
@@ -80,7 +83,7 @@ export interface AppConfig {
 
 export interface Job {
   job_id: string;
-  job_type: "grade" | "prep";
+  job_type: "grade" | "sync";
   status: "queued" | "running" | "succeeded" | "failed";
   target: string;
   error?: string;
@@ -107,9 +110,9 @@ export interface Exercise {
   title?: string;
   description?: string | null;
   task_type?: string | null;
-  prep_status: string;
+  sync_status: string;
   reason?: string;
-  last_prepped_at?: string;
+  last_synced_at?: string;
   max_points?: number;
   missing_from_image?: boolean;
   archived?: boolean;
@@ -122,7 +125,7 @@ export interface TriggeredRequest {
 }
 
 /** Structured replacement for the hand-written task.json. Absent/null =
- * "auto": prep derives everything for a single-output file-writer. */
+ * "auto": sync derives everything for a single-output file-writer. */
 export type TaskConfig =
   | {
       task_type: "file_writer";
@@ -143,7 +146,7 @@ export interface ExerciseDetail {
   task_config?: TaskConfig | null;
   resources?: ExerciseResource[];
   archived?: boolean;
-  prep_status?: string;
+  sync_status?: string;
 }
 
 export interface CreateExercisePayload {
@@ -186,7 +189,7 @@ export interface DeleteStudentSummary {
 export interface DeleteExerciseSummary {
   exercise: string;
   objects: number; // S3 object versions
-  jobs: number; // prep-job rows
+  jobs: number; // sync-job rows
   reports_scrubbed: number; // student reports the result was removed from
   tombstoned: boolean; // folder still ships in the image; marker row kept
 }

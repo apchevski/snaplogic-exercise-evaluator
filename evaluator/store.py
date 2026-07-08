@@ -6,14 +6,14 @@ The split (see .claude/cloud_grading_plan.md):
   general_evaluation_rules.md, committed task.json) ships inside the Docker
   image — it's in git, CI rebuilds the image on push.
 - **Generated artifacts** (solution.json, solution.cache.json, expected/*,
-  prep-reconciled task.json) are gitignored and live in S3 under
-  ``exercises/<slug>/`` — only prep jobs write them.
+  sync-reconciled task.json) are gitignored and live in S3 under
+  ``exercises/<slug>/`` — only sync jobs write them.
 
 On Lambda the image filesystem is read-only, so before a run the
 :class:`S3Store` *materializes* a merged exercises directory under ``/tmp``
 (env var ``EVALUATOR_EXERCISES_DIR`` points `evaluator.config` there):
 authored files copied from the image first, then S3 artifacts downloaded on
-top (S3 wins for task.json so prep reconciliation sticks).
+top (S3 wins for task.json so sync reconciliation sticks).
 
 Reports flow the other way: `evaluator.grade` renders into
 ``EVALUATOR_GRADES_DIR`` and the worker uploads them to
@@ -100,7 +100,7 @@ class S3Store:
         if self.image_exercises_dir.resolve() != dest.resolve() and self.image_exercises_dir.is_dir():
             shutil.copytree(self.image_exercises_dir, dest, dirs_exist_ok=True)
 
-        # 2. Generated artifacts from S3 (override the image copy — prep's
+        # 2. Generated artifacts from S3 (override the image copy — sync's
         #    reconciled task.json must win over the committed one).
         paginator = self._s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=self.exercises_prefix):
@@ -132,7 +132,7 @@ class S3Store:
             if key:
                 self._s3.download_file(self.bucket, str(key), str(report_dir / filename))
 
-    # ----- outbound: prep artifacts -----
+    # ----- outbound: sync artifacts -----
 
     def upload_exercise_artifacts(self, slug: str) -> list[str]:
         """Upload one slug's generated artifacts from the merged dir to S3."""
@@ -158,7 +158,7 @@ class S3Store:
 
         S3 is the canonical authored store; exercises that still originate
         in the image (git fallback / pre-migration) get their description.md,
-        notes.md and resources/* uploaded on their next prep. Never
+        notes.md and resources/* uploaded on their next sync. Never
         overwrites an existing S3 key — a UI edit must not be clobbered by a
         stale image copy — and never deletes anything.
         """

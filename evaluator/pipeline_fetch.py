@@ -220,8 +220,8 @@ def load_cached_solution_pipeline(
     Hits the remote ONCE to read the asset-list timestamp, then compares
     it against the sidecar signature. Raises SolutionNotReadyError if
     any cached file is missing (including any expected output file) or the cache
-    is stale. Callers that get this exception should surface a `needs_prep`
-    outcome and stop — refreshing the cache is /prep's job.
+    is stale. Callers that get this exception should surface a `needs_sync`
+    outcome and stop — refreshing the cache is sync's job.
     """
     if not solution_json_path.exists():
         raise SolutionNotReadyError(
@@ -292,8 +292,8 @@ def load_cached_solution_triggered_task(
     remote ONCE to read the asset-list timestamp, then compares it
     against the sidecar signature. Raises SolutionNotReadyError if any
     cached file is missing or the cache is stale. Callers that get this
-    exception should surface a `needs_prep` outcome and stop —
-    refreshing the cache is /prep's job.
+    exception should surface a `needs_sync` outcome and stop —
+    refreshing the cache is sync's job.
     """
     if not solution_json_path.exists():
         raise SolutionNotReadyError(
@@ -519,7 +519,7 @@ def _do_refresh_triggered(
 def extract_binary_write_filenames(definition: dict[str, Any]) -> list[str]:
     """Return every `filename` value from `com-snaplogic-snaps-binary-write` snaps.
 
-    Used by /prep to auto-detect a task's expected output filename. The
+    Used by sync to auto-detect a task's expected output filename. The
     list preserves snap_map iteration order (which is not execution
     order; we don't need execution order here — the writer set is
     unordered by intent).

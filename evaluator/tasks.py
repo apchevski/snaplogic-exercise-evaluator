@@ -293,7 +293,7 @@ def list_tasks() -> list[str]:
 def list_exercise_folders() -> list[str]:
     """Return every child folder under exercises/, regardless of task.json.
 
-    Used by /grade and /prep to discover folders that exist on disk but
+    Used by /grade and sync to discover folders that exist on disk but
     haven't been registered yet (no task.json). list_tasks() filters
     those out; this one doesn't.
     """
@@ -312,7 +312,7 @@ def read_pipeline_name_from_description(folder: str) -> str | None:
     The pipeline name lives in the first H1 heading of
     `exercises/<folder>/description.md` (e.g. "# Task 01 – Generate CSV
     Report"). This is what the student's pipeline must be named and what
-    /prep uses to look up the solution pipeline in SnapLogic. Returns
+    sync uses to look up the solution pipeline in SnapLogic. Returns
     None if description.md is missing or has no H1 heading. Folder slugs
     can stay snake_case; the pipeline name lives in description.md.
     """

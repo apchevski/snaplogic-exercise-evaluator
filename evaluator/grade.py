@@ -199,8 +199,8 @@ def cmd_plan(
             f"No task.json in exercises/{folder}/. "
             f"Run `/prep` to bootstrap it."
         )
-        entries.append({"slug": folder, "status": "needs_prep", "reason": reason})
-        print(f"[{folder}] NEEDS PREP — no task.json")
+        entries.append({"slug": folder, "status": "needs_sync", "reason": reason})
+        print(f"[{folder}] NEEDS SYNC — no task.json")
 
     with SnapLogicClient(settings) as client:
         try:
@@ -248,8 +248,8 @@ def cmd_plan(
             exit_code = run_evaluation(slug, student_pipeline_path, student_name=student)
         except SolutionNotReadyError as e:
             reason = f"{e.status}: {e.reason}"
-            entries.append({"slug": slug, "status": "needs_prep", "reason": reason})
-            print(f"[{slug}] NEEDS PREP — {reason}")
+            entries.append({"slug": slug, "status": "needs_sync", "reason": reason})
+            print(f"[{slug}] NEEDS SYNC — {reason}")
             continue
 
         per_task_eval = _student_dir(student) / slug / "evaluation.json"
@@ -317,17 +317,17 @@ def cmd_plan(
     print("=" * 60)
     print(f"Manifest written: {out_path}")
     ready = [e for e in entries if e["status"] == "ready_for_ai"]
-    needs_prep = [e for e in entries if e["status"] == "needs_prep"]
+    needs_sync = [e for e in entries if e["status"] == "needs_sync"]
     if ready:
         print(f"{len(ready)} task(s) READY_FOR_AI_REVIEW:")
         for e in ready:
             print(f"  - {e['slug']}  (ai_context: {e['ai_context_path']})")
     else:
         print("No tasks require AI judgment — all gates resolved deterministically.")
-    if needs_prep:
+    if needs_sync:
         print()
-        print(f"{len(needs_prep)} folder(s) NEED PREP — run `/prep` first:")
-        for e in needs_prep:
+        print(f"{len(needs_sync)} folder(s) NEED SYNC — run `/prep` first:")
+        for e in needs_sync:
             print(f"  - {e['slug']}: {e['reason']}")
     return 0
 
@@ -423,19 +423,19 @@ def _render_task_section(slug: str, eval_data: dict[str, Any]) -> str:
 def _render_entry_section(entry: dict[str, Any]) -> tuple[str, str, int | None]:
     """Render one manifest entry as (section_markdown, count_bucket, points).
 
-    `points` is None for MISSING / NEEDS_PREP (not graded) and an int in
+    `points` is None for MISSING / NEEDS_SYNC (not graded) and an int in
     [0, MAX_POINTS_PER_EXERCISE] otherwise. The caller uses it to compute
     the per-student total.
     """
     slug = entry["slug"]
     status = entry["status"]
-    if status == "needs_prep":
+    if status in ("needs_sync", "needs_prep"):  # "needs_prep" = pre-rename reports
         return (
-            f"## {slug} — ⏳ NEEDS PREP\n\n"
+            f"## {slug} — ⏳ NEEDS SYNC\n\n"
             f"**Points**: {_format_points(None)}\n\n"
             f"**Reason**: {entry.get('reason', 'Solution cache not ready.')}\n\n"
             f"Run `/prep` to bootstrap or refresh, then re-run `/grade`.",
-            "needs_prep",
+            "needs_sync",
             None,
         )
     if status == "missing":
@@ -488,15 +488,15 @@ def _build_task_data(entry: dict[str, Any]) -> tuple[dict[str, Any], str]:
     slug = entry["slug"]
     status = entry["status"]
 
-    if status == "needs_prep":
+    if status in ("needs_sync", "needs_prep"):  # "needs_prep" = pre-rename reports
         return (
             {
                 "slug": slug,
-                "status": "needs_prep",
+                "status": "needs_sync",
                 "verdict": None,
                 "reason": entry.get("reason", "Solution cache not ready."),
             },
-            "needs_prep",
+            "needs_sync",
         )
     if status == "missing":
         return (
@@ -560,11 +560,11 @@ def _build_task_data(entry: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
 
 def _counts_from_tasks(tasks: list[dict[str, Any]]) -> dict[str, int]:
-    counts = {"pass": 0, "fail": 0, "missing": 0, "needs_prep": 0}
+    counts = {"pass": 0, "fail": 0, "missing": 0, "needs_sync": 0}
     for t in tasks:
         status = t.get("status")
-        if status == "needs_prep":
-            counts["needs_prep"] += 1
+        if status in ("needs_sync", "needs_prep"):  # "needs_prep" = pre-rename reports
+            counts["needs_sync"] += 1
         elif status == "missing":
             counts["missing"] += 1
         elif status in {"config_error", "missing_evaluation"}:
@@ -581,7 +581,7 @@ def _counts_from_tasks(tasks: list[dict[str, Any]]) -> dict[str, int]:
 def _sum_points(tasks: list[dict[str, Any]]) -> int:
     """Sum task points for the per-student total numerator.
 
-    MISSING / NEEDS_PREP tasks store `points: None`; they contribute 0
+    MISSING / NEEDS_SYNC tasks store `points: None`; they contribute 0
     to the numerator but still count in the denominator
     `(total exercises) × MAX_POINTS_PER_EXERCISE`.
     """
@@ -804,8 +804,8 @@ def cmd_report(
 
         # Print result line for the one task.
         status = entry["status"]
-        if status == "needs_prep":
-            print(f"  {task_slug} -> NEEDS_PREP")
+        if status in ("needs_sync", "needs_prep"):
+            print(f"  {task_slug} -> NEEDS_SYNC")
         elif status == "missing":
             print(f"  {task_slug} -> MISSING")
         elif status == "config_error":
@@ -831,7 +831,7 @@ def cmd_report(
         "pass": 0,
         "fail": 0,
         "missing": 0,
-        "needs_prep": 0,
+        "needs_sync": 0,
     }
     sections: list[str] = []
     tasks_json: list[dict[str, Any]] = []
@@ -863,7 +863,7 @@ def cmd_report(
             f"- **Pass**: {counts['pass']} · "
             f"**Fail**: {counts['fail']} · "
             f"**Missing**: {counts['missing']} · "
-            f"**Needs prep**: {counts['needs_prep']}"
+            f"**Needs sync**: {counts['needs_sync']}"
         ),
         total_line,
         "",
@@ -893,8 +893,8 @@ def cmd_report(
     for entry in entries:
         slug = entry["slug"]
         status = entry["status"]
-        if status == "needs_prep":
-            print(f"  {slug} -> NEEDS_PREP")
+        if status in ("needs_sync", "needs_prep"):
+            print(f"  {slug} -> NEEDS_SYNC")
         elif status == "missing":
             print(f"  {slug} -> MISSING")
         elif status == "config_error":

@@ -93,7 +93,7 @@ def _fake_report_fn(student: str) -> None:
     (report_dir / "report.md").write_text(md, encoding="utf-8")
     payload = {
         "student": student,
-        "counts": {"pass": 1, "fail": 0, "missing": 0, "needs_prep": 0, "total": 1},
+        "counts": {"pass": 1, "fail": 0, "missing": 0, "needs_sync": 0, "total": 1},
         "points_earned": 8,
         "points_possible": 10,
         "overall_summary": None,

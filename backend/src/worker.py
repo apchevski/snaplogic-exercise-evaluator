@@ -1,4 +1,4 @@
-"""Worker Lambda: SQS consumer that executes grade and prep jobs.
+"""Worker Lambda: SQS consumer that executes grade and sync jobs.
 
 One message = one job (batch size 1, reserved concurrency 1, DLQ with
 maxReceiveCount 1 — a paid grading run is never auto-retried). Failures are
@@ -11,7 +11,7 @@ Job flow:
 grade jobs:  S3Store.materialize → evaluator.runner.run_grade (hard gates +
              Claude judge + report) → upload report version to S3 → write
              REPORT row + refresh STUDENT card → usage/cost onto the job.
-prep jobs:   S3Store.materialize → evaluator.prep sync (slug or all, $0 AI)
+sync jobs:   S3Store.materialize → evaluator.sync sync (slug or all, $0 AI)
              → upload generated artifacts to S3 → survey state into
              EXERCISE rows (powers the Exercises page).
 """
@@ -62,7 +62,7 @@ def _release_lock(job_type: str, target: str) -> None:
 
 # ---------- exercise rows (authored state lives in DynamoDB) ----------
 
-#: EXERCISE-row attributes the prep survey must carry forward — they're
+#: EXERCISE-row attributes the sync survey must carry forward — they're
 #: authored via the API (create/edit dialog), and the survey's put_item
 #: would otherwise wipe them.
 _PRESERVED_EXERCISE_FIELDS = (
@@ -87,7 +87,7 @@ def _exercise_rows() -> dict[str, dict[str, Any]]:
 def _prune_excluded_exercises(rows: dict[str, dict[str, Any]]) -> list[str]:
     """Drop archived and hard-deleted exercises from the merged /tmp tree.
 
-    Runs after materialize for BOTH job types: prep skips them (so a deleted
+    Runs after materialize for BOTH job types: sync skips them (so a deleted
     exercise's image copy is never re-seeded into S3), and grading no longer
     counts them toward the points denominator. Archived exercises keep their
     S3 content; deleted ones only exist as an image folder plus the tombstone
@@ -108,16 +108,16 @@ def _synthesize_task_json(folder: str, cfg: dict[str, Any]) -> None:
 
     The config (authored in the UI dialog) is env-neutral; the one
     env-specific field, solution_pipeline_path, is derived here from the
-    SnapLogic settings + the description.md H1 — the same rule prep's
+    SnapLogic settings + the description.md H1 — the same rule sync's
     reconciler uses. Overwrites whatever task.json the overlay produced:
-    the stored config is canonical, and prep re-uploads the result to S3.
+    the stored config is canonical, and sync re-uploads the result to S3.
     """
     from evaluator.config import EXERCISES_DIR, load_settings
     from evaluator.tasks import read_pipeline_name_from_description
 
     pipeline_name = read_pipeline_name_from_description(folder)
     if not pipeline_name:
-        return  # prep's classify step will surface missing_description
+        return  # sync's classify step will surface missing_description
     settings = load_settings()
     data: dict[str, Any] = {
         "task_type": cfg["task_type"],
@@ -267,13 +267,13 @@ def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
     }
 
 
-# ---------- prep ----------
+# ---------- sync ----------
 
 
-def _run_prep_job(
+def _run_sync_job(
     job: dict[str, Any], store: Any, rows: dict[str, dict[str, Any]]
 ) -> dict[str, Any]:
-    from evaluator import prep as prep_mod
+    from evaluator import sync as sync_mod
     from evaluator.config import load_settings
     from evaluator.snaplogic_client import SnapLogicClient
     from evaluator.tasks import list_exercise_folders, read_pipeline_name_from_description
@@ -288,16 +288,16 @@ def _run_prep_job(
         if cfg:
             _synthesize_task_json(folder, cfg)
 
-    rc = prep_mod.cmd_sync(slug, None)
+    rc = sync_mod.cmd_sync(slug, None)
     if rc != 0:
-        raise RuntimeError(f"prep sync exited with code {rc}; see the run log.")
+        raise RuntimeError(f"sync exited with code {rc}; see the run log.")
 
     settings = load_settings()
     now = utc_now_iso()
     survey: list[dict[str, Any]] = []
     with SnapLogicClient(settings) as client:
         for folder in folders:
-            report = prep_mod._classify_folder(folder, client, settings)
+            report = sync_mod._classify_folder(folder, client, settings)
             uploaded = store.upload_exercise_artifacts(folder)
             # Migration path: image-shipped authored files (git fallback /
             # pre-pivot exercises) graduate to S3 here, additively.
@@ -316,9 +316,9 @@ def _run_prep_job(
                         "slug": folder,
                         "title": read_pipeline_name_from_description(folder) or folder,
                         "task_type": report.task_type,
-                        "prep_status": report.status,
+                        "sync_status": report.status,
                         "reason": report.reason,
-                        "last_prepped_at": now,
+                        "last_synced_at": now,
                         "max_points": 10,
                         "artifact_keys": uploaded,
                     }
@@ -351,14 +351,14 @@ def _process_job(job: dict[str, Any]) -> None:
         store = _make_store()
         store.materialize_exercises()
         # Archived and hard-deleted exercises are dropped from the working
-        # tree, so prep skips them (and never re-seeds a deleted one) and
+        # tree, so sync skips them (and never re-seeds a deleted one) and
         # grading stops counting them toward the points denominator.
         rows = _exercise_rows()
         _prune_excluded_exercises(rows)
         if job_type == "grade":
             result = _run_grade_job(job, store)
-        elif job_type == "prep":
-            result = _run_prep_job(job, store, rows)
+        elif job_type in ("sync", "prep"):  # "prep" = pre-rename in-flight jobs
+            result = _run_sync_job(job, store, rows)
         else:
             raise ValueError(f"Unknown job_type {job_type!r}.")
         _update_job(

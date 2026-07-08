@@ -7,10 +7,10 @@ const LABELS: Record<Job["status"], string> = {
   failed: "Failed",
 };
 
-export function StatusPill({ job, kind }: { job: Job; kind: "grade" | "prep" }) {
+export function StatusPill({ job, kind }: { job: Job; kind: "grade" | "sync" }) {
   const busy = job.status === "queued" || job.status === "running";
   const label =
-    job.status === "running" && kind === "prep" ? "Prepping…" : LABELS[job.status];
+    job.status === "running" && kind === "sync" ? "Syncing…" : LABELS[job.status];
   const cost = job.result?.usage?.est_cost_usd;
   return (
     <span>

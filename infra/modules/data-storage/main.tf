@@ -1,13 +1,13 @@
 # Data layer: the DynamoDB single table + the S3 bucket holding rendered
-# reports (students/<slug>/<version>/) and prep-generated exercise artifacts
+# reports (students/<slug>/<version>/) and sync-generated exercise artifacts
 # (exercises/<slug>/).
 #
 # Item types (PK / SK):
 #   STUDENT#<slug>  / META            student summary + latest_version pointer
 #   STUDENT#<slug>  / REPORT#<iso-ts> one row per grading run (history kept)
-#   JOB#<id>        / META            grade/prep job lifecycle + usage
+#   JOB#<id>        / META            grade/sync job lifecycle + usage
 #   LOCK#<key>      / META            conditional-put dedupe lock, TTL 30 min
-#   EXERCISE#<slug> / META            prep status per exercise
+#   EXERCISE#<slug> / META            sync status per exercise
 # GSI gsi1 (entity, slug) powers the "list all students / exercises" queries.
 
 # --- DynamoDB single table -------------------------------------------------
