@@ -148,7 +148,13 @@ users change their password and set a display name, and it relies on the
 deploying that scope, existing sessions must sign out and back in once before
 Settings works. Set the pool to `"ON"` to require a second factor for everyone
 (then the hosted UI drives enrollment at sign-in and the in-app flow isn't
-needed).
+needed). **Session length:** a sign-in lasts up to **12 hours** (the Cognito
+`refresh_token_validity`; access/id tokens are 60 min and renew silently in the
+background until then). When the session expires — or any API call is rejected
+with `401` — the app clears it and returns you to the **Sign in** screen (at
+`/login`) rather than leaving you on a page of "Unauthorized" errors. The
+Sign-in screen lives at `/login`; every other path redirects there while signed
+out, and Cognito returns to the dashboard (`/`) after a successful sign-in.
 
 ### Deploying (one-time, in order)
 
