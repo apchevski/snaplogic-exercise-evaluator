@@ -86,10 +86,10 @@ export function GradeScopeModal({
                     onChange={() => toggle(e.slug)}
                   />
                   <span className="cell-mono">{e.slug}</span>
-                  {e.prep_status !== "ready" && (
+                  {e.sync_status !== "ready" && (
                     <span
                       className="warn-chip"
-                      title="Not prepped — grading will skip it until it's prepped on the Exercises page."
+                      title="Not synced — grading will skip it until it's synced on the Exercises page."
                     >
                       ⚠
                     </span>

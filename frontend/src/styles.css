@@ -320,15 +320,19 @@ tr.expand-row:hover td { background: #f8f9fb; }
 .badge.fail { background: #fbe7e7; color: #a33230; border-color: #eec1c0; }
 .badge.missing { background: #f1f3f5; color: #5b6771; border-color: var(--sl-border); }
 
-.prep-status {
+.sync-status {
   padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: 600;
   display: inline-block; white-space: nowrap;
 }
-.prep-status.ready { background: #e7f2e7; color: #256d29; }
-.prep-status.never_prepped, .prep-status.needs_task_json, .prep-status.needs_task_json_triggered,
-.prep-status.stale_solution { background: #fdf3dc; color: #8a6116; }
-.prep-status.pipeline_not_found, .prep-status.config_error, .prep-status.ambiguous_writer,
-.prep-status.missing_description, .prep-status.pipeline_renamed, .prep-status.writer_changed {
+/* healthy = green "synced" */
+.sync-status.ready { background: #e7f2e7; color: #256d29; }
+/* in-progress / needs-attention states = amber */
+.sync-status.needs_task_json, .sync-status.needs_task_json_triggered,
+.sync-status.stale_solution { background: #fdf3dc; color: #8a6116; }
+/* hard failures = red (never-synced renders as a muted "—", not a pill) */
+.sync-status.pipeline_not_found, .sync-status.config_error,
+.sync-status.ambiguous_writer, .sync-status.missing_description,
+.sync-status.pipeline_renamed, .sync-status.writer_changed {
   background: #fbe7e7; color: #a33230;
 }
 
@@ -492,8 +496,8 @@ tr.expand-row:hover td { background: #f8f9fb; }
 .scenario-row input:nth-child(2) { flex: 1; font-family: var(--mono); font-size: 12px; }
 .resource-chip.chip-removed { text-decoration: line-through; color: #a33230; border-color: #eec1c0; background: #fdf4f4; }
 
-/* archived exercises: kept forever, just excluded from prep/grade */
-.prep-status.archived { background: #eceff1; color: #5b6771; border: 1px dashed #b3bcc5; }
+/* archived exercises: kept forever, just excluded from sync/grade */
+.sync-status.archived { background: #eceff1; color: #5b6771; border: 1px dashed #b3bcc5; }
 tr.row-archived td { opacity: 0.62; }
 tr.row-archived td:last-child { opacity: 1; }
 

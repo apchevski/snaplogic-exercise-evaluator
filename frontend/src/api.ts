@@ -135,7 +135,7 @@ export const api = {
     ),
 
   // Admin only. Permanently removes the exercise everywhere: S3 content and
-  // artifacts (all versions), DynamoDB row, prep-job rows — and scrubs its
+  // artifacts (all versions), DynamoDB row, sync-job rows — and scrubs its
   // result out of every student's live report.
   deleteExercise: (token: string, slug: string) =>
     request<{ deleted: DeleteExerciseSummary }>(
@@ -174,11 +174,11 @@ export const api = {
   getGrading: (token: string, id: string) =>
     request<Job>(token, "GET", `/v1/gradings/${encodeURIComponent(id)}`),
 
-  startPrep: (token: string, slug?: string) =>
-    request<{ id: string }>(token, "POST", "/v1/preps", slug ? { slug } : {}),
+  startSync: (token: string, slug?: string) =>
+    request<{ id: string }>(token, "POST", "/v1/syncs", slug ? { slug } : {}),
 
-  getPrep: (token: string, id: string) =>
-    request<Job>(token, "GET", `/v1/preps/${encodeURIComponent(id)}`),
+  getSync: (token: string, id: string) =>
+    request<Job>(token, "GET", `/v1/syncs/${encodeURIComponent(id)}`),
 };
 
 /** Upload one file straight to S3 — the presigned URL carries the auth,

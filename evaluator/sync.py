@@ -1,13 +1,13 @@
-"""Solution-side preparation for SnapLogic exercises.
+"""Solution-side sync (reconciliation) for SnapLogic exercises.
 
 Two subcommands:
 
-    python -m evaluator.prep survey
+    python -m evaluator.sync survey
         Walk exercises/, classify each folder, emit a plain summary plus
         a JSON block (delimited by SURVEY_JSON markers) for the /prep
         skill to parse. Read-only — never writes.
 
-    python -m evaluator.prep sync [--slug X] [--output-file FILENAME]
+    python -m evaluator.sync sync [--slug X] [--output-file FILENAME]
         Perform the writes. Creates exercises/<slug>/task.json when
         possible (file_writer only — single-writer pipelines), then
         refreshes solution.json + sidecar + expected outputs via the
@@ -30,15 +30,15 @@ initial task.json; sync then handles the API-side work.
 Design rule: the canonical pipeline name lives in the FIRST H1 HEADING
 of `exercises/<slug>/description.md` (e.g. `# Task 01 – Generate CSV
 Report`). Folder slugs can stay snake_case — they're filesystem-friendly
-ids. When prep creates a task.json, it looks up the pipeline at
+ids. When sync creates a task.json, it looks up the pipeline at
 <org>/<solution_ps>/<solution_project>/<heading-from-description.md>.
 
-Reconciliation rule: prep is the source-of-truth reconciler. Every
+Reconciliation rule: sync is the source-of-truth reconciler. Every
 survey/sync re-reads the heading, looks up the pipeline live, fetches
 the definition, and compares against task.json. If anything drifted —
 pipeline renamed, writer filename renamed, snap structure changed,
-cache stale, expected outputs missing — prep detects it and (on sync)
-updates local files to match SnapLogic. /grade trusts the resulting
+cache stale, expected outputs missing — sync detects it and updates
+local files to match SnapLogic. /grade trusts the resulting
 local files as ground truth.
 """
 from __future__ import annotations
@@ -110,7 +110,7 @@ class FolderReport:
     task_type: str | None = None
     triggered_task_name: str | None = None
     request_names: list[str] | None = None
-    # The .json files prep expects to find in expected/, for the skill's
+    # The .json files sync expects to find in expected/, for the skill's
     # benefit when it's deciding whether sync did the right thing.
     expected_response_filenames: list[str] | None = None
 
@@ -717,7 +717,7 @@ def _reconcile_triggered_task(
 def _prune_expected_dir(folder: str, *, keep_filenames: set[str]) -> None:
     """Delete every file in exercises/<folder>/expected/ not in keep_filenames.
 
-    Prep owns this directory; only files registered in task.json should
+    Sync owns this directory; only files registered in task.json should
     live here. Stale files accumulate when a writer is renamed or a
     triggered-task scenario is removed.
     """
@@ -824,9 +824,9 @@ def cmd_sync(slug_filter: str | None, output_file_override: str | None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="evaluator.prep",
+        prog="evaluator.sync",
         description=(
-            "Prepare exercise folders: create task.json for new folders, "
+            "Sync exercise folders: create task.json for new folders, "
             "refresh solution.json + expected/ when SnapLogic pipelines change."
         ),
     )

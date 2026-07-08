@@ -12,7 +12,7 @@ rather than a rubric.
 > [Cloud grading platform](#cloud-grading-platform) for the deployment steps
 > that remain. The local `/grade` Claude Code skill was removed; `/prep`
 > (exercise maintenance) remains available locally as the dev fallback until
-> cloud prep is verified.
+> cloud sync is verified.
 
 ## What it does
 
@@ -62,7 +62,7 @@ tables, tabbed sub-nav):
   report in place ($0 — no re-grade); verdicts, points, and deductions are
   untouched. Regrading a task later replaces its edited summary with fresh
   AI text.
-- **Prep** (admin only): click Prep on an exercise to refresh its solution
+- **Sync** (admin only): click Sync on an exercise to refresh its solution
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
 - **Remove a student** (admin only): a red **Remove** button on the
   student's row opens a confirmation dialog, then permanently deletes the
@@ -71,14 +71,14 @@ tables, tabbed sub-nav):
   (if any). Their SnapLogic project is untouched.
 - **Delete an exercise** (admin only): a red **Delete** button next to
   Archive opens a confirmation dialog, then permanently deletes the exercise
-  from AWS — authored content, prep artifacts and input files (every S3
+  from AWS — authored content, sync artifacts and input files (every S3
   version) plus its DynamoDB and job records — and scrubs its result out of
   every student's live report (points, counts and totals are recalculated;
   older report versions keep their history). Archive remains the reversible
   alternative. Exercises that still ship in the container image keep a
   minimal tombstone row so the image copy can't resurrect them; re-creating
   the same folder name later replaces the tombstone.
-- **Exercises** (mentor or admin): the exercise list shows prep status per
+- **Exercises** (mentor or admin): the exercise list shows sync status per
   task; click a task name to expand its full description (rendered from the
   exercise's `description.md`). Exercises that ship input data (zips, CSVs
   under `exercises/<slug>/resources/`) show a **Files** column — click a
@@ -107,7 +107,7 @@ Browser (VPN/office IPs only)
         │        read-only Cognito login for the student      (mentor or admin)
         ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
         ├─ PATCH /v1/students/{slug}/report — edit AI text    (mentor or admin)
-        ├─ POST /v1/preps {slug?}                             (admin only)
+        ├─ POST /v1/syncs {slug?}                             (admin only)
         ├─ POST/PUT /v1/exercises — create / edit / archive   (admin only)
         ├─ DELETE /v1/students/{slug} — purge everything      (admin only)
         └─ DELETE /v1/exercises/{slug} — purge + report scrub (admin only)
@@ -118,7 +118,7 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
           ├─ SnapLogic REST (GET-only, creds from Secrets Manager)
           ├─ grade: hard gates → Claude (Sonnet 4.6, structured outputs,
           │         prompt-cached rules) → report.md/.json → S3 + DynamoDB
-          └─ prep:  evaluator.prep sync → artifacts to S3 ($0 AI)
+          └─ sync:  evaluator.sync sync → artifacts to S3 ($0 AI)
 ```
 
 | Piece | Where |
@@ -132,7 +132,7 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
 | CI/CD (GitHub OIDC, no stored keys) | `.github/workflows/` |
 
 **Roles** (Cognito groups; the API enforces, the UI only hides buttons):
-admins prep + grade + view; mentors grade + view; students view only (no
+admins sync + grade + view; mentors grade + view; students view only (no
 grading, no edits, no instructor notes). Admin/mentor users are invite-only
 (admin-created in the Cognito console — no self-signup); student logins are
 created by the app itself when a registration includes an email — never add
@@ -169,7 +169,7 @@ needed).
    (auto-deploys via path filters) or run a workflow manually from the Actions
    tab / `gh workflow run` against any branch. CI takes over (image → Lambdas,
    SPA → S3 + CloudFront).
-6. Click **Prep All Exercises** (admin) once. Besides generating artifacts,
+6. Click **Sync All Exercises** (admin) once. Besides generating artifacts,
    this seeds every image-shipped exercise's authored files
    (description/notes/resources) into S3 — the canonical exercise store —
    after which the UI owns exercise content end to end.
@@ -346,7 +346,7 @@ silently route to the wrong task.
 │   ├── hard_gates.py           # name + output equality checks (CSV/XLSX or per-scenario JSON)
 │   ├── tasks.py                # task.json discovery + TaskConfig (file_writer | triggered_task)
 │   ├── evaluate.py             # per-task evaluator (no LLM call)
-│   ├── prep.py                 # /prep skill orchestrator + CLI (also runs inside cloud prep jobs)
+│   ├── sync.py                 # /prep skill orchestrator + CLI (also runs inside cloud sync jobs)
 │   ├── grade.py                # plan/report orchestrator + CLI
 │   ├── ai_judge.py             # headless Claude judge (Sonnet 4.6, structured outputs)
 │   ├── runner.py               # in-process grade run: gates → judge → report → Overall
@@ -431,14 +431,14 @@ the SnapLogic asset's modified-at timestamp. A run only refetches the
 body when the timestamp changes — so back-to-back grading of multiple
 students hits the cache. To force a refresh of a solution and its
 expected outputs, run `/prep --task <slug>` (or call
-`python -m evaluator.prep sync --slug <slug>`).
+`python -m evaluator.sync sync --slug <slug>`).
 
 Flags:
 - `--student-name <name>` — override the auto-derived student name
   (used in the output path).
 
 The `/prep` and `/grade` orchestrators are exposed as their own subcommands:
-`python -m evaluator.prep {survey,sync}` and
+`python -m evaluator.sync {survey,sync}` and
 `python -m evaluator.grade {plan,report,sync-overall}`. `sync-overall` is a
 small helper that copies the rendered `## Overall` paragraph from `report.md`
 into `overall_summary` inside `report.json`. (The `/grade` skill that drove
@@ -454,7 +454,7 @@ the same image that runs in AWS:
 |---------|-------------|------|
 | `api` | API Lambda via RIE — HTTP API proxy events | 9000 |
 | `worker` | Worker Lambda via RIE — SQS-style invocations | 9001 |
-| `cli` | evaluator CLI — `prep` / `run`; bind-mounts repo dirs | — |
+| `cli` | evaluator CLI — `sync` / `run`; bind-mounts repo dirs | — |
 
 ### Prerequisites
 
@@ -463,14 +463,14 @@ the same image that runs in AWS:
 - Build the image once: `docker compose build` (re-run when `evaluator/`,
   `backend/`, `schemas/`, or `requirements.txt` changes).
 
-### CLI (prep, local run)
+### CLI (sync, local run)
 
 The `cli` service overrides the Lambda entrypoint to run Python directly.
 Bind mounts keep all writes in your workspace:
 
 ```powershell
-docker compose run --rm -T cli python -m evaluator.prep survey
-docker compose run --rm -T cli python -m evaluator.prep sync --slug task_02_calculator
+docker compose run --rm -T cli python -m evaluator.sync survey
+docker compose run --rm -T cli python -m evaluator.sync sync --slug task_02_calculator
 docker compose run --rm -T cli python -m evaluator run "Gabriela Shurbeska"  # costs real money
 docker compose run --rm -T cli python -m evaluator.ui --no-open
 ```
@@ -520,7 +520,7 @@ no `fetch` calls). Features:
 - Search by student name; filter by project space.
 - Sort by total points (default), pass count, name, or grading date.
 - Per-student card with a colored **Total: X/Y pts** badge (green/amber/red by
-  ratio) plus verdict counts (pass / fail / missing / needs prep).
+  ratio) plus verdict counts (pass / fail / missing / needs sync).
 - Overall summary paragraph (from `## Overall` in `report.md`).
 - Collapsible per-task accordion showing each task's verdict, `points/10`
   pill, summary, failing gate (if any), and the differences list split into
@@ -541,7 +541,7 @@ Exit codes:
 
 **S3 is the source of truth for exercise content.** Exercises are created,
 edited and archived from the web UI; the `exercises/` folders in this repo
-are a *seed* — anything shipped there graduates into S3 on its next prep
+are a *seed* — anything shipped there graduates into S3 on its next sync
 (additively; an S3 copy is never overwritten by the image), and from then on
 the UI owns it. Durability comes from the AWS side, not from git: bucket
 versioning + DynamoDB point-in-time recovery + `prevent_destroy` guards, plus
@@ -552,11 +552,11 @@ an export, not an input.
 
 ### Creating and editing (web UI, admin only)
 
-Click **Add New Exercise** (next to *Prep All Exercises*), or **Edit** on any
+Click **Add New Exercise** (next to *Sync All Exercises*), or **Edit** on any
 row. The dialog takes:
 
 - **Exercise Name** (required) — the human-readable pipeline name (e.g.
-  *Task 07 – Router Basics*). Prep looks the solution pipeline up by it, and on
+  *Task 07 – Router Basics*). Sync looks the solution pipeline up by it, and on
   create the exercise's folder id is derived from it automatically — there's no
   slug to type. Stored as the H1 heading of `description.md` behind the scenes.
 - **Description** (required) — the student-facing prompt body (Markdown); no
@@ -564,7 +564,7 @@ row. The dialog takes:
 - **AI Guidance** (optional) — instructor hints fed to the AI judge.
 - **Task type** — this replaces the hand-written `task.json`:
   - *File writer, single output* (the default "auto"): nothing to fill in;
-    prep detects the pipeline's lone writer snap and generates everything.
+    sync detects the pipeline's lone writer snap and generates everything.
   - *File writer, multiple/custom outputs*: list the output filenames and
     pick the comparison mode (`exact` vs `columns_only` for
     non-deterministic outputs).
@@ -572,24 +572,24 @@ row. The dialog takes:
     `<pipeline name> Task`, the strict convention) and one row per request
     scenario — a snake_case name plus `param=value; param2=value2` pairs.
   The config is stored as structured data; the worker synthesizes
-  `task.json` from it (plus the env-derived pipeline path) at prep time.
+  `task.json` from it (plus the env-derived pipeline path) at sync time.
 - **Input files** (optional) — uploaded browser → S3 via presigned URLs;
   students download them from the Exercises page. In edit mode, click an
   existing file to mark it for deletion.
 
 Markdown lands in S3 under `exercises/<slug>/`; the worker overlays that
 prefix onto its working tree before every job, so a UI-authored exercise is
-indistinguishable from a seeded one. Finish by clicking **Prep** on the row.
+indistinguishable from a seeded one. Finish by clicking **Sync** on the row.
 
 **Archive** (admin, per row) soft-deletes an exercise: it stops being
-prepped, graded and counted toward student totals, and shows greyed-out with
+synced, graded and counted toward student totals, and shows greyed-out with
 an `archived` badge. Nothing is removed from S3 — **Unarchive** restores it
 fully. There is deliberately no hard delete.
 
 ### Fallback: authoring in git
 
 If the UI is unavailable you can still drop a folder in the repo — the
-pre-pivot flow. On its next prep the folder's authored files are seeded into
+pre-pivot flow. On its next sync the folder's authored files are seeded into
 S3 and the UI takes over; **content edits in git do NOT propagate after
 that** (the S3 copy wins), so treat git authoring as create-only.
 
@@ -644,7 +644,7 @@ that** (the S3 copy wins), so treat git authoring as create-only.
      > `csv_writer`, with keys `output_csv_filename` / `output_csv_filenames`
      > (the first exercises all wrote CSVs). Those old names are still accepted
      > in `task.json` and normalize to the format-neutral ones; the
-     > `prep sync --output-csv` flag is likewise a deprecated alias for
+     > `sync --output-csv` flag is likewise a deprecated alias for
      > `--output-file`. Write new exercises with the `file_writer` /
      > `output_filename(s)` names.
    - For **triggered_task** exercises, `/prep` asks you to hand-write

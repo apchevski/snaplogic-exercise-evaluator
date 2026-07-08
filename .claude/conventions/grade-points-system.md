@@ -123,5 +123,5 @@ The renderer (`evaluator/grade.py`) splits `differences` into
 **Deductions** (`points_deducted > 0`) and **Notes** (`points_deducted == 0`)
 when writing per-task sections. The report header shows the per-student
 total as `points_earned / points_possible` where `points_possible` is
-always `(total exercises) × 10` — MISSING / NEEDS_PREP exercises
+always `(total exercises) × 10` — MISSING / NEEDS_SYNC exercises
 contribute `0` to the numerator but still count in the denominator.

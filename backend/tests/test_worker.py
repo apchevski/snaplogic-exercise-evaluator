@@ -60,7 +60,7 @@ def _fake_run_result(student: str):
     )
     return SimpleNamespace(
         student=student,
-        counts={"pass": 5, "fail": 1, "missing": 0, "needs_prep": 0, "total": 6},
+        counts={"pass": 5, "fail": 1, "missing": 0, "needs_sync": 0, "total": 6},
         points_earned=52,
         points_possible=60,
         judged_count=6,
@@ -313,19 +313,19 @@ def test_grade_job_failure_marks_failed_and_releases_lock(aws, monkeypatch):
     )
 
 
-def test_prep_job_success(aws, monkeypatch, evaluator_dirs):
+def test_sync_job_success(aws, monkeypatch, evaluator_dirs):
     store = StubStore()
     monkeypatch.setattr(worker, "_make_store", lambda: store)
 
-    folder = evaluator_dirs["exercises"] / "worker_prep_slug"
+    folder = evaluator_dirs["exercises"] / "worker_sync_slug"
     folder.mkdir(exist_ok=True)
     (folder / "description.md").write_text("# Worker Prep", encoding="utf-8")
 
-    import evaluator.prep as prep_mod
+    import evaluator.sync as sync_mod
 
-    monkeypatch.setattr(prep_mod, "cmd_sync", lambda slug, ofile: 0)
+    monkeypatch.setattr(sync_mod, "cmd_sync", lambda slug, ofile: 0)
     monkeypatch.setattr(
-        prep_mod,
+        sync_mod,
         "_classify_folder",
         lambda folder, client, settings: SimpleNamespace(
             status="ready", reason="fresh", task_type="file_writer"
@@ -348,26 +348,26 @@ def test_prep_job_success(aws, monkeypatch, evaluator_dirs):
     monkeypatch.setattr(sl_mod, "SnapLogicClient", lambda settings: FakeClient())
 
     job = _seed_job(
-        "job-prep-1", "prep", "worker_prep_slug", exercise_slug="worker_prep_slug"
+        "job-sync-1", "sync", "worker_sync_slug", exercise_slug="worker_sync_slug"
     )
     worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
 
-    item = _get_job("job-prep-1")
+    item = _get_job("job-sync-1")
     assert item["status"] == "succeeded"
     assert item["result"]["exercises"][0]["status"] == "ready"
-    assert store.uploaded_artifacts == ["worker_prep_slug"]
+    assert store.uploaded_artifacts == ["worker_sync_slug"]
 
     ex = dynamo_table().get_item(
-        Key={"pk": "EXERCISE#worker_prep_slug", "sk": "META"}
+        Key={"pk": "EXERCISE#worker_sync_slug", "sk": "META"}
     )["Item"]
-    assert ex["prep_status"] == "ready"
+    assert ex["sync_status"] == "ready"
     assert ex["title"] == "Worker Prep"
 
 
-def _stub_prep_pipeline(monkeypatch, sync_hook=None):
-    """Stub the deterministic prep machinery (no SnapLogic, no network)."""
+def _stub_sync_pipeline(monkeypatch, sync_hook=None):
+    """Stub the deterministic sync machinery (no SnapLogic, no network)."""
     import evaluator.config as config_mod
-    import evaluator.prep as prep_mod
+    import evaluator.sync as sync_mod
     import evaluator.snaplogic_client as sl_mod
 
     def fake_sync(slug, ofile):
@@ -375,9 +375,9 @@ def _stub_prep_pipeline(monkeypatch, sync_hook=None):
             sync_hook(slug)
         return 0
 
-    monkeypatch.setattr(prep_mod, "cmd_sync", fake_sync)
+    monkeypatch.setattr(sync_mod, "cmd_sync", fake_sync)
     monkeypatch.setattr(
-        prep_mod,
+        sync_mod,
         "_classify_folder",
         lambda folder, client, settings: SimpleNamespace(
             status="ready", reason="fresh", task_type=None
@@ -401,7 +401,7 @@ def _stub_prep_pipeline(monkeypatch, sync_hook=None):
     monkeypatch.setattr(sl_mod, "SnapLogicClient", lambda settings: FakeClient())
 
 
-def test_prep_synthesizes_task_json_from_config_and_preserves_row(
+def test_sync_synthesizes_task_json_from_config_and_preserves_row(
     aws, monkeypatch, evaluator_dirs
 ):
     store = StubStore()
@@ -436,14 +436,14 @@ def test_prep_synthesizes_task_json_from_config_and_preserves_row(
             (folder / "task.json").read_text(encoding="utf-8")
         )
 
-    _stub_prep_pipeline(monkeypatch, sync_hook=capture)
+    _stub_sync_pipeline(monkeypatch, sync_hook=capture)
 
     job = _seed_job(
-        "job-prep-cfg", "prep", "worker_cfg_slug", exercise_slug="worker_cfg_slug"
+        "job-sync-cfg", "sync", "worker_cfg_slug", exercise_slug="worker_cfg_slug"
     )
     worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
 
-    assert _get_job("job-prep-cfg")["status"] == "succeeded"
+    assert _get_job("job-sync-cfg")["status"] == "succeeded"
     # Synthesized before sync ran, from config + env-derived pipeline path.
     tj = seen_at_sync["task_json"]
     assert tj["task_type"] == "triggered_task"
@@ -457,7 +457,7 @@ def test_prep_synthesizes_task_json_from_config_and_preserves_row(
     ex = dynamo_table().get_item(
         Key={"pk": "EXERCISE#worker_cfg_slug", "sk": "META"}
     )["Item"]
-    assert ex["prep_status"] == "ready"
+    assert ex["sync_status"] == "ready"
     assert ex["created_by"] == "admin@x.io"
     assert ex["authored_in"] == "s3"
     assert ex["task_config"]["triggered_task_name"] == "Task 77 – Config Task"
@@ -499,7 +499,7 @@ def test_archived_exercise_pruned_from_working_tree(aws, monkeypatch, evaluator_
 
 def test_deleted_exercise_pruned_from_working_tree(aws, monkeypatch, evaluator_dirs):
     """A hard-deleted exercise's tombstone row keeps its image folder out of
-    every job's working tree — prep must never re-seed it into S3."""
+    every job's working tree — sync must never re-seed it into S3."""
     store = StubStore()
     monkeypatch.setattr(worker, "_make_store", lambda: store)
     import evaluator.runner as runner_mod

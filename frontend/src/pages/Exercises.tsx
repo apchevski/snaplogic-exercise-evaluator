@@ -19,15 +19,19 @@ import type { Exercise, ExerciseDetail, Job } from "../types";
 const COMPARE: Record<string, (a: Exercise, b: Exercise) => number> = {
   exercise: (a, b) => (a.title ?? a.slug).localeCompare(b.title ?? b.slug),
   type: (a, b) => (a.task_type ?? "").localeCompare(b.task_type ?? ""),
-  status: (a, b) => a.prep_status.localeCompare(b.prep_status),
-  prepped: (a, b) => (a.last_prepped_at ?? "").localeCompare(b.last_prepped_at ?? ""),
+  status: (a, b) => a.sync_status.localeCompare(b.sync_status),
+  synced: (a, b) => (a.last_synced_at ?? "").localeCompare(b.last_synced_at ?? ""),
 };
 const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   exercise: "asc",
   type: "asc",
   status: "asc",
-  prepped: "desc",
+  synced: "desc",
 };
+
+// The "ready" sync state reads as "synced" (green) in the Status column;
+// every other state keeps its diagnostic label (underscores → spaces).
+const SYNC_STATUS_LABEL: Record<string, string> = { ready: "synced" };
 
 /** "4017654" → "3.8 MB" — chip labels stay short. */
 function formatSize(bytes: number): string {
@@ -84,9 +88,9 @@ export default function Exercises() {
   const [archiveTarget, setArchiveTarget] = useState<Exercise | null>(null);
   // Confirmation dialog target for the admin-only permanent Delete.
   const [deleting, setDeleting] = useState<Exercise | null>(null);
-  // Confirmation dialog target for prep: "all" = Prep All Exercises,
-  // otherwise the single exercise being prepped.
-  const [prepConfirm, setPrepConfirm] = useState<Exercise | "all" | null>(null);
+  // Confirmation dialog target for sync: "all" = Sync All Exercises,
+  // otherwise the single exercise being synced.
+  const [syncConfirm, setSyncConfirm] = useState<Exercise | "all" | null>(null);
 
   const toggleExpanded = (slug: string) =>
     setExpanded((prev) => {
@@ -113,14 +117,14 @@ export default function Exercises() {
     void refresh();
   }, [refresh]);
 
-  const startPrep = useCallback(
+  const startSync = useCallback(
     async (slug?: string) => {
       const key = slug ?? "__all__";
       setError(null);
       try {
-        const { id } = await api.startPrep(token, slug);
+        const { id } = await api.startSync(token, slug);
         const job = await pollJob(
-          () => api.getPrep(token, id),
+          () => api.getSync(token, id),
           (j) => setJobs((prev) => ({ ...prev, [key]: j })),
         );
         if (job.status === "succeeded") void refresh();
@@ -248,8 +252,8 @@ export default function Exercises() {
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
       <Panel
-        title="Exercise Prep Status of All Projects"
-        hint="Every authored exercise and whether its grading artifacts are prepped and current. Click a task name to view its description; click a file to download its input data."
+        title="Exercise Sync Status of All Projects"
+        hint="Every authored exercise and whether its grading artifacts are synced and current. Click a task name to view its description; click a file to download its input data."
         toolbar={
           <>
             <SearchBox
@@ -260,16 +264,16 @@ export default function Exercises() {
             <span className="toolbar-spacer" />
             {isAdmin && (
               <>
-                {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="prep" />}
+                {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="sync" />}
                 <button className="btn" onClick={() => setShowAdd(true)} disabled={anyBusy}>
                   Add New Exercise
                 </button>
                 <button
                   className="btn primary"
-                  onClick={() => setPrepConfirm("all")}
+                  onClick={() => setSyncConfirm("all")}
                   disabled={anyBusy}
                 >
-                  Prep All Exercises
+                  Sync All Exercises
                 </button>
               </>
             )}
@@ -306,8 +310,8 @@ export default function Exercises() {
                 <SortableTh label="Exercise" sortKey="exercise" sort={sort} onSort={onSort} />
                 <SortableTh label="Task Type" sortKey="type" sort={sort} onSort={onSort} />
                 <th className="plain">Files</th>
-                <SortableTh label="Prep Status" sortKey="status" sort={sort} onSort={onSort} />
-                <SortableTh label="Last Prepped" sortKey="prepped" sort={sort} onSort={onSort} />
+                <SortableTh label="Status" sortKey="status" sort={sort} onSort={onSort} />
+                <SortableTh label="Last Synced" sortKey="synced" sort={sort} onSort={onSort} />
                 {isAdmin && <th className="plain">Actions</th>}
               </tr>
             </thead>
@@ -358,26 +362,30 @@ export default function Exercises() {
                         )}
                       </td>
                       <td className={sc("status")}>
-                        <span className={`prep-status ${ex.prep_status}`}>
-                          {ex.prep_status.replace(/_/g, " ")}
-                        </span>{" "}
-                        {ex.archived && <span className="prep-status archived">archived</span>}{" "}
+                        {ex.sync_status === "never_synced" ? (
+                          <span className="cell-muted">—</span>
+                        ) : (
+                          <span className={`sync-status ${ex.sync_status}`}>
+                            {SYNC_STATUS_LABEL[ex.sync_status] ?? ex.sync_status.replace(/_/g, " ")}
+                          </span>
+                        )}{" "}
+                        {ex.archived && <span className="sync-status archived">archived</span>}{" "}
                         {ex.missing_from_image && (
-                          <span className="prep-status config_error">missing from image</span>
+                          <span className="sync-status config_error">missing from image</span>
                         )}
                       </td>
-                      <td className={`${sc("prepped")} cell-muted`}>
-                        {ex.last_prepped_at ?? "never"}
+                      <td className={`${sc("synced")} cell-muted`}>
+                        {ex.last_synced_at ?? "—"}
                       </td>
                       {isAdmin && (
                         <td>
                           <span className="actions-cell">
                             <button
                               className="btn small"
-                              onClick={() => setPrepConfirm(ex)}
+                              onClick={() => setSyncConfirm(ex)}
                               disabled={anyBusy || ex.archived}
                             >
-                              Prep
+                              Sync
                             </button>
                             <button
                               className="btn small"
@@ -400,7 +408,7 @@ export default function Exercises() {
                             >
                               Delete
                             </button>
-                            {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="prep" />}
+                            {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="sync" />}
                           </span>
                         </td>
                       )}
@@ -449,28 +457,28 @@ export default function Exercises() {
           onSaved={() => void refresh()}
         />
       )}
-      {prepConfirm && isAdmin && (
+      {syncConfirm && isAdmin && (
         <ConfirmModal
-          title={prepConfirm === "all" ? "Prep All Exercises" : "Prep Exercise"}
-          confirmLabel={prepConfirm === "all" ? "Prep all" : "Prep"}
+          title={syncConfirm === "all" ? "Sync All Exercises" : "Sync Exercise"}
+          confirmLabel={syncConfirm === "all" ? "Sync all" : "Sync"}
           confirmClassName="btn primary"
           busyLabel="Starting…"
           onConfirm={async () => {
-            const target = prepConfirm;
-            setPrepConfirm(null);
-            if (target) void startPrep(target === "all" ? undefined : target.slug);
+            const target = syncConfirm;
+            setSyncConfirm(null);
+            if (target) void startSync(target === "all" ? undefined : target.slug);
           }}
-          onClose={() => setPrepConfirm(null)}
+          onClose={() => setSyncConfirm(null)}
         >
-          {prepConfirm === "all" ? (
+          {syncConfirm === "all" ? (
             <p>
-              Prep <strong>all active exercises</strong>? This rebuilds every
+              Sync <strong>all active exercises</strong>? This rebuilds every
               exercise&rsquo;s grading artifacts from its current files. It can
               take a while and runs in the background.
             </p>
           ) : (
             <p>
-              Prep <strong>{prepConfirm.title ?? prepConfirm.slug}</strong>?
+              Sync <strong>{syncConfirm.title ?? syncConfirm.slug}</strong>?
               This rebuilds its grading artifacts from its current files and
               runs in the background.
             </p>
@@ -490,7 +498,7 @@ export default function Exercises() {
         >
           <p>
             Archive <strong>{archiveTarget.title ?? archiveTarget.slug}</strong>?
-            It stops being prepped, graded and counted toward student totals.
+            It stops being synced, graded and counted toward student totals.
           </p>
           <p className="hint">
             Nothing is deleted — you can unarchive it anytime.

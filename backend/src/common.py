@@ -6,7 +6,7 @@ Single DynamoDB table (see infra/modules/data). Item shapes:
     STUDENT#<slug>  / REPORT#<ver>    one row per grading run (history)
     JOB#<id>        / META            entity="job", slug=<id> — job lifecycle
     LOCK#<key>      / META            conditional-put dedupe lock, ttl 30 min
-    EXERCISE#<slug> / META            entity="exercise", slug — prep status
+    EXERCISE#<slug> / META            entity="exercise", slug — sync status
 
 GSI ``gsi1`` is sparse on (entity, slug): only items that carry both
 attributes are listable, which keeps REPORT/LOCK rows out of list queries.

@@ -26,7 +26,7 @@ Endpoint shapes (validated against `elastic.snaplogic.com`):
 
     GET /api/1/rest/slsched/feed/{org}/{ps}/{project}/{task_name}
         -> raw pipeline output (typically JSON). Invokes a Triggered Task
-        with basic auth and query-string parameters. Used by /prep to
+        with basic auth and query-string parameters. Used by sync to
         capture solution responses and by /grade to compare against
         student responses. Verified 2026-05-20: returns the same JSON
         body the task's Designer view shows.
@@ -218,7 +218,7 @@ class SnapLogicClient:
 
         This DOES execute the pipeline server-side (it counts against
         SnapLogic execution quotas). Caching of responses is the caller's
-        responsibility — see `pipeline_fetch` for the cache logic /prep
+        responsibility — see `pipeline_fetch` for the cache logic sync
         and /grade use.
         """
         path = "/api/1/rest/slsched/feed/" + self._encode_path_segments(

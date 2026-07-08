@@ -13,9 +13,9 @@ locals {
     "DELETE /v1/exercises/{slug}",
     "GET /v1/exercises/{slug}/resources/{filename}",
     "GET /v1/gradings/{id}",
-    "GET /v1/preps/{id}",
+    "GET /v1/syncs/{id}",
     "POST /v1/gradings",
-    "POST /v1/preps",
+    "POST /v1/syncs",
     "POST /v1/exercises",
   ]
 }

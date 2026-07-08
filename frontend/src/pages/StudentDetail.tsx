@@ -167,11 +167,13 @@ export default function StudentDetail() {
   const tier = tierForRatio(earned, possible);
   const pct = possible > 0 ? Math.round((earned / possible) * 100) : null;
 
-  // Unprepped exercises are surfaced as a warning instead of task cards —
+  // Unsynced exercises are surfaced as a warning instead of task cards —
   // they were skipped by grading, so there is no verdict to show.
-  const unprepped = report?.tasks.filter((t) => t.status === "needs_prep") ?? [];
-  const needsPrepCount = unprepped.length || (counts?.needs_prep ?? 0);
-  const gradedTasks = report?.tasks.filter((t) => t.status !== "needs_prep") ?? [];
+  const unsynced =
+    report?.tasks.filter((t) => t.status === "needs_sync" || t.status === "needs_prep") ?? [];
+  const needsSyncCount = unsynced.length || (counts?.needs_sync ?? counts?.needs_prep ?? 0);
+  const gradedTasks =
+    report?.tasks.filter((t) => t.status !== "needs_sync" && t.status !== "needs_prep") ?? [];
 
   // Registered exercises with no verdict at all for this student — never
   // graded, or added to the exercise set after the last grading run.
@@ -233,12 +235,12 @@ export default function StudentDetail() {
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
-      {canGrade && needsPrepCount > 0 && (
+      {canGrade && needsSyncCount > 0 && (
         <div className="warn-banner">
-          ⚠ {needsPrepCount} exercise{needsPrepCount === 1 ? " was" : "s were"} skipped
-          because {needsPrepCount === 1 ? "its" : "their"} grading artifacts are not
-          prepped{unprepped.length > 0 && <>: {unprepped.map((t) => t.slug).join(", ")}</>}.
-          Prep {needsPrepCount === 1 ? "it" : "them"} on the Exercises page, then regrade.
+          ⚠ {needsSyncCount} exercise{needsSyncCount === 1 ? " was" : "s were"} skipped
+          because {needsSyncCount === 1 ? "its" : "their"} grading artifacts are not
+          synced{unsynced.length > 0 && <>: {unsynced.map((t) => t.slug).join(", ")}</>}.
+          Sync {needsSyncCount === 1 ? "it" : "them"} on the Exercises page, then regrade.
         </div>
       )}
       <Link className="back-link" to="/">
@@ -361,10 +363,10 @@ export default function StudentDetail() {
                     {canGrade && (
                       <span className="actions-cell">
                         {jobs[e.slug] && <StatusPill job={jobs[e.slug]} kind="grade" />}
-                        {e.prep_status !== "ready" && (
+                        {e.sync_status !== "ready" && (
                           <span
                             className="warn-chip"
-                            title="Not prepped — grading will skip it until it's prepped on the Exercises page."
+                            title="Not synced — grading will skip it until it's synced on the Exercises page."
                           >
                             ⚠
                           </span>

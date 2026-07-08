@@ -153,7 +153,7 @@ def test_overall_summary_call():
     stub = StubClient([{"overall_summary": "5 of 6 passed with 52/60 points."}])
     judge = AIJudge(client=stub)
     report = {
-        "counts": {"pass": 5, "fail": 1, "missing": 0, "needs_prep": 0, "total": 6},
+        "counts": {"pass": 5, "fail": 1, "missing": 0, "needs_sync": 0, "total": 6},
         "points_earned": 52,
         "points_possible": 60,
         "tasks": [{"verdict": "pass", "points": 10, "differences": []}],

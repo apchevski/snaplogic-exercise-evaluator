@@ -9,7 +9,7 @@
 # Locally via docker-compose:
 #   - api service:   runs the API Lambda via RIE on port 9000
 #   - worker service: runs the worker Lambda via RIE on port 9001
-#   - cli service:    entrypoint overridden to python; runs prep/run commands
+#   - cli service:    entrypoint overridden to python; runs sync/run commands
 #
 # Contents: evaluator/ (hard gates + runners) + backend/ (API + worker handlers)
 # + schemas/ (structured outputs) + exercises/ (authored content: descriptions,

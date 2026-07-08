@@ -113,10 +113,10 @@ IAM/OIDC, CloudWatch, Budgets).
 
 | Piece | Where | What it does |
 |---|---|---|
-| React SPA | `frontend/` (Vite + TS) | Dashboard (student rows, sortable/paginated, SnapLogic-Dashboard styling), student detail (task cards, regrade/edit buttons), exercises page (authoring, prep, file downloads). Cognito Hosted UI + PKCE login. |
+| React SPA | `frontend/` (Vite + TS) | Dashboard (student rows, sortable/paginated, SnapLogic-Dashboard styling), student detail (task cards, regrade/edit buttons), exercises page (authoring, sync, file downloads). Cognito Hosted UI + PKCE login. |
 | API Lambda | `backend/src/api.py` | Powertools router behind API Gateway `/v1`. Validates, enforces the role matrix and source IP, writes DynamoDB items and S3 authored content, queues jobs on SQS. Never does grading work itself. |
-| Worker Lambda | `backend/src/worker.py` | SQS consumer. Runs grade and prep jobs via the `evaluator/` package. Concurrency 1; the DLQ has `maxReceiveCount 1` so a paid grade job is never auto-retried. |
-| Evaluator core | `evaluator/` | Shared Python: GET-only SnapLogic client, pipeline fetch + topo sort, hard gates, AI judge (`ai_judge.py`), in-process run loop (`runner.py`), artifact/report I/O (`store.py` — LocalStore for dev, S3Store in Lambda), prep orchestrator (`prep.py`). Same code path locally and in the cloud. |
+| Worker Lambda | `backend/src/worker.py` | SQS consumer. Runs grade and sync jobs via the `evaluator/` package. Concurrency 1; the DLQ has `maxReceiveCount 1` so a paid grade job is never auto-retried. |
+| Evaluator core | `evaluator/` | Shared Python: GET-only SnapLogic client, pipeline fetch + topo sort, hard gates, AI judge (`ai_judge.py`), in-process run loop (`runner.py`), artifact/report I/O (`store.py` — LocalStore for dev, S3Store in Lambda), sync orchestrator (`sync.py`). Same code path locally and in the cloud. |
 | Structured-output schemas | `schemas/` | JSON schemas Claude's structured outputs are constrained to. |
 | Container image | `Dockerfile` | One image, two CMDs — API and worker. Also runs locally via `docker-compose.yml` (api/worker under Lambda RIE + a `cli` service). |
 | Terraform | `infra/` | `bootstrap/` (state bucket) + `environments/production/` + 9 modules: api-gateway, sqs-worker, data-storage, cognito-auth, static-web-hosting, secrets-manager, elastic-container-registry, github-oidc, billing-budget. |
@@ -133,12 +133,12 @@ IAM/OIDC, CloudWatch, Budgets).
   student login), registration stamps.
 - **REPORT history rows** — one per grading run, pointing at the immutable S3
   version; scoped runs record their `tasks_scope`.
-- **JOB items** — grade/prep lifecycle (queued → running → done/failed), cost
+- **JOB items** — grade/sync lifecycle (queued → running → done/failed), cost
   and token usage.
-- **Locks** — conditional-put, TTL 30 min, one per student/prep target.
-- **EXERCISE rows** — prep state, `archived` flag, structured `task_config`
+- **Locks** — conditional-put, TTL 30 min, one per student/sync target.
+- **EXERCISE rows** — sync state, `archived` flag, structured `task_config`
   (replaces hand-written task.json; the worker synthesizes task.json from it at
-  prep time), and **tombstones** (`deleted: true`) for hard-deleted exercises
+  sync time), and **tombstones** (`deleted: true`) for hard-deleted exercises
   whose folders still ship in the image (without one, the image copy would
   resurface and get re-seeded).
 
@@ -146,9 +146,9 @@ IAM/OIDC, CloudWatch, Budgets).
 pivot). Layout:
 
 - `exercises/<slug>/` — authored files (`description.md`, `notes.md`,
-  `resources/*` — written by the API's create/edit routes) and generated prep
-  artifacts (`task.json`, `solution.json`, `expected/` — written only by prep
-  jobs). The repo's `exercises/` folders are a **create-only seed**: first prep
+  `resources/*` — written by the API's create/edit routes) and generated sync
+  artifacts (`task.json`, `solution.json`, `expected/` — written only by sync
+  jobs). The repo's `exercises/` folders are a **create-only seed**: first sync
   additively copies authored files to S3, and from then on **the S3 copy wins
   everywhere** — git edits do not propagate.
 - `students/<slug>/<version>/report.md|report.json` — **immutable report
@@ -182,7 +182,7 @@ history.
   the edge; the API Gateway JWT authorizer rejects unauthenticated calls; the
   API Lambda re-checks source IP and enforces the role matrix (the UI only
   hides buttons — the backend is the real gate).
-- **Role matrix:** admins do everything (prep, exercise authoring/archiving,
+- **Role matrix:** admins do everything (sync, exercise authoring/archiving,
   hard deletes); mentors grade, register students, and edit report text;
   students are read-only — dashboards, summaries, descriptions, file downloads,
   with every action (and `notes.md`, i.e. instructor hints) 403'd server-side.
@@ -202,12 +202,12 @@ scoped runs merge into the existing report and leave it untouched. Per-task
 **Regrade** and $0 inline **report-text editing** (PATCH) work on the same
 stored report.
 
-**Prep** (admin, $0 — no AI): per exercise or Prep All. The worker synthesizes
+**Sync** (admin, $0 — no AI): per exercise or Sync All. The worker synthesizes
 `task.json` from the row's `task_config`, fetches the solution pipeline and its
 expected outputs from SnapLogic (for `triggered_task` exercises it invokes the
 solution's Triggered Task once per scenario), and writes artifacts to S3. First
-prep also seeds image-shipped authored files into S3. A sidecar signature keyed
-off the pipeline's modified-time makes re-preps no-ops unless the solution
+sync also seeds image-shipped authored files into S3. A sidecar signature keyed
+off the pipeline's modified-time makes re-syncs no-ops unless the solution
 changed.
 
 **Add student** (mentor/admin): dialog takes name + project space (prefilled
@@ -219,7 +219,7 @@ student login (registration fails as a unit if the login can't be created).
 **Exercise authoring** (admin): create/edit in the UI — description.md (first
 H1 = canonical pipeline name), notes.md, task-type config, input-file uploads
 via presigned PUT. Dropping a folder in git still works as a create-only
-fallback; after its first prep, S3 owns it.
+fallback; after its first sync, S3 owns it.
 
 ### The two task types
 
@@ -250,14 +250,14 @@ Four GitHub Actions workflows; non-secret config comes from
 | `backup-exercises` | nightly cron | S3 `exercises/` → commit snapshot to `exercises-backup/` |
 
 First-time deployment order (state bucket → targeted apply for ECR → manual
-image push → full apply → secret value → Cognito users → deploy.vars → Prep
+image push → full apply → secret value → Cognito users → deploy.vars → Sync
 All) is in the README under *Cloud grading platform → Deploying*. A billing
 budget alarm emails on overspend.
 
 ## 8. Local development
 
 - **Docker is the primary runtime:** `docker compose build`, then
-  `docker compose run --rm -T cli python -m evaluator.prep survey` (etc.), or
+  `docker compose run --rm -T cli python -m evaluator.sync survey` (etc.), or
   `docker compose up api` / `run --rm worker` to exercise the Lambdas under the
   Runtime Interface Emulator. A venv is the documented escape hatch.
 - `python -m evaluator run <student>` is the local twin of a cloud grade job —

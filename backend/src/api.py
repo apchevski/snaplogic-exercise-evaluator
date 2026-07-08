@@ -13,7 +13,7 @@ Defense layers (outer → inner):
        | POST /v1/students                 |  ✅   |  ✅    |  ❌ 403 |
        | POST /v1/gradings                 |  ✅   |  ✅    |  ❌ 403 |
        | PATCH /v1/students/{slug}/report  |  ✅   |  ✅    |  ❌ 403 |
-       | POST /v1/preps                    |  ✅   |  ❌ 403|  ❌ 403 |
+       | POST /v1/syncs                    |  ✅   |  ❌ 403|  ❌ 403 |
        | POST /v1/exercises                |  ✅   |  ❌ 403|  ❌ 403 |
        | PUT  /v1/exercises/{slug}         |  ✅   |  ❌ 403|  ❌ 403 |
        | DELETE /v1/students/{slug}        |  ✅   |  ❌ 403|  ❌ 403 |
@@ -194,14 +194,14 @@ def _get_job(job_id: str) -> dict[str, Any]:
 # S3 (under exercises/<slug>/) is the canonical home of authored exercise
 # content — description.md, notes.md, resources/* — created and edited from
 # the UI. The worker overlays the whole prefix onto the image tree before
-# every job (S3Store.materialize_exercises), so prep and grade see authored
+# every job (S3Store.materialize_exercises), so sync and grade see authored
 # exercises exactly as if the folders were committed. Folders that still ship
 # in the image (git fallback / pre-migration) are seeded into S3 by the next
-# prep job. Only the API writes description.md into the prefix (prep uploads
+# sync job. Only the API writes description.md into the prefix (sync uploads
 # task.json / solution.json / expected/ only), so its presence in S3 marks an
 # authored slug. Type-specific config (the old hand-written task.json) is
 # structured data on the EXERCISE row (`task_config`); the worker synthesizes
-# task.json from it at prep time.
+# task.json from it at sync time.
 
 AUTHORED_PREFIX = "exercises/"
 UPLOAD_URL_TTL_SECONDS = 900
@@ -222,9 +222,9 @@ def _validate_task_config(raw: Any) -> dict[str, Any] | None:
     """Normalize the structured task config from the create/edit dialog.
 
     None means "auto": a single-output file_writer exercise needs no config —
-    prep derives task.json from the solution pipeline's lone writer snap.
+    sync derives task.json from the solution pipeline's lone writer snap.
     The returned dict is stored on the EXERCISE row; the worker synthesizes
-    task.json from it (plus the env-derived pipeline path) at prep time.
+    task.json from it (plus the env-derived pipeline path) at sync time.
     """
     if raw is None or raw == {} or raw == "":
         return None
@@ -306,7 +306,7 @@ def _scan_authored_s3() -> dict[str, list[dict[str, Any]]]:
     """One paginated LIST over exercises/ → {slug: [resource entries]}.
 
     A slug counts as S3-authored only when S3 holds its description.md;
-    prep-generated artifacts sharing the prefix never include one.
+    sync-generated artifacts sharing the prefix never include one.
     """
     slugs: dict[str, dict[str, Any]] = {}
     paginator = s3_client().get_paginator("list_objects_v2")
@@ -343,11 +343,29 @@ def _known_exercise_slugs() -> set[str]:
     return set(list_exercise_folders()) | set(_scan_authored_s3())
 
 
+def _normalize_sync_fields(item: dict[str, Any]) -> dict[str, Any]:
+    """Back-compat: emit the post-rename attribute names for old rows.
+
+    EXERCISE rows written before the prep→sync rename carry `prep_status` /
+    `last_prepped_at` / the `never_prepped` value. Surface them under the new
+    names (`sync_status` / `last_synced_at` / `never_synced`) so the API is
+    uniform; old rows migrate to the new attributes on their next sync-job
+    put_item (or the next edit).
+    """
+    if "prep_status" in item:
+        item.setdefault("sync_status", item.pop("prep_status"))
+    if item.get("sync_status") == "never_prepped":
+        item["sync_status"] = "never_synced"
+    if "last_prepped_at" in item:
+        item.setdefault("last_synced_at", item.pop("last_prepped_at"))
+    return item
+
+
 def _exercise_row(slug: str) -> dict[str, Any] | None:
     item = (
         dynamo_table().get_item(Key={"pk": f"EXERCISE#{slug}", "sk": "META"}).get("Item")
     )
-    return from_dynamo(item) if item else None
+    return _normalize_sync_fields(from_dynamo(item)) if item else None
 
 
 def _reject_archived(slug: str, action: str) -> None:
@@ -434,7 +452,7 @@ def list_exercises() -> dict[str, Any]:
     # Students may look: the listing carries descriptions and input files but
     # never notes.md (instructor hints live behind GET /v1/exercises/{slug}).
     _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
-    # Authored folders ship in this image; prep state lives in DynamoDB.
+    # Authored folders ship in this image; sync state lives in DynamoDB.
     from evaluator.tasks import (
         list_exercise_folders,
         list_exercise_resources,
@@ -445,7 +463,10 @@ def list_exercises() -> dict[str, Any]:
     resp = dynamo_table().query(
         IndexName="gsi1", KeyConditionExpression=Key("entity").eq("exercise")
     )
-    by_slug = {str(i.get("slug")): public_item(i) for i in resp.get("Items", [])}
+    by_slug = {
+        str(i.get("slug")): _normalize_sync_fields(public_item(i))
+        for i in resp.get("Items", [])
+    }
     # Hard-deleted exercises whose folder still ships in the image keep a
     # tombstone row (see delete_exercise); they must not resurface anywhere.
     deleted_slugs = {s for s, e in by_slug.items() if e.get("deleted")}
@@ -457,14 +478,14 @@ def list_exercises() -> dict[str, Any]:
             authored.pop(folder, None)
             continue
         # S3 is the canonical authored store: once an exercise exists there
-        # (UI-created, or seeded from the image by a prep job), its S3
+        # (UI-created, or seeded from the image by a sync job), its S3
         # description wins over the image copy — a UI edit must show even
         # when the image still ships the original. Image files only fill
         # gaps (e.g. resources that predate the S3 seed).
         s3_files = authored.pop(folder, None)
         entry = by_slug.pop(folder, None) or {
             "slug": folder,
-            "prep_status": "never_prepped",
+            "sync_status": "never_synced",
         }
         entry.setdefault("max_points", 10)
         if s3_files is not None:
@@ -489,7 +510,7 @@ def list_exercises() -> dict[str, Any]:
             continue
         entry = by_slug.pop(slug, None) or {
             "slug": slug,
-            "prep_status": "never_prepped",
+            "sync_status": "never_synced",
         }
         text = _s3_text(f"{AUTHORED_PREFIX}{slug}/description.md") or ""
         entry.setdefault("title", _h1_title(text) or slug)
@@ -603,8 +624,8 @@ def get_grading(job_id: str) -> dict[str, Any]:
     return _get_job(job_id)
 
 
-@app.get("/v1/preps/<job_id>")
-def get_prep(job_id: str) -> dict[str, Any]:
+@app.get("/v1/syncs/<job_id>")
+def get_sync(job_id: str) -> dict[str, Any]:
     _require_role(ROLE_ADMIN, ROLE_MENTOR)
     return _get_job(job_id)
 
@@ -1014,8 +1035,8 @@ def patch_student_report(slug: str) -> dict[str, Any]:
     return {"student": meta, "report": report}
 
 
-@app.post("/v1/preps")
-def post_prep() -> Response:
+@app.post("/v1/syncs")
+def post_sync() -> Response:
     claims = _require_role(ROLE_ADMIN)  # mentors get 403 here
     body = app.current_event.json_body or {}
     slug = str(body.get("slug") or "").strip()
@@ -1023,10 +1044,10 @@ def post_prep() -> Response:
     if slug:
         if slug not in _known_exercise_slugs():
             raise BadRequestError(
-                f"Unknown exercise folder {slug!r}. Omit 'slug' to prep everything."
+                f"Unknown exercise folder {slug!r}. Omit 'slug' to sync everything."
             )
-        _reject_archived(slug, "prep")
-    job = _create_job("prep", target, {"exercise_slug": slug or None}, _email(claims))
+        _reject_archived(slug, "sync")
+    job = _create_job("sync", target, {"exercise_slug": slug or None}, _email(claims))
     return Response(
         status_code=202, content_type="application/json", body=json.dumps(job)
     )
@@ -1039,7 +1060,7 @@ def post_exercise() -> Response:
     Writes the authored markdown to S3 under exercises/<slug>/ and returns
     presigned PUT URLs for the declared input files — the browser uploads
     those straight to S3 (same 6 MB-ceiling reasoning as the download route,
-    in reverse). The next prep job materializes the folder like any other.
+    in reverse). The next sync job materializes the folder like any other.
     """
     claims = _require_role(ROLE_ADMIN)  # mentors get 403 here
     body = app.current_event.json_body or {}
@@ -1059,7 +1080,7 @@ def post_exercise() -> Response:
     if not title:
         raise BadRequestError(
             "description.md must have an H1 heading naming the pipeline "
-            "(e.g. '# Task 07 – Router Basics'); prep derives the solution "
+            "(e.g. '# Task 07 – Router Basics'); sync derives the solution "
             "pipeline lookup from it."
         )
     task_config = _validate_task_config(body.get("task_config"))
@@ -1094,7 +1115,7 @@ def post_exercise() -> Response:
         "entity": "exercise",
         "slug": slug,
         "title": title,
-        "prep_status": "never_prepped",
+        "sync_status": "never_synced",
         "max_points": 10,
         "authored_in": "s3",
         "created_by": _email(claims),
@@ -1121,7 +1142,7 @@ def post_exercise() -> Response:
         content_type="application/json",
         body=json.dumps(
             {
-                "exercise": {"slug": slug, "title": title, "prep_status": "never_prepped"},
+                "exercise": {"slug": slug, "title": title, "sync_status": "never_synced"},
                 "uploads": uploads,
             }
         ),
@@ -1192,7 +1213,7 @@ def put_exercise(slug: str) -> dict[str, Any]:
       resources        NEW input files to add — presigned PUT URLs returned
       remove_resources input filenames to delete from S3
       archived         soft-delete flag; archived exercises are excluded from
-                       prep/grade jobs and flagged in the UI, nothing is deleted
+                       sync/grade jobs and flagged in the UI, nothing is deleted
     """
     claims = _require_role(ROLE_ADMIN)
     body = app.current_event.json_body or {}
@@ -1257,7 +1278,7 @@ def put_exercise(slug: str) -> dict[str, Any]:
     merged.setdefault("sk", "META")
     merged.setdefault("entity", "exercise")
     merged.setdefault("slug", slug)
-    merged.setdefault("prep_status", "never_prepped")
+    merged.setdefault("sync_status", "never_synced")
     merged.setdefault("max_points", 10)
     merged["updated_by"] = _email(claims)
     merged["updated_at"] = utc_now_iso()
@@ -1467,13 +1488,13 @@ def delete_student(slug: str) -> dict[str, Any]:
 def delete_exercise(slug: str) -> dict[str, Any]:
     """Hard-delete an exercise and every trace of it (admin only).
 
-    Removes all its S3 content (authored files, prep artifacts, mirrored
-    input files — all versions), the EXERCISE row, its prep-job rows and
+    Removes all its S3 content (authored files, sync artifacts, mirrored
+    input files — all versions), the EXERCISE row, its sync-job rows and
     lock, and scrubs its result out of every student's live report. When
     the folder still ships inside the container image, a minimal tombstone
     row (slug + deleted flag) replaces the EXERCISE row — without it the
-    image copy would resurrect the exercise on the next listing or prep.
-    409 while a prep involving it is queued or running.
+    image copy would resurrect the exercise on the next listing or sync.
+    409 while a sync involving it is queued or running.
     """
     claims = _require_role(ROLE_ADMIN)
     from evaluator.tasks import list_exercise_folders
@@ -1486,6 +1507,10 @@ def delete_exercise(slug: str) -> dict[str, Any]:
     in_image = slug in list_exercise_folders()
     if row is None and not in_image and slug not in _scan_authored_s3():
         raise NotFoundError(f"No exercise {slug!r}.")
+    _reject_active_job("sync", slug)
+    _reject_active_job("sync", "all")
+    # Pre-rename in-flight jobs still hold "prep" locks (the worker also still
+    # accepts them), so block deletion while one is queued or running too.
     _reject_active_job("prep", slug)
     _reject_active_job("prep", "all")
 
@@ -1507,8 +1532,8 @@ def delete_exercise(slug: str) -> dict[str, Any]:
         )
     else:
         table.delete_item(Key={"pk": f"EXERCISE#{slug}", "sk": "META"})
-    jobs = _delete_jobs_for_target("prep", slug)
-    table.delete_item(Key={"pk": lock_key("prep", slug), "sk": "META"})
+    jobs = _delete_jobs_for_target("sync", slug)
+    table.delete_item(Key={"pk": lock_key("sync", slug), "sk": "META"})
     reports = _scrub_exercise_from_reports(slug)
     return {
         "deleted": {

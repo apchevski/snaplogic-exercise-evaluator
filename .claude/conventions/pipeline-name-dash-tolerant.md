@@ -29,7 +29,7 @@ All three count as the same name. Nothing else is tolerated: case differs → mi
   - `evaluator/snaplogic_client.py::find_pipeline_asset_entry` — pipeline lookup by name.
   - `evaluator/snaplogic_client.py::find_triggered_task_entry` — Triggered Task lookup by name.
   - `evaluator/grade.py::_find_student_pipeline` — student-pipeline lookup during `/grade plan`.
-  - `evaluator/prep.py` — `solution_pipeline_path` drift checks in `_classify_csv_writer`, `_classify_triggered_task`, and `_reconcile_csv_writer`.
+  - `evaluator/sync.py` — `solution_pipeline_path` drift checks in `_classify_file_writer`, `_classify_triggered_task`, and `_reconcile_file_writer`.
 - When you add a new name-comparison site, route it through `names_match` / `pipeline_paths_match` rather than `==`.
 
 Related: [triggered-task-naming-strict](triggered-task-naming-strict.md) — the `<pipeline name> Task` convention enforces this rule for Triggered Task names.

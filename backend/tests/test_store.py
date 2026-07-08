@@ -36,7 +36,7 @@ def test_materialize_merges_image_and_s3_with_s3_winning(aws, evaluator_dirs, tm
     assert (dest / "store_slug_a" / "description.md").read_text(encoding="utf-8") == "# Task A"
     assert (dest / "store_slug_a" / "solution.json").exists()
     assert (dest / "store_slug_a" / "expected" / "out.csv").exists()
-    # The prep-reconciled task.json from S3 overrides the committed one.
+    # The sync-reconciled task.json from S3 overrides the committed one.
     assert '"from": "s3"' in (dest / "store_slug_a" / "task.json").read_text(encoding="utf-8")
 
 

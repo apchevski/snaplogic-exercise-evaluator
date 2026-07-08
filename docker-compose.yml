@@ -5,7 +5,7 @@
 # Three services, one image:
 #   api     — API Lambda on RIE port 9000
 #   worker  — Worker Lambda on RIE port 9001 (CMD override)
-#   cli     — evaluator CLI for prep / local-run (entrypoint override + bind mounts)
+#   cli     — evaluator CLI for sync / local-run (entrypoint override + bind mounts)
 #
 # Build:          docker compose build
 # API (up):       docker compose up api
@@ -13,7 +13,7 @@
 #                   -H 'Content-Type: application/json' \
 #                   -d '{"version":"2.0","routeKey":"GET /v1/health","rawPath":"/v1/health","headers":{},"requestContext":{"http":{"method":"GET","path":"/v1/health"}},"isBase64Encoded":false}'
 # Worker invoke:  docker compose run --rm worker
-# CLI:            docker compose run --rm cli python -m evaluator.prep survey
+# CLI:            docker compose run --rm cli python -m evaluator.sync survey
 
 services:
   api:
@@ -51,7 +51,7 @@ services:
     env_file:
       - .env
     environment:
-      # Pin the dirs to the bind mounts below so prep/grade writes land on
+      # Pin the dirs to the bind mounts below so sync/grade writes land on
       # the host repo (these match the code defaults; kept explicit).
       EVALUATOR_EXERCISES_DIR: /var/task/exercises
       EVALUATOR_TMP_DIR: /var/task/.tmp
@@ -59,7 +59,7 @@ services:
       # Keep the UI rebuild enabled so `evaluator.ui` can render dashboards.
       EVALUATOR_DISABLE_UI_REBUILD: ""
     volumes:
-      - ./exercises:/var/task/exercises   # prep writes solution.json / expected/
+      - ./exercises:/var/task/exercises   # sync writes solution.json / expected/
       - ./grades:/var/task/grades         # persistent per-student reports
       - ./frontend/dist:/var/task/frontend/dist  # generated dashboard
       - ./.tmp:/var/task/.tmp             # scratch / local-run handoff bundle

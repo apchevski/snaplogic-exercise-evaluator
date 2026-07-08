@@ -1,5 +1,5 @@
 # .dockerignore for the unified Dockerfile (Lambda image).
-# Keeps committed task.json in the image — cloud prep needs the
+# Keeps committed task.json in the image — cloud sync needs the
 # hand-authored triggered_task registrations as its starting point.
 
 .env
