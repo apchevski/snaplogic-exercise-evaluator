@@ -26,6 +26,18 @@ export class ApiError extends Error {
   }
 }
 
+// A 401 from any authenticated call means the Cognito session is dead — the id
+// token expired and could not be silently renewed (its refresh token lives 12h;
+// see infra/modules/cognito-auth). App.tsx registers a handler here that clears
+// the session so the UI drops back to the login screen, instead of every page
+// rendering a dead-end "Unauthorized" banner. 403 is deliberately excluded: it
+// means the signed-in user's role can't do this action, not that the session is
+// gone (e.g. a student hitting an admin-only route stays logged in).
+let unauthorizedHandler: (() => void) | null = null;
+export function onUnauthorized(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
+}
+
 async function request<T>(
   token: string,
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
@@ -42,6 +54,7 @@ async function request<T>(
   });
   const text = await resp.text();
   if (!resp.ok) {
+    if (resp.status === 401) unauthorizedHandler?.();
     let message = text || resp.statusText;
     try {
       message = JSON.parse(text).message ?? message;

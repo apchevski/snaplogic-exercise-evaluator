@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, pollJob } from "./api";
+import { api, ApiError, onUnauthorized, pollJob } from "./api";
 import type { Job } from "./types";
 
 function job(status: Job["status"]): Job {
@@ -73,6 +73,37 @@ describe("api.deleteStudent / api.deleteExercise", () => {
       "/v1/exercises/task_01",
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+});
+
+describe("onUnauthorized", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    onUnauthorized(null);
+  });
+
+  it("fires the handler on a 401 and still throws the ApiError", async () => {
+    const handler = vi.fn();
+    onUnauthorized(handler);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ message: "Unauthorized" }), { status: 401 })),
+    );
+
+    await expect(api.listStudents("expired")).rejects.toMatchObject({ status: 401 });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire the handler on a 403 (role forbidden, session still valid)", async () => {
+    const handler = vi.fn();
+    onUnauthorized(handler);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ message: "Forbidden" }), { status: 403 })),
+    );
+
+    await expect(api.listStudents("tok")).rejects.toMatchObject({ status: 403 });
+    expect(handler).not.toHaveBeenCalled();
   });
 });
 

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
-import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 
+import { onUnauthorized } from "./api";
 import { signOut, useDisplayName, useGroups } from "./auth";
 import { SettingsModal } from "./components/SettingsModal";
 import Dashboard from "./pages/Dashboard";
@@ -149,6 +150,9 @@ function Shell() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/students/:slug" element={<StudentDetail />} />
         <Route path="/exercises" element={<Exercises />} />
+        {/* /login only exists while signed out; a signed-in user who lands on
+            it (bookmark, back button) goes home. */}
+        <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Dashboard />} />
       </Routes>
     </>
@@ -157,6 +161,28 @@ function Shell() {
 
 export default function App() {
   const auth = useAuth();
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // A dead session must return the user to the login screen, not strand them on
+  // a page full of "Unauthorized" errors. react-oidc-context keeps the stale
+  // user in its store after the refresh token expires, so isAuthenticated stays
+  // true on its own — we have to clear it. Two triggers cover it: the access
+  // token expiring without a successful silent renew (fires even while the user
+  // sits idle), and any API call coming back 401 (catches clock skew or a token
+  // the backend rejects for other reasons). Both clear the session; removeUser
+  // flips isAuthenticated to false, dropping us to <Login> below.
+  useEffect(() => {
+    const expire = () => {
+      setSessionExpired(true);
+      void auth.removeUser();
+    };
+    const unsubscribe = auth.events.addAccessTokenExpired(expire);
+    onUnauthorized(expire);
+    return () => {
+      unsubscribe();
+      onUnauthorized(null);
+    };
+  }, [auth]);
 
   // Only take over the whole screen on the initial sign-in. A background
   // silent token renew (e.g. after a display-name change) also flips
@@ -174,11 +200,25 @@ export default function App() {
     );
   }
   if (!auth.isAuthenticated) {
-    return (
+    const login = (
       <Login
         onLogin={() => void auth.signinRedirect()}
-        error={auth.error?.message}
+        error={
+          sessionExpired
+            ? "Your session expired. Please sign in again."
+            : auth.error?.message
+        }
       />
+    );
+    // The login screen lives at /login; every other path redirects there while
+    // signed out (replace: no dead history entry behind the back button). The
+    // OIDC redirect_uri stays "/", so Cognito still returns to the dashboard
+    // after a successful sign-in — /login isn't a registered callback URL.
+    return (
+      <Routes>
+        <Route path="/login" element={login} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
     );
   }
   return <Shell />;
