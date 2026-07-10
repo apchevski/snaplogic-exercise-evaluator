@@ -4,12 +4,14 @@ Single DynamoDB table (see infra/modules/data). Item shapes:
 
     STUDENT#<slug>  / META            entity="student", slug — student card
     STUDENT#<slug>  / REPORT#<ver>    one row per grading run (history)
+    STUDENT#<slug>  / AUDIT#<ts>#<r>  one immutable row per manual report edit
     JOB#<id>        / META            entity="job", slug=<id> — job lifecycle
     LOCK#<key>      / META            conditional-put dedupe lock, ttl 30 min
     EXERCISE#<slug> / META            entity="exercise", slug — sync status
 
 GSI ``gsi1`` is sparse on (entity, slug): only items that carry both
-attributes are listable, which keeps REPORT/LOCK rows out of list queries.
+attributes are listable, which keeps REPORT/AUDIT/LOCK rows out of list
+queries.
 """
 from __future__ import annotations
 

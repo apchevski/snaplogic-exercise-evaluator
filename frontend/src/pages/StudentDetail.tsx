@@ -7,10 +7,23 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/table";
 import { TaskCard, tierForRatio } from "../components/TaskCard";
-import type { Exercise, Job, Report, StudentMeta, TaskResult } from "../types";
+import {
+  TaskEvaluationEditor,
+  type TaskEvaluationPayload,
+} from "../components/TaskEvaluationEditor";
+import type {
+  Exercise,
+  Job,
+  Report,
+  ReportEdit,
+  ReportEditChange,
+  StudentMeta,
+  TaskResult,
+} from "../types";
 
-// Edit target for the AI-written text: the report's Overall paragraph or one
-// task's summary. Saving PATCHes the stored report in place — no re-grade.
+// Edit target for the AI-written evaluation: the report's Overall paragraph,
+// or one task's whole evaluation (summary + deductions + bonus). Saving
+// PATCHes the stored report in place — no re-grade.
 type EditTarget = { kind: "overall" } | { kind: "task"; slug: string };
 
 function PencilIcon() {
@@ -29,6 +42,39 @@ function PencilIcon() {
       <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
     </svg>
   );
+}
+
+function formatEditTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** "task:task_03" → "task_03"; "overall" → "Overall summary". */
+function editTargetLabel(target: string): string {
+  return target === "overall"
+    ? "Overall summary"
+    : target.startsWith("task:")
+      ? target.slice("task:".length)
+      : target;
+}
+
+function describeChange(c: ReportEditChange): string {
+  switch (c.field) {
+    case "points":
+      return `points ${c.from ?? "—"} → ${c.to ?? "—"}`;
+    case "deductions":
+      return `deductions ${c.from} → ${c.to}`;
+    case "summary":
+      return "summary edited";
+    case "bonus":
+      return "bonus updated";
+    case "overall_summary":
+      return "overall summary edited";
+    default:
+      return c.field;
+  }
 }
 
 export default function StudentDetail() {
@@ -55,6 +101,10 @@ export default function StudentDetail() {
   const [gradeConfirm, setGradeConfirm] = useState<
     { kind: "all" } | { kind: "task"; slug: string; regrade: boolean } | null
   >(null);
+  // Audit log (admin/mentor only); lazy-loaded when the panel is expanded.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [edits, setEdits] = useState<ReportEdit[] | null>(null);
+  const [editsError, setEditsError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -79,6 +129,23 @@ export default function StudentDetail() {
       .then(({ exercises }) => setExercises(exercises))
       .catch(() => setExercises([])); // "not graded" cards degrade gracefully
   }, [token]);
+
+  const loadEdits = useCallback(async () => {
+    setEditsError(null);
+    try {
+      const { edits } = await api.getReportEdits(token, slug);
+      setEdits(edits);
+    } catch (e) {
+      setEditsError(e instanceof Error ? e.message : String(e));
+      setEdits([]);
+    }
+  }, [token, slug]);
+
+  const toggleHistory = () => {
+    const next = !historyOpen;
+    setHistoryOpen(next);
+    if (next && edits === null) void loadEdits();
+  };
 
   const name = student?.display_name ?? report?.student ?? slug;
 
@@ -116,9 +183,14 @@ export default function StudentDetail() {
 
   const gradeAll = useCallback(() => runGrading("__all__"), [runGrading]);
 
-  const startEdit = (target: EditTarget, currentText: string) => {
-    setEditing(target);
+  const startOverallEdit = (currentText: string) => {
+    setEditing({ kind: "overall" });
     setDraft(currentText);
+    setEditError(null);
+  };
+
+  const startTaskEdit = (taskSlug: string) => {
+    setEditing({ kind: "task", slug: taskSlug });
     setEditError(null);
   };
 
@@ -127,21 +199,20 @@ export default function StudentDetail() {
     setEditError(null);
   };
 
-  const saveEdit = async () => {
-    if (!editing) return;
-    const text = draft.trim();
-    if (!text) return;
+  // Push a report edit and swap in the returned state. `payload` is either the
+  // overall summary or a task's edited fields (summary/differences/bonus).
+  const applyEdit = async (
+    payload: Parameters<typeof api.updateStudentReport>[2],
+  ) => {
     setSavingEdit(true);
     setEditError(null);
     try {
-      const payload =
-        editing.kind === "overall"
-          ? { overall_summary: text }
-          : { task: editing.slug, summary: text };
       const updated = await api.updateStudentReport(token, slug, payload);
       setStudent(updated.student);
       setReport(updated.report);
       setEditing(null);
+      // Keep the audit panel current if it's already been opened.
+      if (edits !== null) void loadEdits();
     } catch (e) {
       setEditError(
         `Saving failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -149,6 +220,17 @@ export default function StudentDetail() {
     } finally {
       setSavingEdit(false);
     }
+  };
+
+  const saveOverall = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    await applyEdit({ overall_summary: text });
+  };
+
+  const saveTaskEval = async (payload: TaskEvaluationPayload) => {
+    if (editing?.kind !== "task") return;
+    await applyEdit({ task: editing.slug, ...payload });
   };
 
   if (loading) return <main className="page">Loading…</main>;
@@ -194,8 +276,9 @@ export default function StudentDetail() {
     report?.student_project_path ?? student?.student_project_path;
   const gradedAt = report?.graded_at ?? student?.graded_at;
 
-  // Shared inline editor rendered in place of whichever text is being edited.
-  const editorNode = (
+  // Overall-summary editor: a single textarea. Task evaluations use the richer
+  // TaskEvaluationEditor (summary + deductions + bonus) rendered per-card.
+  const overallEditorNode = (
     <div className="summary-editor">
       <textarea
         value={draft}
@@ -207,7 +290,7 @@ export default function StudentDetail() {
       <div className="editor-actions">
         <button
           className="btn small primary"
-          onClick={() => void saveEdit()}
+          onClick={() => void saveOverall()}
           disabled={savingEdit || !draft.trim()}
         >
           {savingEdit ? "Saving…" : "Save"}
@@ -234,7 +317,15 @@ export default function StudentDetail() {
     ) : null;
 
   const taskEditor = (t: TaskResult) =>
-    editing?.kind === "task" && editing.slug === t.slug ? editorNode : undefined;
+    editing?.kind === "task" && editing.slug === t.slug ? (
+      <TaskEvaluationEditor
+        task={t}
+        saving={savingEdit}
+        error={editError}
+        onSave={(payload) => void saveTaskEval(payload)}
+        onCancel={cancelEdit}
+      />
+    ) : undefined;
 
   return (
     <main className="page">
@@ -288,7 +379,7 @@ export default function StudentDetail() {
             </div>
           )}
           {editing?.kind === "overall" ? (
-            editorNode
+            overallEditorNode
           ) : report ? (
             <div className="overall-row">
               {overallText ? (
@@ -297,7 +388,7 @@ export default function StudentDetail() {
                 <p className="overall muted">No overall summary yet.</p>
               )}
               {editPencil("Edit overall summary", () =>
-                startEdit({ kind: "overall" }, overallText),
+                startOverallEdit(overallText),
               )}
             </div>
           ) : (
@@ -335,17 +426,12 @@ export default function StudentDetail() {
                 <TaskCard
                   key={t.slug}
                   task={t}
-                  summaryEditor={taskEditor(t)}
+                  editor={taskEditor(t)}
                   action={
                     canGrade ? (
                       <span className="actions-cell">
                         {jobs[t.slug] && <StatusPill job={jobs[t.slug]} kind="grade" />}
-                        {editPencil("Edit summary", () =>
-                          startEdit(
-                            { kind: "task", slug: t.slug },
-                            t.summary || t.reason || "",
-                          ),
-                        )}
+                        {editPencil("Edit evaluation", () => startTaskEdit(t.slug))}
                         <button
                           className="btn small"
                           onClick={() =>
@@ -400,6 +486,49 @@ export default function StudentDetail() {
           )}
         </div>
       </Panel>
+      {canGrade && report && (
+        <Panel
+          title="Edit history"
+          hint="Every manual change to this report — who edited what, and when. AI-only evaluations never appear here."
+        >
+          <div className="panel-body">
+            <button className="btn small" onClick={toggleHistory}>
+              {historyOpen ? "Hide edit history" : "Show edit history"}
+            </button>
+            {historyOpen && (
+              <div className="edit-history">
+                {editsError && <div className="job-error">{editsError}</div>}
+                {edits === null && !editsError && (
+                  <p className="summary muted">Loading…</p>
+                )}
+                {edits !== null && edits.length === 0 && !editsError && (
+                  <p className="summary muted">
+                    No manual edits — this report is exactly as graded.
+                  </p>
+                )}
+                {edits !== null && edits.length > 0 && (
+                  <ul className="edit-list">
+                    {edits.map((e, i) => (
+                      <li key={i} className="edit-entry">
+                        <div className="edit-entry-head">
+                          <span className="edit-target">{editTargetLabel(e.target)}</span>
+                          <span className="edit-when">{formatEditTime(e.edited_at)}</span>
+                        </div>
+                        <div className="edit-by">by {e.edited_by}</div>
+                        <ul className="edit-changes">
+                          {e.changes.map((c, j) => (
+                            <li key={j}>{describeChange(c)}</li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        </Panel>
+      )}
       {gradeConfirm && canGrade && (
         <ConfirmModal
           title={

@@ -76,6 +76,71 @@ describe("api.deleteStudent / api.deleteExercise", () => {
   });
 });
 
+describe("api.updateStudentReport", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("PATCHes the report with a direct points override in the body", async () => {
+    const payload = { student: { slug: "jane-doe" }, report: { points_earned: 3 } };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.updateStudentReport("tok", "jane-doe", { task: "task_a", points: 3 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/students/jane-doe/report",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ task: "task_a", points: 3 }),
+      }),
+    );
+  });
+
+  it("sends points: null to clear an override", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.updateStudentReport("tok", "jane-doe", { task: "task_a", points: null });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/students/jane-doe/report",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ task: "task_a", points: null }),
+      }),
+    );
+  });
+});
+
+describe("api.getReportEdits", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("GETs the audit-log route and returns the parsed edits", async () => {
+    const payload = {
+      edits: [
+        {
+          edited_by: "m@x.io",
+          edited_at: "2026-07-10T18:30:00+00:00",
+          target: "task:task_a",
+          changes: [{ field: "points", from: 10, to: 4 }],
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await api.getReportEdits("tok", "jane-doe");
+
+    expect(out).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/students/jane-doe/report/edits",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ Authorization: "Bearer tok" }),
+      }),
+    );
+  });
+});
+
 describe("onUnauthorized", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

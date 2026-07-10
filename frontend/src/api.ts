@@ -8,10 +8,12 @@ import type {
   CreateExerciseResult,
   DeleteExerciseSummary,
   DeleteStudentSummary,
+  Difference,
   Exercise,
   ExerciseDetail,
   Job,
   Report,
+  ReportEdit,
   StudentMeta,
   UpdateExercisePayload,
 } from "./types";
@@ -89,18 +91,37 @@ export const api = {
       `/v1/students/${encodeURIComponent(slug)}`,
     ),
 
-  // Rewrite AI-written report text in place (overall summary or one task's
-  // summary) — no re-grade, no AI cost. Returns the same shape as getStudent.
+  // Edit a graded report in place — no re-grade, no AI cost. Either the
+  // report's overall summary, or one task's summary / deductions (differences)
+  // / bonus answer / points. Editing differences recomputes that task's points
+  // unless a manual override is in force; `points` (int) pins the score,
+  // `points: null` clears the override. Returns the same shape as getStudent.
   updateStudentReport: (
     token: string,
     slug: string,
-    payload: { overall_summary?: string; task?: string; summary?: string },
+    payload: {
+      overall_summary?: string;
+      task?: string;
+      summary?: string;
+      differences?: Difference[];
+      bonus_question_answer?: string | null;
+      points?: number | null;
+    },
   ) =>
     request<{ student: StudentMeta; report: Report }>(
       token,
       "PATCH",
       `/v1/students/${encodeURIComponent(slug)}/report`,
       payload,
+    ),
+
+  // Immutable audit log of every manual edit to this student's report
+  // (admin/mentor only; newest first). Powers the "Edit history" panel.
+  getReportEdits: (token: string, slug: string) =>
+    request<{ edits: ReportEdit[] }>(
+      token,
+      "GET",
+      `/v1/students/${encodeURIComponent(slug)}/report/edits`,
     ),
 
   listExercises: (token: string) =>
