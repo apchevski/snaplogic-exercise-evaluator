@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { api, pollJob } from "../api";
-import { useCanGrade, useToken } from "../auth";
+import { useCanGrade, useIsStudentOnly, useToken } from "../auth";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/table";
@@ -36,6 +36,8 @@ export default function StudentDetail() {
   const token = useToken();
   // Students get the same report, minus every action (backend-enforced too).
   const canGrade = useCanGrade();
+  // A student has no dashboard to go back to — this is their only page.
+  const isStudentOnly = useIsStudentOnly();
   const [student, setStudent] = useState<StudentMeta | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [exercises, setExercises] = useState<Exercise[]>([]);
@@ -154,9 +156,11 @@ export default function StudentDetail() {
     return (
       <main className="page">
         <div className="error-banner">{error}</div>
-        <Link className="back-link" to="/">
-          ← Back to dashboard
-        </Link>
+        {!isStudentOnly && (
+          <Link className="back-link" to="/">
+            ← Back to dashboard
+          </Link>
+        )}
       </main>
     );
   }
@@ -243,9 +247,11 @@ export default function StudentDetail() {
           Sync {needsSyncCount === 1 ? "it" : "them"} on the Exercises page, then regrade.
         </div>
       )}
-      <Link className="back-link" to="/">
-        ← Back to dashboard
-      </Link>
+      {!isStudentOnly && (
+        <Link className="back-link" to="/">
+          ← Back to dashboard
+        </Link>
+      )}
       <Panel
         title={`Grade Summary — ${name}`}
         hint="Total points, per-verdict counts, and the overall summary from the latest grading run."

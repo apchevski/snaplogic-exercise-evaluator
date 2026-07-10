@@ -184,8 +184,13 @@ history.
   hides buttons — the backend is the real gate).
 - **Role matrix:** admins do everything (sync, exercise authoring/archiving,
   hard deletes); mentors grade, register students, and edit report text;
-  students are read-only — dashboards, summaries, descriptions, file downloads,
-  with every action (and `notes.md`, i.e. instructor hints) 403'd server-side.
+  students are read-only **and scoped to their own grades** — a signed-in
+  student lands on `/students/<own-slug>` and sees only their own card
+  (`GET /v1/students` returns just that card; any other student's detail or
+  reports 403s), plus exercise descriptions and file downloads. Every action
+  (and `notes.md`, i.e. instructor hints) is 403'd server-side. The email
+  stored on the card at registration is what links a student's login to their
+  card.
 
 ## 6. Key flows
 

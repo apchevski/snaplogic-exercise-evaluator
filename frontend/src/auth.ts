@@ -70,6 +70,19 @@ export function useCanGrade(): boolean {
   return groups.includes("admin") || groups.includes("mentor");
 }
 
+/** A pure student — in the `student` group and nothing more privileged. Such
+ * users are confined to their own grades page (no roster, no exercises tab);
+ * anyone who is also admin/mentor gets the full app. The backend enforces the
+ * same scoping (GET /v1/students returns only their card) — this is cosmetic. */
+export function useIsStudentOnly(): boolean {
+  const groups = useGroups();
+  return (
+    groups.includes("student") &&
+    !groups.includes("admin") &&
+    !groups.includes("mentor")
+  );
+}
+
 /** Cognito has no end_session in some pool configs — log out via the hosted UI. */
 export function signOut(removeUser: () => Promise<void>): void {
   const domain = (import.meta.env.VITE_COGNITO_DOMAIN ?? "").replace(/\/$/, "");

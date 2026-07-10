@@ -8,7 +8,9 @@ Defense layers (outer → inner):
 
        | Action                            | admin | mentor | student |
        |-----------------------------------|-------|--------|---------|
-       | GET  students / reports / exercises / resources | ✅ | ✅ | ✅ |
+       | GET  /v1/exercises / resources    |  ✅   |  ✅    |  ✅ |
+       | GET  /v1/students (list)          |  ✅   |  ✅    |  ✅ own card only |
+       | GET  /v1/students/{slug} (+ /reports) | ✅ | ✅    |  ✅ own card only (else 403) |
        | GET  /v1/config, /v1/exercises/{slug} (authored content incl. notes.md), job polling | ✅ | ✅ | ❌ 403 |
        | POST /v1/students                 |  ✅   |  ✅    |  ❌ 403 |
        | POST /v1/gradings                 |  ✅   |  ✅    |  ❌ 403 |
@@ -21,9 +23,14 @@ Defense layers (outer → inner):
 
    `student` is the read-only role: members are created by POST /v1/students
    when a registration carries an email (Cognito emails the temporary
-   password; the hosted UI forces a change on first sign-in). They see the
-   same dashboards mentors see — grades and exercises — but can start or
-   change nothing, and never see instructor notes.
+   password; the hosted UI forces a change on first sign-in). A student is
+   scoped to their OWN grades: the list endpoint returns only the card their
+   login owns, and the per-student reads 403 on anyone else's slug — they
+   never see the roster or another student's grades. They can also browse the
+   exercise list (descriptions + input files) but start or change nothing,
+   and never see instructor notes. The link between a Cognito login and its
+   card is the email: it is stored (lowercased) on the STUDENT card created
+   alongside the login, and matched against the caller's email claim here.
 
 POSTs never do the work inline — they write a JOB item + an SQS message and
 return 202; the worker Lambda owns execution. A conditional-put LOCK item
@@ -110,6 +117,40 @@ def _require_role(*allowed: str) -> dict[str, Any]:
             403, f"Requires one of roles {sorted(allowed)}; token has {sorted(groups)}."
         )
     return claims
+
+
+def _is_student_only(claims: dict[str, Any]) -> bool:
+    """True for a caller in the read-only `student` group and nothing more
+    privileged. Such users are scoped to their own STUDENT card; an
+    admin/mentor (even one who is also in `student`) sees everything."""
+    groups = _groups(claims)
+    return ROLE_STUDENT in groups and not groups.intersection({ROLE_ADMIN, ROLE_MENTOR})
+
+
+def _own_student_slug(claims: dict[str, Any]) -> str | None:
+    """The STUDENT card slug whose login email matches the caller, or None.
+
+    A student login is created together with its card (POST /v1/students with
+    an email), which stores that email lowercased on the card — so the email
+    claim is the link between the Cognito identity and the dashboard row.
+    """
+    email = _email(claims).strip().lower()
+    if not email or email == "unknown":
+        return None
+    resp = dynamo_table().query(
+        IndexName="gsi1", KeyConditionExpression=Key("entity").eq("student")
+    )
+    for item in resp.get("Items", []):
+        if str(item.get("email") or "").strip().lower() == email:
+            return str(item.get("slug"))
+    return None
+
+
+def _require_own_card(claims: dict[str, Any], slug: str) -> None:
+    """Confine a student to their own card. Admins and mentors may read any
+    student's card; a student reading anyone else's slug gets a 403."""
+    if _is_student_only(claims) and _own_student_slug(claims) != slug:
+        raise ServiceError(403, "Students may only view their own grades.")
 
 
 def _ip_allowed(source_ip: str) -> bool:
@@ -405,7 +446,7 @@ def get_config() -> dict[str, Any]:
 
 @app.get("/v1/students")
 def list_students() -> dict[str, Any]:
-    _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
+    claims = _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
     resp = dynamo_table().query(
         IndexName="gsi1", KeyConditionExpression=Key("entity").eq("student")
     )
@@ -413,12 +454,20 @@ def list_students() -> dict[str, Any]:
         (public_item(i) for i in resp.get("Items", [])),
         key=lambda s: str(s.get("display_name", "")).lower(),
     )
+    if _is_student_only(claims):
+        # A student never sees the roster — only the card their login owns
+        # (matched by email). This drives the SPA's redirect to /students/<own>.
+        email = _email(claims).strip().lower()
+        students = [
+            s for s in students if str(s.get("email") or "").strip().lower() == email
+        ]
     return {"students": students}
 
 
 @app.get("/v1/students/<slug>")
 def get_student(slug: str) -> dict[str, Any]:
-    _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
+    claims = _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
+    _require_own_card(claims, slug)
     resp = dynamo_table().get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"})
     item = resp.get("Item")
     if not item:
@@ -438,7 +487,8 @@ def get_student(slug: str) -> dict[str, Any]:
 
 @app.get("/v1/students/<slug>/reports")
 def list_student_reports(slug: str) -> dict[str, Any]:
-    _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
+    claims = _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
+    _require_own_card(claims, slug)
     resp = dynamo_table().query(
         KeyConditionExpression=Key("pk").eq(f"STUDENT#{slug}")
         & Key("sk").begins_with("REPORT#"),
