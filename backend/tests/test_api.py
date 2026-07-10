@@ -1560,6 +1560,138 @@ def test_edit_differences_on_output_mismatch_fail_allowed(aws):
     assert stored["tasks"][0]["points"] == 9
 
 
+def test_points_override_sticks_over_deductions(aws):
+    slug, json_key, _ = _seed_student_report(aws, slug="ovr", name="Ovr")
+    # Directly pin task_a to 3/10 — the mentor's call; 10 − Σ is bypassed.
+    resp = _call(
+        api_event(
+            "PATCH", f"/v1/students/{slug}/report",
+            groups=("mentor",), email="m@x.io",
+            body={"task": "task_a", "points": 3},
+        )
+    )
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    task_a = next(t for t in data["report"]["tasks"] if t["slug"] == "task_a")
+    assert task_a["points"] == 3
+    assert task_a["points_manual"] is True
+    assert data["report"]["points_earned"] == 3  # task_b MISSING → 0
+
+    # A later deduction edit (no points key) must NOT recompute — the manual
+    # override stays pinned.
+    resp2 = _call(
+        api_event(
+            "PATCH", f"/v1/students/{slug}/report",
+            body={
+                "task": "task_a",
+                "differences": [{"description": "Nit.", "points_deducted": 2}],
+            },
+        )
+    )
+    assert resp2["statusCode"] == 200
+    stored = json.loads(
+        aws["s3"].get_object(Bucket=os.environ["DATA_BUCKET"], Key=json_key)["Body"].read()
+    )
+    a = next(t for t in stored["tasks"] if t["slug"] == "task_a")
+    assert a["points"] == 3  # still pinned despite the −2 deduction
+    assert a["points_manual"] is True
+
+
+def test_points_override_on_missing_task(aws):
+    slug, json_key, _ = _seed_student_report(aws, slug="ovr-miss", name="Ovr Miss")
+    # A MISSING task can still be awarded partial credit by a human.
+    resp = _call(
+        api_event(
+            "PATCH", f"/v1/students/{slug}/report",
+            groups=("admin",), email="a@x.io",
+            body={"task": "task_b", "points": 5},
+        )
+    )
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    task_b = next(t for t in data["report"]["tasks"] if t["slug"] == "task_b")
+    assert task_b["points"] == 5
+    assert task_b["points_manual"] is True
+    # Verdict/status stay MISSING — only the points move.
+    assert task_b["status"] == "missing"
+    assert task_b.get("verdict") is None
+    # task_a (10) + task_b (5) → 15.
+    assert data["report"]["points_earned"] == 15
+    assert data["student"]["points_earned"] == 15
+    stored = json.loads(
+        aws["s3"].get_object(Bucket=os.environ["DATA_BUCKET"], Key=json_key)["Body"].read()
+    )
+    assert stored["points_earned"] == 15
+
+
+def test_clear_points_override_recomputes(aws):
+    slug, _, _ = _seed_student_report(aws, slug="ovr-clear", name="Ovr Clear")
+
+    def patch(body):
+        return _call(api_event("PATCH", f"/v1/students/{slug}/report", body=body))
+
+    assert patch({"task": "task_a", "points": 2})["statusCode"] == 200
+    # null clears the override → back to the computed value (no deductions → 10).
+    data = _body(patch({"task": "task_a", "points": None}))
+    task_a = next(t for t in data["report"]["tasks"] if t["slug"] == "task_a")
+    assert task_a["points"] == 10
+    assert "points_manual" not in task_a
+    assert data["report"]["points_earned"] == 10
+
+
+def test_invalid_points_override_400(aws):
+    slug, _, _ = _seed_student_report(aws, slug="ovr-bad", name="Ovr Bad")
+    resp = _call(
+        api_event(
+            "PATCH", f"/v1/students/{slug}/report",
+            body={"task": "task_a", "points": "abc"},
+        )
+    )
+    assert resp["statusCode"] == 400
+
+
+def test_report_edits_are_audit_logged(aws):
+    slug, _, _ = _seed_student_report(aws, slug="audit-me", name="Audit Me")
+    # A task edit (summary + points) and an overall edit → two audit rows.
+    assert _call(
+        api_event(
+            "PATCH", f"/v1/students/{slug}/report",
+            groups=("mentor",), email="m1@x.io",
+            body={"task": "task_a", "summary": "Human summary.", "points": 4},
+        )
+    )["statusCode"] == 200
+    assert _call(
+        api_event(
+            "PATCH", f"/v1/students/{slug}/report",
+            groups=("admin",), email="a2@x.io",
+            body={"overall_summary": "Human overall."},
+        )
+    )["statusCode"] == 200
+
+    edits = _body(
+        _call(api_event("GET", f"/v1/students/{slug}/report/edits", groups=("mentor",)))
+    )["edits"]
+    assert len(edits) == 2
+    # Rows may share a one-second timestamp, so key by target rather than order.
+    by_target = {e["target"]: e for e in edits}
+    task_edit = by_target["task:task_a"]
+    assert task_edit["edited_by"] == "m1@x.io"
+    assert {c["field"] for c in task_edit["changes"]} == {"summary", "points"}
+    pts = next(c for c in task_edit["changes"] if c["field"] == "points")
+    assert pts["from"] == 10 and pts["to"] == 4
+    overall_edit = by_target["overall"]
+    assert overall_edit["edited_by"] == "a2@x.io"
+    assert overall_edit["changes"][0]["field"] == "overall_summary"
+
+
+def test_report_edits_forbidden_for_student(aws):
+    slug, _, _ = _seed_student_report(aws, slug="audit-priv", name="Audit Priv")
+    resp = _call(
+        api_event("GET", f"/v1/students/{slug}/report/edits", groups=("student",))
+    )
+    assert resp["statusCode"] == 403
+
+
 def test_list_exercises_s3_description_wins_over_image_copy(aws, evaluator_dirs):
     """After a UI edit the S3 copy is canonical — a stale image copy of the
     same folder must not shadow it."""

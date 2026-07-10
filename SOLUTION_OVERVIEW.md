@@ -133,6 +133,11 @@ IAM/OIDC, CloudWatch, Budgets).
   student login), registration stamps.
 - **REPORT history rows** — one per grading run, pointing at the immutable S3
   version; scoped runs record their `tasks_scope`.
+- **AUDIT rows** (`AUDIT#<ts>#<rand>`) — one immutable row per manual report
+  edit (who, target, `field: from → to`, when), appended by the PATCH route and
+  read back via `GET /v1/students/{slug}/report/edits` for the Edit-history
+  panel. Like REPORT rows, they omit the `entity`/`slug` GSI keys so they stay
+  out of list queries.
 - **JOB items** — grade/sync lifecycle (queued → running → done/failed), cost
   and token usage.
 - **Locks** — conditional-put, TTL 30 min, one per student/sync target.
@@ -206,9 +211,13 @@ topo-sorted snap flows + both raw pipeline JSONs → Python recomputes points �
 updated, row refreshes live. Full runs regenerate the AI **Overall** summary;
 scoped runs merge into the existing report and leave it untouched. Per-task
 **Regrade** and $0 inline **evaluation editing** (PATCH — overall summary, or a
-task's summary / deductions / bonus answer; editing deductions recomputes that
-task's points as `10 − Σ` and the student total, verdict untouched) work on the
-same stored report.
+task's summary / deductions / bonus answer / points; editing deductions
+recomputes that task's points as `10 − Σ` and the student total, verdict
+untouched) work on the same stored report. A mentor/admin may also **override
+points directly** (`points` int), which deliberately supersedes `10 − Σ` — the
+one place the "same mistake = same points" invariant yields to human judgment;
+it's flagged `points_manual`, allowed on any task (MISSING included), cleared by
+a re-grade, and — like every edit — recorded in the AUDIT rows.
 
 **Sync** (admin, $0 — no AI): per exercise or Sync All. The worker synthesizes
 `task.json` from the row's `task_config`, fetches the solution pipeline and its

@@ -12,6 +12,7 @@ Defense layers (outer → inner):
        | GET  /v1/students (list)          |  ✅   |  ✅    |  ✅ own card only |
        | GET  /v1/students/{slug} (+ /reports) | ✅ | ✅    |  ✅ own card only (else 403) |
        | GET  /v1/config, /v1/exercises/{slug} (authored content incl. notes.md), job polling | ✅ | ✅ | ❌ 403 |
+       | GET  /v1/students/{slug}/report/edits (audit log) | ✅ | ✅ | ❌ 403 |
        | POST /v1/students                 |  ✅   |  ✅    |  ❌ 403 |
        | POST /v1/gradings                 |  ✅   |  ✅    |  ❌ 403 |
        | PATCH /v1/students/{slug}/report  |  ✅   |  ✅    |  ❌ 403 |
@@ -1030,6 +1031,61 @@ def _clean_difference(d: Any) -> dict[str, Any]:
     }
 
 
+def _derived_points(task: dict[str, Any]) -> int | None:
+    """Points a task carries with no manual override in force.
+
+    AI-judged → 10 − Σ deductions (the judge's invariant); a procedural FAIL →
+    0; a MISSING / needs-sync task → None (unscored). Used when a mentor clears
+    a manual override to fall back to the computed value.
+    """
+    from evaluator.grade import MAX_POINTS_PER_EXERCISE
+
+    if _task_is_ai_judged(task):
+        total = sum(int(d.get("points_deducted") or 0) for d in (task.get("differences") or []))
+        return max(0, MAX_POINTS_PER_EXERCISE - total)
+    if task.get("verdict") == "fail":
+        return 0
+    return None
+
+
+def _audit_text(val: Any, limit: int = 160) -> str | None:
+    """A compact snapshot of a text field for the audit log (trimmed)."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if len(s) > limit:
+        s = s[: limit - 1].rstrip() + "…"
+    return s or None
+
+
+def _append_report_audit(
+    slug: str, editor: str, when: str, target: str, changes: list[dict[str, Any]]
+) -> None:
+    """Append one immutable audit row for a report edit; no-op if nothing
+    actually changed.
+
+    Rows live under the student's partition as ``AUDIT#<ts>#<rand>`` (sortable
+    by time, unique per edit). They deliberately omit the ``entity``/``slug``
+    GSI keys so they stay out of the student/exercise list queries — the same
+    trick REPORT# rows use (see common.py). None values inside ``changes`` are
+    fine here: they are plain attributes, not GSI keys.
+    """
+    if not changes:
+        return
+    dynamo_table().put_item(
+        Item=to_dynamo(
+            {
+                "pk": f"STUDENT#{slug}",
+                "sk": f"AUDIT#{when}#{uuid.uuid4().hex[:8]}",
+                "edited_by": editor,
+                "edited_at": when,
+                "target": target,
+                "changes": changes,
+            }
+        )
+    )
+
+
 @app.patch("/v1/students/<slug>/report")
 def patch_student_report(slug: str) -> dict[str, Any]:
     """Edit a graded report in place (admin or mentor) — no re-grade, no AI cost.
@@ -1042,19 +1098,31 @@ def patch_student_report(slug: str) -> dict[str, Any]:
       summary                  replacement summary text
       differences              full replacement list of deductions + notes;
                                each item is {area, description, points_deducted,
-                               rule_source, reasoning}. The task's points are
+                               rule_source, reasoning}. Unless a manual points
+                               override is in force, the task's points are
                                recomputed as max(0, 10 - Σ points_deducted) —
                                the same invariant the AI judge uses — and the
                                student's points_earned total is refreshed.
       bonus_question_answer    replacement bonus text, or null/"" to clear it
+      points                   direct points OVERRIDE (int 0..10): pins the
+                               score, flags the task points_manual=True, and
+                               deliberately bypasses 10 − Σ (human judgment
+                               wins). null clears the override and falls back to
+                               the computed value. Allowed on ANY task — even a
+                               MISSING or name-mismatch one — so a mentor can
+                               award partial credit; the verdict/status (a
+                               hard-gate outcome) is still never changed.
 
     'differences' and 'bonus_question_answer' apply only to an AI-judged task
     (see _task_is_ai_judged): a MISSING / NEEDS-SYNC task or a procedural FAIL
-    (e.g. name mismatch) has a fixed score and no deductions to edit.
+    (e.g. name mismatch) has a fixed score and no deductions to edit — but its
+    points can still be overridden directly.
     Rewrites the latest stored report.json at its existing S3 key (and the
     report.md Overall section for an overall edit); verdicts are never changed.
-    Any of these edits is overwritten by the next re-grade of that task, which
-    is the intended semantics: new grading, new evaluation.
+    Every applied change is appended to an immutable audit log (AUDIT# rows,
+    read back via GET .../report/edits). Any of these edits is overwritten by
+    the next re-grade of that task, which is the intended semantics: new
+    grading, new evaluation.
     """
     from evaluator.grade import MAX_POINTS_PER_EXERCISE, _sum_points
 
@@ -1071,7 +1139,8 @@ def patch_student_report(slug: str) -> dict[str, Any]:
     edit_summary = "summary" in body
     edit_diffs = "differences" in body
     edit_bonus = "bonus_question_answer" in body
-    if (edit_summary or edit_diffs or edit_bonus) and not task_slug:
+    edit_points = "points" in body
+    if (edit_summary or edit_diffs or edit_bonus or edit_points) and not task_slug:
         raise BadRequestError("Editing a task needs a non-empty 'task' slug.")
 
     new_summary: str | None = None
@@ -1093,14 +1162,31 @@ def patch_student_report(slug: str) -> dict[str, Any]:
         # null or "" clears the bonus answer; any other value is stored as text.
         new_bonus = None if raw_bonus is None else (str(raw_bonus).strip() or None)
 
+    # A manual points override: an int pins the score (10 − Σ is bypassed on
+    # purpose), null clears the override and falls back to the computed value.
+    override_points: int | None = None
+    clear_override = False
+    if edit_points:
+        raw_points = body.get("points")
+        if raw_points is None:
+            clear_override = True
+        else:
+            try:
+                override_points = int(raw_points)
+            except (TypeError, ValueError):
+                raise BadRequestError(
+                    "points must be an integer 0..10, or null to clear the override."
+                )
+            override_points = max(0, min(override_points, MAX_POINTS_PER_EXERCISE))
+
     if new_overall is None and not task_slug:
         raise BadRequestError(
             "Body must include 'overall_summary' and/or a task edit."
         )
-    if task_slug and not (edit_summary or edit_diffs or edit_bonus):
+    if task_slug and not (edit_summary or edit_diffs or edit_bonus or edit_points):
         raise BadRequestError(
-            "A task edit needs 'summary', 'differences', and/or "
-            "'bonus_question_answer'."
+            "A task edit needs 'summary', 'differences', 'bonus_question_answer', "
+            "and/or 'points'."
         )
 
     item = dynamo_table().get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"}).get("Item")
@@ -1128,32 +1214,85 @@ def patch_student_report(slug: str) -> dict[str, Any]:
         # Deductions and the bonus answer only exist for an AI-judged task. A
         # MISSING / NEEDS-SYNC one has no verdict, and a procedural FAIL is
         # fixed at 0 points with no AI call — neither has deductions to edit or
-        # a 10 − Σ score to recompute.
+        # a 10 − Σ score to recompute. A direct points OVERRIDE, by contrast, is
+        # allowed on any task: human judgment may award partial credit even for
+        # a missing or name-mismatch submission.
         if (edit_diffs or edit_bonus) and not _task_is_ai_judged(task):
             raise BadRequestError(
                 "Only an AI-judged exercise has deductions or a bonus answer to "
-                "edit. A missing or name-mismatch result has a fixed score."
+                "edit. A missing or name-mismatch result has a fixed score "
+                "(you can still override its points directly)."
             )
+        # Snapshot pre-edit values for the audit log.
+        before_summary = task.get("summary")
+        before_bonus = task.get("bonus_question_answer")
+        before_points = task.get("points")
+        before_diffs = [dict(d) for d in (task.get("differences") or [])]
+
         if new_summary is not None:
             task["summary"] = new_summary
             task["summary_edited_by"] = editor
             task["summary_edited_at"] = now
         if edit_diffs:
             task["differences"] = new_diffs
-            total_ded = sum(int(d["points_deducted"]) for d in new_diffs or [])
-            # Same invariant as the AI judge: points = 10 − Σ deductions, floored
-            # at 0. The verdict is a hard-gate outcome and is left untouched.
-            task["points"] = max(0, MAX_POINTS_PER_EXERCISE - total_ded)
-            points_changed = True
         if edit_bonus:
             task["bonus_question_answer"] = new_bonus
+
+        # Points resolution, in precedence order:
+        #   explicit override  → pin the score, flag it manual (10 − Σ bypassed)
+        #   clear override     → drop the flag, fall back to the computed value
+        #   deductions changed & not manual → recompute 10 − Σ
+        #   (deductions changed while manual → points stay pinned)
+        if override_points is not None:
+            task["points"] = override_points
+            task["points_manual"] = True
+            points_changed = True
+        elif clear_override:
+            task.pop("points_manual", None)
+            task["points"] = _derived_points(task)
+            points_changed = True
+        elif edit_diffs and not task.get("points_manual"):
+            task["points"] = _derived_points(task)
+            points_changed = True
+
         task["edited_by"] = editor
         task["edited_at"] = now
 
+        # Record only what actually changed (empty → no audit row written).
+        task_changes: list[dict[str, Any]] = []
+        if new_summary is not None and new_summary != (before_summary or ""):
+            task_changes.append(
+                {"field": "summary", "from": _audit_text(before_summary),
+                 "to": _audit_text(new_summary)}
+            )
+        if edit_diffs and new_diffs != before_diffs:
+            before_ded = sum(int(d.get("points_deducted") or 0) for d in before_diffs)
+            after_ded = sum(int(d["points_deducted"]) for d in new_diffs or [])
+            task_changes.append(
+                {"field": "deductions", "from": f"−{before_ded}", "to": f"−{after_ded}"}
+            )
+        if edit_bonus and (new_bonus or None) != (before_bonus or None):
+            task_changes.append(
+                {"field": "bonus", "from": _audit_text(before_bonus),
+                 "to": _audit_text(new_bonus)}
+            )
+        if points_changed and task.get("points") != before_points:
+            task_changes.append(
+                {"field": "points", "from": before_points, "to": task.get("points")}
+            )
+        _append_report_audit(slug, editor, now, f"task:{task_slug}", task_changes)
+
     if new_overall is not None:
+        before_overall = report.get("overall_summary")
         report["overall_summary"] = new_overall
         report["overall_summary_edited_by"] = editor
         report["overall_summary_edited_at"] = now
+        if new_overall != (before_overall or ""):
+            _append_report_audit(
+                slug, editor, now, "overall",
+                [{"field": "overall_summary", "from": _audit_text(before_overall),
+                  "to": _audit_text(new_overall)}],
+            )
 
     if points_changed:
         report["points_earned"] = _sum_points(report.get("tasks") or [])
@@ -1202,6 +1341,24 @@ def patch_student_report(slug: str) -> dict[str, Any]:
         meta["points_earned"] = report["points_earned"]
     # Same shape as GET /v1/students/{slug} so the UI can swap state directly.
     return {"student": meta, "report": report}
+
+
+@app.get("/v1/students/<slug>/report/edits")
+def list_report_edits(slug: str) -> dict[str, Any]:
+    """Immutable audit log of every manual edit to a student's report — who
+    changed what, when (admin or mentor). Newest first.
+
+    Students never see it: provenance is a mentor/admin concern, and a
+    student's own view stays purely their grades (they didn't get the
+    'edited by' line either).
+    """
+    _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    resp = dynamo_table().query(
+        KeyConditionExpression=Key("pk").eq(f"STUDENT#{slug}")
+        & Key("sk").begins_with("AUDIT#"),
+        ScanIndexForward=False,
+    )
+    return {"edits": [public_item(i) for i in resp.get("Items", [])]}
 
 
 @app.post("/v1/syncs")

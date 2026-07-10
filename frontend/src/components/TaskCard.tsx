@@ -1,6 +1,7 @@
 // Port of renderTask() from the static dashboard (evaluator/ui.py).
 import type { ReactNode } from "react";
 
+import { taskProvenance } from "../types";
 import type { Difference, TaskResult } from "../types";
 
 const MAX_POINTS = 10;
@@ -11,6 +12,13 @@ export function tierForRatio(num: number, den: number): string {
   if (r >= 0.8) return "high";
   if (r >= 0.5) return "mid";
   return "low";
+}
+
+function formatEditedAt(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function DiffItem({ d }: { d: Difference }) {
@@ -48,6 +56,7 @@ export function TaskCard({
   const deductions = diffs.filter((d) => Number(d.points_deducted || 0) > 0);
   const notes = diffs.filter((d) => Number(d.points_deducted || 0) === 0);
   const totalCost = deductions.reduce((s, d) => s + Number(d.points_deducted || 0), 0);
+  const prov = taskProvenance(task);
 
   return (
     <div className={`task v-${verdict}`}>
@@ -56,9 +65,21 @@ export function TaskCard({
         <h3>{task.slug}</h3>
         <span className={`points-pill tier-${tier}`}>
           {pts === null ? "—" : pts}/{MAX_POINTS}
+          {task.points_manual && (
+            <span className="points-manual-marker" title="Points manually adjusted by a mentor">
+              ✎
+            </span>
+          )}
         </span>
         {action}
       </header>
+      {prov && (
+        <p className={`task-provenance ${prov.kind}`}>
+          {prov.kind === "edited"
+            ? `Edited by ${prov.by}${prov.at ? ` · ${formatEditedAt(prov.at)}` : ""}`
+            : "Evaluated by AI"}
+        </p>
+      )}
       {task.student_pipeline_name && (
         <p className="task-pipeline">Pipeline: {task.student_pipeline_name}</p>
       )}

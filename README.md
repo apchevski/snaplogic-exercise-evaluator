@@ -65,13 +65,20 @@ tables, tabbed sub-nav):
   editor. Beside the Overall paragraph it rewrites that summary; on a task card
   it opens the **whole evaluation**: the summary, the list of deductions and
   notes (add/edit/remove each one's area, description, −points, rule source and
-  reasoning), and the bonus-question assessment. Editing the deductions
-  recomputes that exercise's points the same way the AI judge does
-  (`points = 10 − Σ deductions`, floored at 0) and refreshes the student's
-  total — a live preview shows the new score as you edit. Edits are saved into
-  the stored report in place ($0 — no re-grade); the pass/fail verdict (a
-  hard-gate outcome) is never changed. Regrading a task later replaces its
-  edited evaluation with fresh AI text.
+  reasoning), the bonus-question assessment, and the **points**. Editing the
+  deductions recomputes that exercise's points the same way the AI judge does
+  (`points = 10 − Σ deductions`, floored at 0) with a live preview; typing a
+  **Points** value instead pins a **manual override** that deliberately bypasses
+  that formula (human judgment wins) — it's labeled *manually adjusted* and can
+  be reset back to the computed value. A points override is allowed on **any**
+  task, even a MISSING or name-mismatch one, so a mentor can award partial
+  credit; the pass/fail verdict (a hard-gate outcome) is still never changed.
+  Edits are saved into the stored report in place ($0 — no re-grade) and refresh
+  the student's total. Each task card shows whether it is still **Evaluated by
+  AI** or was **Edited by** someone (with the date); every change is appended to
+  an immutable **Edit history** (who changed what, when) in its own panel on the
+  student's page. Regrading a task later replaces its edited evaluation — and
+  clears any override — with fresh AI text.
 - **Sync** (admin only): click Sync on an exercise to refresh its solution
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
 - **Remove a student** (admin only): a red **Remove** button on the
@@ -112,14 +119,16 @@ Browser (VPN/office IPs only)
         ├─ GET  exercises / files                       (any role, students too)
         ├─ GET  students / detail / reports  (students: own card only; else 403)
         ├─ GET  /v1/config, job status, authored content       (mentor or admin)
+        ├─ GET  /v1/students/{slug}/report/edits — audit log   (mentor or admin)
         ├─ POST /v1/students {student, space?, project?, email?} — register, no
         │        grading; 400 unless the SnapLogic project exists; the stored
         │        space/project dictate later grading runs; an email creates a
         │        read-only Cognito login for the student      (mentor or admin)
         ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
         ├─ PATCH /v1/students/{slug}/report — edit evaluation (mentor or admin)
-        │        (overall summary, or a task's summary/deductions/bonus; editing
-        │        deductions recomputes that task's points + the student total)
+        │        (overall summary, or a task's summary/deductions/bonus/points;
+        │        deductions recompute points unless a manual override pins them;
+        │        every change is appended to the audit log)
         ├─ POST /v1/syncs {slug?}                             (admin only)
         ├─ POST/PUT /v1/exercises — create / edit / archive   (admin only)
         ├─ DELETE /v1/students/{slug} — purge everything      (admin only)
@@ -250,6 +259,13 @@ every time.
 
 If the AI sees something off that no rule covers with explicit points,
 it surfaces it under **Notes** in the report — no points deducted.
+
+A mentor or admin may also **override an exercise's points directly** from the
+web UI, pinning a 0–10 value that intentionally supersedes `10 − Σ deductions`
+(human judgment wins over the formula). The override is labeled *manually
+adjusted*, is allowed on any task — including MISSING and name-mismatch — and
+every such change is written to the report's immutable audit log; a re-grade of
+that task clears it. The verdict never changes.
 
 ### `/prep` — keep exercise folders in sync with SnapLogic
 

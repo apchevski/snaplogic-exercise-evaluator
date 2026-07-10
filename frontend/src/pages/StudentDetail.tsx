@@ -11,7 +11,15 @@ import {
   TaskEvaluationEditor,
   type TaskEvaluationPayload,
 } from "../components/TaskEvaluationEditor";
-import type { Exercise, Job, Report, StudentMeta, TaskResult } from "../types";
+import type {
+  Exercise,
+  Job,
+  Report,
+  ReportEdit,
+  ReportEditChange,
+  StudentMeta,
+  TaskResult,
+} from "../types";
 
 // Edit target for the AI-written evaluation: the report's Overall paragraph,
 // or one task's whole evaluation (summary + deductions + bonus). Saving
@@ -34,6 +42,39 @@ function PencilIcon() {
       <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
     </svg>
   );
+}
+
+function formatEditTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** "task:task_03" → "task_03"; "overall" → "Overall summary". */
+function editTargetLabel(target: string): string {
+  return target === "overall"
+    ? "Overall summary"
+    : target.startsWith("task:")
+      ? target.slice("task:".length)
+      : target;
+}
+
+function describeChange(c: ReportEditChange): string {
+  switch (c.field) {
+    case "points":
+      return `points ${c.from ?? "—"} → ${c.to ?? "—"}`;
+    case "deductions":
+      return `deductions ${c.from} → ${c.to}`;
+    case "summary":
+      return "summary edited";
+    case "bonus":
+      return "bonus updated";
+    case "overall_summary":
+      return "overall summary edited";
+    default:
+      return c.field;
+  }
 }
 
 export default function StudentDetail() {
@@ -60,6 +101,10 @@ export default function StudentDetail() {
   const [gradeConfirm, setGradeConfirm] = useState<
     { kind: "all" } | { kind: "task"; slug: string; regrade: boolean } | null
   >(null);
+  // Audit log (admin/mentor only); lazy-loaded when the panel is expanded.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [edits, setEdits] = useState<ReportEdit[] | null>(null);
+  const [editsError, setEditsError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -84,6 +129,23 @@ export default function StudentDetail() {
       .then(({ exercises }) => setExercises(exercises))
       .catch(() => setExercises([])); // "not graded" cards degrade gracefully
   }, [token]);
+
+  const loadEdits = useCallback(async () => {
+    setEditsError(null);
+    try {
+      const { edits } = await api.getReportEdits(token, slug);
+      setEdits(edits);
+    } catch (e) {
+      setEditsError(e instanceof Error ? e.message : String(e));
+      setEdits([]);
+    }
+  }, [token, slug]);
+
+  const toggleHistory = () => {
+    const next = !historyOpen;
+    setHistoryOpen(next);
+    if (next && edits === null) void loadEdits();
+  };
 
   const name = student?.display_name ?? report?.student ?? slug;
 
@@ -149,6 +211,8 @@ export default function StudentDetail() {
       setStudent(updated.student);
       setReport(updated.report);
       setEditing(null);
+      // Keep the audit panel current if it's already been opened.
+      if (edits !== null) void loadEdits();
     } catch (e) {
       setEditError(
         `Saving failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -422,6 +486,49 @@ export default function StudentDetail() {
           )}
         </div>
       </Panel>
+      {canGrade && report && (
+        <Panel
+          title="Edit history"
+          hint="Every manual change to this report — who edited what, and when. AI-only evaluations never appear here."
+        >
+          <div className="panel-body">
+            <button className="btn small" onClick={toggleHistory}>
+              {historyOpen ? "Hide edit history" : "Show edit history"}
+            </button>
+            {historyOpen && (
+              <div className="edit-history">
+                {editsError && <div className="job-error">{editsError}</div>}
+                {edits === null && !editsError && (
+                  <p className="summary muted">Loading…</p>
+                )}
+                {edits !== null && edits.length === 0 && !editsError && (
+                  <p className="summary muted">
+                    No manual edits — this report is exactly as graded.
+                  </p>
+                )}
+                {edits !== null && edits.length > 0 && (
+                  <ul className="edit-list">
+                    {edits.map((e, i) => (
+                      <li key={i} className="edit-entry">
+                        <div className="edit-entry-head">
+                          <span className="edit-target">{editTargetLabel(e.target)}</span>
+                          <span className="edit-when">{formatEditTime(e.edited_at)}</span>
+                        </div>
+                        <div className="edit-by">by {e.edited_by}</div>
+                        <ul className="edit-changes">
+                          {e.changes.map((c, j) => (
+                            <li key={j}>{describeChange(c)}</li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        </Panel>
+      )}
       {gradeConfirm && canGrade && (
         <ConfirmModal
           title={
