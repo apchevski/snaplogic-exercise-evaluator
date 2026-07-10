@@ -178,7 +178,7 @@ describe("pollJob", () => {
     const fetchJob = vi.fn(async () => done);
     const onUpdate = vi.fn();
 
-    const result = await pollJob(fetchJob, onUpdate, 1, 1000);
+    const result = await pollJob(fetchJob, onUpdate, { intervalMs: 1, timeoutMs: 1000 });
 
     expect(result).toBe(done);
     expect(fetchJob).toHaveBeenCalledTimes(1);
@@ -192,7 +192,7 @@ describe("pollJob", () => {
     );
     const onUpdate = vi.fn();
 
-    const result = await pollJob(fetchJob, onUpdate, 1, 1000);
+    const result = await pollJob(fetchJob, onUpdate, { intervalMs: 1, timeoutMs: 1000 });
 
     expect(result.status).toBe("succeeded");
     expect(fetchJob).toHaveBeenCalledTimes(2);
@@ -202,8 +202,21 @@ describe("pollJob", () => {
   it("throws an ApiError once the timeout is exceeded", async () => {
     const fetchJob = vi.fn(async () => job("running"));
 
-    await expect(pollJob(fetchJob, vi.fn(), 1, -1)).rejects.toBeInstanceOf(
-      ApiError,
-    );
+    await expect(
+      pollJob(fetchJob, vi.fn(), { intervalMs: 1, timeoutMs: -1 }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("stops quietly and returns the last job when onTimeout is 'stop'", async () => {
+    const processing = job("batch_processing");
+    const fetchJob = vi.fn(async () => processing);
+
+    const result = await pollJob(fetchJob, vi.fn(), {
+      intervalMs: 1,
+      timeoutMs: -1,
+      onTimeout: "stop",
+    });
+
+    expect(result).toBe(processing);
   });
 });

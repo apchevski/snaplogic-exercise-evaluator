@@ -144,7 +144,10 @@ export interface AppConfig {
 export interface Job {
   job_id: string;
   job_type: "grade" | "sync";
-  status: "queued" | "running" | "succeeded" | "failed";
+  // "batch_processing": a full "grade all" run is judging every exercise via
+  // the (asynchronous, 50%-cheaper) Message Batches API — the worker is
+  // polling the batch to completion in the background.
+  status: "queued" | "running" | "batch_processing" | "succeeded" | "failed";
   target: string;
   error?: string;
   requested_by?: string;

@@ -9,7 +9,12 @@ import pytest
 
 from evaluator.ai_judge import AIJudge
 from evaluator.config import GRADES_DIR, TMP_DIR
-from evaluator.runner import GradeRunError, run_grade
+from evaluator.runner import (
+    GradeRunError,
+    collect_grade_batch,
+    run_grade,
+    submit_grade_batch,
+)
 
 OVERALL_PLACEHOLDER = (
     "<!-- TODO Claude: SHORT (1-2 sentence) GENERAL synthesis. -->"
@@ -175,3 +180,134 @@ def test_plan_failure_raises(evaluator_dirs):
             plan_fn=lambda s, ps, t: 2,
             report_fn=lambda s, ps, t: 0,
         )
+
+
+# ----- batch full-run path (submit / collect) -----
+
+
+class StubBatchClient:
+    """Serves both the batch API (per-exercise) and messages.create (overall)."""
+
+    def __init__(self, batch_results=(), create_payloads=()):
+        self._batch_results = list(batch_results)
+        self._create_payloads = list(create_payloads)
+        self.created_requests = None
+        self.messages = SimpleNamespace(
+            create=self._create,
+            batches=SimpleNamespace(
+                create=self._batch_create,
+                retrieve=lambda batch_id: SimpleNamespace(processing_status="ended"),
+                results=lambda batch_id: iter(self._batch_results),
+            ),
+        )
+
+    def _create(self, **kwargs):
+        payload = self._create_payloads.pop(0)
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=json.dumps(payload))],
+            usage=SimpleNamespace(
+                input_tokens=10, output_tokens=5,
+                cache_creation_input_tokens=0, cache_read_input_tokens=0,
+            ),
+            stop_reason="end_turn",
+        )
+
+    def _batch_create(self, requests):
+        self.created_requests = requests
+        return SimpleNamespace(id="batch_1")
+
+
+def _batch_result(custom_id, raw):
+    return SimpleNamespace(
+        custom_id=custom_id,
+        result=SimpleNamespace(
+            type="succeeded",
+            message=SimpleNamespace(
+                content=[SimpleNamespace(type="text", text=json.dumps(raw))],
+                usage=SimpleNamespace(
+                    input_tokens=100, output_tokens=50,
+                    cache_creation_input_tokens=0, cache_read_input_tokens=0,
+                ),
+                stop_reason="end_turn",
+            ),
+        ),
+    )
+
+
+def test_submit_grade_batch_no_ready_finalizes_sync(evaluator_dirs, monkeypatch):
+    student = "Runner No Ready"
+    _write_fixtures(student, ready=False)  # manifest with nothing to judge
+    import evaluator.grade as grade_mod
+
+    monkeypatch.setattr(grade_mod, "cmd_plan", lambda s, ps, t, project=None: 0)
+    monkeypatch.setattr(grade_mod, "cmd_report", lambda s, ps, t: (_fake_report_fn(s), 0)[1])
+
+    judge = AIJudge(client=StubBatchClient(create_payloads=[{"overall_summary": "none judged."}]))
+    store = SimpleNamespace(upload_scratch=lambda *a: 0)
+
+    out = submit_grade_batch(
+        student, project_space=None, project=None, judge=judge, store=store, job_id="job1"
+    )
+    assert out["done"] is True
+    assert out["result"].points_earned == 8  # rendered synchronously, no batch
+
+
+def test_submit_grade_batch_submits_and_stashes(evaluator_dirs, monkeypatch):
+    student = "Runner Batch Submit"
+    _write_fixtures(student, ready=True)
+    import evaluator.grade as grade_mod
+
+    monkeypatch.setattr(grade_mod, "cmd_plan", lambda s, ps, t, project=None: 0)
+
+    judge = AIJudge(client=StubBatchClient())
+    stashed = []
+    store = SimpleNamespace(upload_scratch=lambda job_id, s: stashed.append((job_id, s)))
+
+    out = submit_grade_batch(
+        student, project_space=None, project=None, judge=judge, store=store, job_id="job2"
+    )
+    assert out["done"] is False
+    assert out["batch_id"] == "batch_1"
+    assert out["judged_count"] == 1
+    assert stashed == [("job2", student)]
+    # custom_id is the exercise slug.
+    assert judge._client.created_requests[0]["custom_id"] == "task_x"
+
+
+def test_collect_grade_batch_writes_evals_and_renders(evaluator_dirs, monkeypatch):
+    student = "Runner Batch Collect"
+    fixtures = _write_fixtures(student, ready=True)
+    import evaluator.grade as grade_mod
+
+    monkeypatch.setattr(grade_mod, "cmd_report", lambda s, ps, t: (_fake_report_fn(s), 0)[1])
+
+    raw = {
+        "verdict": "pass",
+        "summary": "ok",
+        "differences": [
+            {"area": "a", "description": "d", "points_deducted": 2,
+             "rule_source": "general_rules: x", "reasoning": "r"}
+        ],
+        "bonus_question_answer": None,
+    }
+    judge = AIJudge(
+        client=StubBatchClient(
+            batch_results=[_batch_result("task_x", raw)],
+            create_payloads=[{"overall_summary": "1 of 1 passed."}],
+        )
+    )
+    downloaded = []
+    store = SimpleNamespace(download_scratch=lambda job_id, s: downloaded.append((job_id, s)))
+
+    result = collect_grade_batch(
+        student, project_space=None, batch_id="batch_1", judge=judge, store=store, job_id="job3"
+    )
+
+    assert downloaded == [("job3", student)]
+    evaluation = json.loads(Path(fixtures["eval_path"]).read_text(encoding="utf-8"))
+    assert evaluation["verdict"] == "pass" and evaluation["points"] == 8
+    assert result.judged_count == 1
+    # per-exercise usage was batched (discounted); the Overall call was not.
+    assert result.usage.batch is True
+    assert result.overall_usage is not None and result.overall_usage.batch is False
+    assert result.report["overall_summary"] == "1 of 1 passed."

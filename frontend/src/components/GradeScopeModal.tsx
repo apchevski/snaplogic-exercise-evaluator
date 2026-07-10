@@ -103,10 +103,23 @@ export function GradeScopeModal({
                 </p>
               )}
             </div>
-            <p className="hint">
-              Grading all exercises also refreshes the AI overall summary; a
-              subset only updates those exercises&rsquo; results.
-            </p>
+            {allSelected ? (
+              <div className="info-note">
+                <strong>Grading every exercise runs as a batch</strong> to cut
+                the AI cost by about half. Because of that, results are{" "}
+                <strong>not instant</strong> — usually a few minutes, and
+                occasionally up to an hour. You can close this dialog and leave
+                the page; the student&rsquo;s report (and the AI overall summary)
+                updates automatically when the batch finishes.
+              </div>
+            ) : (
+              <p className="hint">
+                The selected exercise{selected.size === 1 ? "" : "s"} are graded{" "}
+                <strong>right away</strong> at normal cost; only their results
+                are updated. Grade <em>all</em> exercises to run the cheaper
+                background batch and refresh the overall summary.
+              </p>
+            )}
           </div>
         </div>
         <footer>

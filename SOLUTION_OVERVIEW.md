@@ -209,7 +209,13 @@ exercise: hard gates → (if judgeable) Claude with description + notes +
 topo-sorted snap flows + both raw pipeline JSONs → Python recomputes points →
 `report.md`/`report.json` written as a new immutable S3 version, card + JOB
 updated, row refreshes live. Full runs regenerate the AI **Overall** summary;
-scoped runs merge into the existing report and leave it untouched. Per-task
+scoped runs merge into the existing report and leave it untouched. A **full
+run** (no task/tasks) judges all exercises through the **Message Batches API**
+(~50% cheaper, asynchronous): the worker splits it into *submit* (plan → fire
+the batch → stash scratch in S3 → JOB `batch_processing`) and *collect* (a
+delayed self-enqueued SQS message polls the batch, then writes results + report
+once it ends), holding the student lock across the wait. A **subset** selection
+and per-task **Regrade** stay synchronous/instant. Per-task
 **Regrade** and $0 inline **evaluation editing** (PATCH — overall summary, or a
 task's summary / deductions / bonus answer / points; editing deductions
 recomputes that task's points as `10 − Σ` and the student total, verdict
@@ -300,6 +306,10 @@ budget alarm emails on overspend.
    deploy. Never author into `exercises-backup/`.
 5. **Paid jobs never auto-retry** — worker concurrency 1, DLQ maxReceiveCount 1.
    Don't add retries around the Claude call path without thinking about cost.
+   The one deliberate exception is the batch **collect** step, which re-enqueues
+   a bounded poll on a transient error — re-reading an *already-finished* batch
+   is free, so it doesn't re-spend. Submit (which fires the paid batch) still
+   fails closed.
 6. **The points denominator is always `active exercises × 10`** — totals like
    49/90 are correct, not a bug.
 7. **The backend role matrix is the security boundary** — the UI hiding a

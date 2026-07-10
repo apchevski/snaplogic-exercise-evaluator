@@ -23,6 +23,9 @@ class StubStore:
         self.materialized = False
         self.materialized_reports = []
         self.seeded = []
+        self.uploaded_scratch = []
+        self.downloaded_scratch = []
+        self.deleted_scratch = []
 
     def materialize_exercises(self):
         self.materialized = True
@@ -44,6 +47,28 @@ class StubStore:
     def seed_authored_files(self, slug):
         self.seeded.append(slug)
         return []
+
+    def upload_scratch(self, job_id, student):
+        self.uploaded_scratch.append((job_id, student))
+        return 0
+
+    def download_scratch(self, job_id, student):
+        self.downloaded_scratch.append((job_id, student))
+        return 0
+
+    def delete_scratch(self, job_id):
+        self.deleted_scratch.append(job_id)
+
+
+def _stub_batch_submit(monkeypatch, submit_impl):
+    """Route a full-run grade through the batch submit, with the real AIJudge
+    (which needs an API key) replaced by a dummy and submit_grade_batch stubbed.
+    """
+    import evaluator.ai_judge as ai_judge_mod
+    import evaluator.runner as runner_mod
+
+    monkeypatch.setattr(ai_judge_mod, "AIJudge", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(runner_mod, "submit_grade_batch", submit_impl)
 
 
 def _fake_run_result(student: str):
@@ -95,13 +120,17 @@ def _get_job(job_id: str) -> dict:
     return dynamo_table().get_item(Key={"pk": f"JOB#{job_id}", "sk": "META"})["Item"]
 
 
-def test_grade_job_success(aws, monkeypatch):
+def test_grade_full_run_with_nothing_to_judge_finalizes_synchronously(aws, monkeypatch):
+    # A full run whose plan found no AI-ready exercise renders the report
+    # without a batch — submit_grade_batch returns done=True and no delayed
+    # poll message is enqueued.
     store = StubStore()
     monkeypatch.setattr(worker, "_make_store", lambda: store)
-    import evaluator.runner as runner_mod
-
-    monkeypatch.setattr(
-        runner_mod, "run_grade", lambda student, **kw: _fake_run_result(student)
+    enqueued: list = []
+    monkeypatch.setattr(worker, "_enqueue_delayed", lambda *a, **k: enqueued.append(a))
+    _stub_batch_submit(
+        monkeypatch,
+        lambda student, **kw: {"done": True, "result": _fake_run_result(student)},
     )
 
     job = _seed_job(
@@ -115,6 +144,7 @@ def test_grade_job_success(aws, monkeypatch):
     assert item["result"]["points_earned"] == 52
     assert float(item["result"]["usage"]["est_cost_usd"]) == 0.95
     assert store.materialized and len(store.uploaded_reports) == 1
+    assert enqueued == []  # no batch → no follow-up poll
 
     # STUDENT card refreshed
     meta = dynamo_table().get_item(Key={"pk": "STUDENT#jane-doe", "sk": "META"})["Item"]
@@ -246,15 +276,15 @@ def test_multi_task_grade_runs_each_slug_and_merges_usage(aws, monkeypatch):
 def test_grade_preserves_registration_fields_on_student_card(aws, monkeypatch):
     store = StubStore()
     monkeypatch.setattr(worker, "_make_store", lambda: store)
-    import evaluator.runner as runner_mod
+    monkeypatch.setattr(worker, "_enqueue_delayed", lambda *a, **k: None)
 
     seen_kwargs = {}
 
-    def fake_run(student, **kw):
+    def fake_submit(student, **kw):
         seen_kwargs.update(kw)
-        return _fake_run_result(student)
+        return {"done": True, "result": _fake_run_result(student)}
 
-    monkeypatch.setattr(runner_mod, "run_grade", fake_run)
+    _stub_batch_submit(monkeypatch, fake_submit)
 
     # Registered from the UI without grading (POST /v1/students).
     dynamo_table().put_item(
@@ -292,12 +322,11 @@ def test_grade_preserves_registration_fields_on_student_card(aws, monkeypatch):
 
 def test_grade_job_failure_marks_failed_and_releases_lock(aws, monkeypatch):
     monkeypatch.setattr(worker, "_make_store", lambda: StubStore())
-    import evaluator.runner as runner_mod
 
     def boom(student, **kw):
         raise RuntimeError("SnapLogic credentials rejected (401).")
 
-    monkeypatch.setattr(runner_mod, "run_grade", boom)
+    _stub_batch_submit(monkeypatch, boom)
 
     job = _seed_job(
         "job-grade-2", "grade", "bad-student",
@@ -311,6 +340,109 @@ def test_grade_job_failure_marks_failed_and_releases_lock(aws, monkeypatch):
     assert "Item" not in dynamo_table().get_item(
         Key={"pk": lock_key("grade", "bad-student"), "sk": "META"}
     )
+
+
+def test_full_grade_submits_batch_and_enqueues_collect(aws, monkeypatch):
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+    enqueued: list = []
+    monkeypatch.setattr(worker, "_enqueue_delayed", lambda body, **k: enqueued.append(body))
+    _stub_batch_submit(
+        monkeypatch,
+        lambda student, **kw: {"done": False, "batch_id": "batch_xyz", "judged_count": 3},
+    )
+
+    job = _seed_job(
+        "job-grade-batch", "grade", "jane-doe",
+        student="Jane Doe", student_slug="jane-doe", requested_by="m@x.io",
+    )
+    worker.handler({"Records": [{"body": json.dumps(job)}]}, None)
+
+    item = _get_job("job-grade-batch")
+    assert item["status"] == "batch_processing"
+    assert item["batch_id"] == "batch_xyz"
+    assert int(item["poll_attempts"]) == 0
+    assert int(item["judged_count"]) == 3
+    # The scratch tree was stashed for the collect step (real store does this;
+    # here submit_grade_batch is stubbed, so we just assert the handoff shape).
+    # Lock is NOT released — the collect step owns it now.
+    assert "Item" in dynamo_table().get_item(
+        Key={"pk": lock_key("grade", "jane-doe"), "sk": "META"}
+    )
+    # One delayed "check the batch" message enqueued.
+    assert len(enqueued) == 1
+    msg = enqueued[0]
+    assert msg["phase"] == "collect"
+    assert msg["batch_id"] == "batch_xyz"
+    assert msg["poll_attempts"] == 0
+    assert msg["job_id"] == "job-grade-batch"
+
+
+def test_grade_collect_reenqueues_while_batch_processing(aws, monkeypatch):
+    monkeypatch.setattr(worker, "_make_store", lambda: StubStore())
+    enqueued: list = []
+    monkeypatch.setattr(worker, "_enqueue_delayed", lambda body, **k: enqueued.append(body))
+    import evaluator.ai_judge as ai_judge_mod
+    import evaluator.runner as runner_mod
+
+    monkeypatch.setattr(ai_judge_mod, "AIJudge", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(runner_mod, "batch_status", lambda batch_id, **kw: "in_progress")
+
+    collect_msg = _seed_job(
+        "job-grade-collect-1", "grade", "jane-doe",
+        phase="collect", batch_id="batch_1",
+        student="Jane Doe", student_slug="jane-doe", poll_attempts=0,
+    )
+    worker.handler({"Records": [{"body": json.dumps(collect_msg)}]}, None)
+
+    item = _get_job("job-grade-collect-1")
+    # Still processing → not terminal, counter bumped, poll re-enqueued.
+    assert item["status"] not in ("succeeded", "failed")
+    assert int(item["poll_attempts"]) == 1
+    assert len(enqueued) == 1 and enqueued[0]["poll_attempts"] == 1
+    # Lock kept alive across the wait.
+    assert "Item" in dynamo_table().get_item(
+        Key={"pk": lock_key("grade", "jane-doe"), "sk": "META"}
+    )
+
+
+def test_grade_collect_finalizes_when_batch_ended(aws, monkeypatch):
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+    monkeypatch.setattr(worker, "_enqueue_delayed", lambda *a, **k: None)
+    import evaluator.ai_judge as ai_judge_mod
+    import evaluator.runner as runner_mod
+
+    monkeypatch.setattr(ai_judge_mod, "AIJudge", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(runner_mod, "batch_status", lambda batch_id, **kw: "ended")
+    monkeypatch.setattr(
+        runner_mod, "collect_grade_batch",
+        lambda student, **kw: _fake_run_result(student),
+    )
+
+    collect_msg = _seed_job(
+        "job-grade-collect-2", "grade", "jane-doe",
+        phase="collect", batch_id="batch_2",
+        student="Jane Doe", student_slug="jane-doe", poll_attempts=2,
+        requested_by="m@x.io",
+    )
+    worker.handler({"Records": [{"body": json.dumps(collect_msg)}]}, None)
+
+    item = _get_job("job-grade-collect-2")
+    assert item["status"] == "succeeded"
+    assert item["result"]["points_earned"] == 52
+    # STUDENT card + REPORT row written by the shared finalize path.
+    meta = dynamo_table().get_item(Key={"pk": "STUDENT#jane-doe", "sk": "META"})["Item"]
+    assert meta["points_earned"] == 52
+    version = item["result"]["version"]
+    assert "Item" in dynamo_table().get_item(
+        Key={"pk": "STUDENT#jane-doe", "sk": f"REPORT#{version}"}
+    )
+    # Lock released and the S3 scratch cleaned up.
+    assert "Item" not in dynamo_table().get_item(
+        Key={"pk": lock_key("grade", "jane-doe"), "sk": "META"}
+    )
+    assert store.deleted_scratch == ["job-grade-collect-2"]
 
 
 def test_sync_job_success(aws, monkeypatch, evaluator_dirs):
@@ -466,10 +598,10 @@ def test_sync_synthesizes_task_json_from_config_and_preserves_row(
 def test_archived_exercise_pruned_from_working_tree(aws, monkeypatch, evaluator_dirs):
     store = StubStore()
     monkeypatch.setattr(worker, "_make_store", lambda: store)
-    import evaluator.runner as runner_mod
-
-    monkeypatch.setattr(
-        runner_mod, "run_grade", lambda student, **kw: _fake_run_result(student)
+    monkeypatch.setattr(worker, "_enqueue_delayed", lambda *a, **k: None)
+    _stub_batch_submit(
+        monkeypatch,
+        lambda student, **kw: {"done": True, "result": _fake_run_result(student)},
     )
 
     folder = evaluator_dirs["exercises"] / "worker_arch_slug"
@@ -502,10 +634,10 @@ def test_deleted_exercise_pruned_from_working_tree(aws, monkeypatch, evaluator_d
     every job's working tree — sync must never re-seed it into S3."""
     store = StubStore()
     monkeypatch.setattr(worker, "_make_store", lambda: store)
-    import evaluator.runner as runner_mod
-
-    monkeypatch.setattr(
-        runner_mod, "run_grade", lambda student, **kw: _fake_run_result(student)
+    monkeypatch.setattr(worker, "_enqueue_delayed", lambda *a, **k: None)
+    _stub_batch_submit(
+        monkeypatch,
+        lambda student, **kw: {"done": True, "result": _fake_run_result(student)},
     )
 
     folder = evaluator_dirs["exercises"] / "worker_del_slug"

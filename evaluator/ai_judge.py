@@ -54,7 +54,12 @@ class JudgeError(RuntimeError):
 
 @dataclass
 class JudgeUsage:
-    """Token usage accumulated across one or more judge calls."""
+    """Token usage accumulated across one or more judge calls.
+
+    ``batch`` marks usage produced through the Message Batches API, which
+    Anthropic bills at half the standard token rates — ``est_cost_usd``
+    applies the 0.5 multiplier when it's set.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
@@ -62,6 +67,7 @@ class JudgeUsage:
     cache_read_input_tokens: int = 0
     calls: int = 0
     model: str = field(default=DEFAULT_JUDGE_MODEL)
+    batch: bool = False
 
     def add_response_usage(self, usage: Any) -> None:
         self.input_tokens += getattr(usage, "input_tokens", 0) or 0
@@ -94,12 +100,15 @@ class JudgeUsage:
             + self.cache_read_input_tokens * in_rate * 0.10
             + self.output_tokens * out_rate
         ) / 1_000_000
+        if self.batch:
+            cost *= 0.5  # Batches API bills at 50% of standard token rates.
         return round(cost, 6)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "model": self.model,
             "calls": self.calls,
+            "batch": self.batch,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "cache_creation_input_tokens": self.cache_creation_input_tokens,
@@ -218,10 +227,16 @@ class AIJudge:
         self._evaluation_schema = _load_schema("evaluation.schema.json")
         self._overall_schema = _load_schema("overall.schema.json")
 
-    # ----- per-exercise call -----
+    # ----- per-exercise request params (shared by sync + batch) -----
 
-    def judge_exercise(self, bundle: dict[str, Any]) -> tuple[dict[str, Any], JudgeUsage]:
-        """Run one Messages API call and return (evaluation.json dict, usage)."""
+    def _judge_params(self, bundle: dict[str, Any]) -> dict[str, Any]:
+        """Build the Messages API kwargs for judging one exercise.
+
+        Byte-identical between the synchronous call (`judge_exercise`) and the
+        batched call (`build_batch_requests`) so the cached rules prefix is
+        shared: a full batch run pays for the rule text once and reads it at
+        ~0.1x on every later request.
+        """
         system = [
             {"type": "text", "text": JUDGE_SYSTEM_INSTRUCTIONS},
             {
@@ -235,20 +250,93 @@ class AIJudge:
                 "cache_control": {"type": "ephemeral"},
             },
         ]
-        user_text = self._render_bundle(bundle)
-        response = self._create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user_text}],
-            output_config={
+        return {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": self._render_bundle(bundle)}],
+            "output_config": {
                 "format": {"type": "json_schema", "schema": self._evaluation_schema}
             },
-        )
+        }
+
+    # ----- per-exercise synchronous call -----
+
+    def judge_exercise(self, bundle: dict[str, Any]) -> tuple[dict[str, Any], JudgeUsage]:
+        """Run one Messages API call and return (evaluation.json dict, usage)."""
+        response = self._create(**self._judge_params(bundle))
         usage = JudgeUsage(model=self.model)
         usage.add_response_usage(response.usage)
         raw = self._parse_json_response(response)
         return _finalize_evaluation(bundle, raw), usage
+
+    # ----- per-exercise batched calls (Message Batches API, 50% cheaper) -----
+
+    def build_batch_requests(
+        self, bundles_by_id: dict[str, dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """One batch request per exercise, keyed by its slug (the custom_id).
+
+        Slugs are the exercise folder names (<=64 chars, unique per run), which
+        is exactly what the Batches API needs for a custom_id. Requests are
+        plain dicts — the SDK accepts them and this avoids pinning a specific
+        typed-params import path across anthropic SDK versions.
+        """
+        return [
+            {"custom_id": slug, "params": self._judge_params(bundle)}
+            for slug, bundle in bundles_by_id.items()
+        ]
+
+    def submit_batch(self, requests: list[dict[str, Any]]) -> str:
+        """Submit a batch of judge requests; returns the batch id."""
+        try:
+            batch = self._client.messages.batches.create(requests=requests)
+        except Exception as e:  # surface API problems as a clear job error
+            raise JudgeError(f"Submitting the grading batch failed: {e}") from e
+        return batch.id
+
+    def retrieve_batch_status(self, batch_id: str) -> str:
+        """Return the batch's processing_status ('in_progress' | 'ended' | ...)."""
+        try:
+            batch = self._client.messages.batches.retrieve(batch_id)
+        except Exception as e:
+            raise JudgeError(f"Retrieving batch {batch_id} failed: {e}") from e
+        return getattr(batch, "processing_status", "") or ""
+
+    def collect_batch(
+        self, batch_id: str, bundles_by_id: dict[str, dict[str, Any]]
+    ) -> tuple[dict[str, dict[str, Any]], JudgeUsage, dict[str, str]]:
+        """Read a finished batch's results.
+
+        Returns (evaluations_by_slug, usage, errors_by_slug). Results arrive in
+        any order, so they're keyed by custom_id (the slug). A non-succeeded
+        result becomes an entry in ``errors`` and simply has no evaluation —
+        the report renderer already treats a missing evaluation as 0 points.
+        """
+        usage = JudgeUsage(model=self.model, batch=True)
+        evaluations: dict[str, dict[str, Any]] = {}
+        errors: dict[str, str] = {}
+        try:
+            results = self._client.messages.batches.results(batch_id)
+        except Exception as e:
+            raise JudgeError(f"Reading batch {batch_id} results failed: {e}") from e
+        for result in results:
+            slug = getattr(result, "custom_id", "")
+            outcome = getattr(result, "result", None)
+            kind = getattr(outcome, "type", "")
+            if kind != "succeeded":
+                detail = getattr(getattr(outcome, "error", None), "type", "") or kind
+                errors[slug] = f"batch result {kind or 'unknown'} ({detail})"
+                continue
+            bundle = bundles_by_id.get(slug)
+            if bundle is None:
+                errors[slug] = "no bundle for this custom_id"
+                continue
+            message = outcome.message
+            usage.add_response_usage(getattr(message, "usage", None))
+            raw = self._parse_json_response(message)
+            evaluations[slug] = _finalize_evaluation(bundle, raw)
+        return evaluations, usage, errors
 
     # ----- report-level Overall -----
 

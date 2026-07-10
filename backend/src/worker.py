@@ -26,12 +26,15 @@ from typing import Any
 from boto3.dynamodb.conditions import Key
 
 from .common import (
+    LOCK_TTL_SECONDS,
     data_bucket,
     dynamo_table,
+    epoch_in,
     from_dynamo,
     load_secrets_into_env,
     lock_key,
     slugify,
+    sqs_client,
     to_dynamo,
     utc_now_iso,
 )
@@ -162,57 +165,89 @@ def _merge_usage(usages: list[dict[str, Any]]) -> dict[str, Any]:
     return merged
 
 
-def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
-    from evaluator.runner import run_grade
+# Full "grade all" runs judge every exercise through the Message Batches API
+# (50% cheaper) — asynchronous, so the job is split across two worker
+# invocations. These bound the follow-up polling.
+_BATCH_POLL_DELAY_SECONDS = 60
+_BATCH_MAX_POLLS = 120  # ~2h at 60s — well past the "usually <1h" batch window
 
-    student = job["student"]
-    student_slug = job.get("student_slug") or slugify(student)
-    # Scope: None = full grading; otherwise the exercise slugs to (re)grade.
-    scope: list[str] | None = None
-    if job.get("tasks"):
-        scope = [str(t) for t in job["tasks"]]
-    elif job.get("task"):
-        scope = [str(job["task"])]
-    meta = from_dynamo(
+
+def _student_meta(student_slug: str) -> dict[str, Any]:
+    return from_dynamo(
         dynamo_table()
         .get_item(Key={"pk": f"STUDENT#{student_slug}", "sk": "META"})
         .get("Item")
         or {}
     )
-    if scope:
-        # Scoped runs merge into the previous report, which on Lambda must
-        # be pulled from S3 first (fresh /tmp every job). A never-graded
-        # student has no keys — nothing downloads and a fresh report grows
-        # task by task.
-        store.materialize_report(
-            student,
-            {
-                "report_md_key": meta.get("report_md_key"),
-                # "report_json" is the legacy attribute name (see api.py).
-                "report_json_key": meta.get("report_json_key") or meta.get("report_json"),
-            },
-        )
-    # The job payload carries the resolved space/project (API merges body →
-    # STUDENT card → env default); the card is the fallback for jobs queued
-    # before that resolution existed.
-    space = job.get("space") or meta.get("space")
-    project = job.get("project") or meta.get("project")
-    if scope is None:
-        results = [
-            run_grade(student, project_space=space, project=project, task_slug=None)
-        ]
-    else:
-        # One run per slug; each merges into report.{md,json} on disk, so
-        # the last result carries the accumulated counts and points.
-        results = [
-            run_grade(student, project_space=space, project=project, task_slug=slug)
-            for slug in scope
-        ]
-    result = results[-1]
 
+
+def _enqueue_delayed(body: dict[str, Any], delay_seconds: int = _BATCH_POLL_DELAY_SECONDS) -> None:
+    """Re-enqueue a message to our own queue, invisible until the timer fires.
+
+    Used to poll an in-flight grading batch without occupying the worker while
+    it waits — the delayed message sits hidden in SQS, so other jobs run
+    meanwhile.
+    """
+    sqs_client().send_message(
+        QueueUrl=os.environ["QUEUE_URL"],
+        DelaySeconds=delay_seconds,
+        MessageBody=json.dumps(body),
+    )
+
+
+def _refresh_lock_ttl(job_type: str, target: str) -> None:
+    """Push out the per-target lock's TTL so a >30-min batch keeps its lock."""
+    dynamo_table().update_item(
+        Key={"pk": lock_key(job_type, target), "sk": "META"},
+        UpdateExpression="SET #ttl = :ttl",
+        ExpressionAttributeNames={"#ttl": "ttl"},
+        ExpressionAttributeValues={":ttl": to_dynamo(epoch_in(LOCK_TTL_SECONDS))},
+    )
+
+
+def _collect_message(job: dict[str, Any], poll_attempts: int) -> dict[str, Any]:
+    """Build the 'check the batch again later' message for a grade collect."""
+    return {
+        "job_id": job["job_id"],
+        "job_type": "grade",
+        "target": job.get("target", ""),
+        "phase": "collect",
+        "batch_id": job["batch_id"],
+        "student": job["student"],
+        "student_slug": job.get("student_slug") or slugify(job["student"]),
+        "space": job.get("space"),
+        "project": job.get("project"),
+        "requested_by": job.get("requested_by"),
+        "poll_attempts": poll_attempts,
+    }
+
+
+def _finalize_grade_rows(
+    store: Any,
+    job: dict[str, Any],
+    student: str,
+    student_slug: str,
+    space: Any,
+    project: Any,
+    meta: dict[str, Any],
+    results: list[Any],
+    scope: list[str] | None,
+) -> dict[str, Any]:
+    """Upload the report version and write the REPORT + STUDENT rows.
+
+    Shared by the synchronous path (`_run_grade_job`) and the batch paths
+    (submit-fast-path and collect), so all three write identical rows. Each
+    result's discounted `usage` and any full-price `overall_usage` are summed.
+    """
+    result = results[-1]
     version = utc_now_iso().replace("+00:00", "Z")
     keys = store.upload_report(student, student_slug, version)
-    usage = _merge_usage([r.usage.to_dict() for r in results])
+    usage_dicts: list[dict[str, Any]] = []
+    for r in results:
+        usage_dicts.append(r.usage.to_dict())
+        if getattr(r, "overall_usage", None) is not None:
+            usage_dicts.append(r.overall_usage.to_dict())
+    usage = _merge_usage(usage_dicts)
     judged_count = sum(r.judged_count for r in results)
     now = utc_now_iso()
 
@@ -265,6 +300,192 @@ def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
         "usage": usage,
         **keys,
     }
+
+
+def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
+    """Synchronous grading: a subset selection or a single-task regrade.
+
+    Full "grade all" runs go through the batch path instead (see
+    `_submit_grade_batch_job`); this stays for the instant, scoped runs.
+    """
+    from evaluator.runner import run_grade
+
+    student = job["student"]
+    student_slug = job.get("student_slug") or slugify(student)
+    # Scope: None = full grading; otherwise the exercise slugs to (re)grade.
+    scope: list[str] | None = None
+    if job.get("tasks"):
+        scope = [str(t) for t in job["tasks"]]
+    elif job.get("task"):
+        scope = [str(job["task"])]
+    meta = _student_meta(student_slug)
+    if scope:
+        # Scoped runs merge into the previous report, which on Lambda must
+        # be pulled from S3 first (fresh /tmp every job). A never-graded
+        # student has no keys — nothing downloads and a fresh report grows
+        # task by task.
+        store.materialize_report(
+            student,
+            {
+                "report_md_key": meta.get("report_md_key"),
+                # "report_json" is the legacy attribute name (see api.py).
+                "report_json_key": meta.get("report_json_key") or meta.get("report_json"),
+            },
+        )
+    # The job payload carries the resolved space/project (API merges body →
+    # STUDENT card → env default); the card is the fallback for jobs queued
+    # before that resolution existed.
+    space = job.get("space") or meta.get("space")
+    project = job.get("project") or meta.get("project")
+    if scope is None:
+        results = [
+            run_grade(student, project_space=space, project=project, task_slug=None)
+        ]
+    else:
+        # One run per slug; each merges into report.{md,json} on disk, so
+        # the last result carries the accumulated counts and points.
+        results = [
+            run_grade(student, project_space=space, project=project, task_slug=slug)
+            for slug in scope
+        ]
+    return _finalize_grade_rows(
+        store, job, student, student_slug, space, project, meta, results, scope
+    )
+
+
+def _submit_grade_batch_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
+    """Phase 1 of a full run: plan, fire the AI-judging batch, hand off.
+
+    Returns ``{"done": True, "result": <row dict>}`` when the plan found
+    nothing to judge (report rendered synchronously), or ``{"done": False}``
+    when a batch is in flight (status set to ``batch_processing`` and a delayed
+    collect message enqueued — the collect step now owns the lock).
+    """
+    from evaluator.ai_judge import AIJudge
+    from evaluator.runner import submit_grade_batch
+
+    student = job["student"]
+    student_slug = job.get("student_slug") or slugify(student)
+    meta = _student_meta(student_slug)
+    space = job.get("space") or meta.get("space")
+    project = job.get("project") or meta.get("project")
+    job_id = job["job_id"]
+
+    outcome = submit_grade_batch(
+        student,
+        project_space=space,
+        project=project,
+        judge=AIJudge(),
+        store=store,
+        job_id=job_id,
+    )
+    if outcome["done"]:
+        row = _finalize_grade_rows(
+            store, job, student, student_slug, space, project, meta,
+            [outcome["result"]], None,
+        )
+        return {"done": True, "result": row}
+
+    batch_id = outcome["batch_id"]
+    _update_job(
+        job_id,
+        status="batch_processing",
+        batch_id=batch_id,
+        poll_attempts=0,
+        judged_count=outcome["judged_count"],
+    )
+    _enqueue_delayed(
+        {
+            "job_id": job_id,
+            "job_type": "grade",
+            "target": job.get("target", ""),
+            "phase": "collect",
+            "batch_id": batch_id,
+            "student": student,
+            "student_slug": student_slug,
+            "space": space,
+            "project": project,
+            "requested_by": job.get("requested_by"),
+            "poll_attempts": 0,
+        }
+    )
+    return {"done": False}
+
+
+def _process_grade_collect(job: dict[str, Any]) -> None:
+    """Phase 2 of a full run: poll the batch; finalize once it has ended.
+
+    Runs on the delayed collect message. Still-processing → refresh the lock,
+    bump the counter, re-enqueue. Ended → read results, render the report,
+    write rows, release the lock, drop the S3 scratch. Reading a finished batch
+    is free, so a transient error re-enqueues (bounded) instead of failing a
+    grade whose paid batch already succeeded.
+    """
+    from evaluator.ai_judge import AIJudge
+    from evaluator.runner import batch_status, collect_grade_batch
+
+    job_id = job["job_id"]
+    target = job.get("target", "")
+    student = job["student"]
+    student_slug = job.get("student_slug") or slugify(student)
+    batch_id = job["batch_id"]
+    attempts = int(job.get("poll_attempts") or 0)
+
+    try:
+        os.environ.setdefault("EVALUATOR_DISABLE_UI_REBUILD", "1")
+        load_secrets_into_env()
+        judge = AIJudge()
+
+        if batch_status(batch_id, judge=judge) != "ended":
+            if attempts >= _BATCH_MAX_POLLS:
+                _update_job(
+                    job_id,
+                    status="failed",
+                    finished_at=utc_now_iso(),
+                    error=f"Grading batch {batch_id} did not finish within the poll window.",
+                )
+                _release_lock("grade", target)
+                return
+            _refresh_lock_ttl("grade", target)
+            _update_job(job_id, poll_attempts=attempts + 1)
+            _enqueue_delayed(_collect_message(job, attempts + 1))
+            return
+
+        store = _make_store()
+        meta = _student_meta(student_slug)
+        space = job.get("space") or meta.get("space")
+        project = job.get("project") or meta.get("project")
+        result = collect_grade_batch(
+            student,
+            project_space=space,
+            batch_id=batch_id,
+            judge=judge,
+            store=store,
+            job_id=job_id,
+        )
+        row = _finalize_grade_rows(
+            store, job, student, student_slug, space, project, meta, [result], None
+        )
+        _update_job(job_id, status="succeeded", finished_at=utc_now_iso(), result=row)
+        _release_lock("grade", target)
+        store.delete_scratch(job_id)
+    except Exception as e:
+        print(f"Grade collect {job_id} failed:\n{traceback.format_exc()}")
+        if attempts < _BATCH_MAX_POLLS:
+            try:  # transient — re-poll rather than dead-letter a paid grade
+                _refresh_lock_ttl("grade", target)
+                _update_job(job_id, poll_attempts=attempts + 1)
+                _enqueue_delayed(_collect_message(job, attempts + 1))
+                return
+            except Exception:
+                pass
+        _update_job(
+            job_id,
+            status="failed",
+            finished_at=utc_now_iso(),
+            error=f"{type(e).__name__}: {e}",
+        )
+        _release_lock("grade", target)
 
 
 # ---------- sync ----------
@@ -342,7 +563,16 @@ def _process_job(job: dict[str, Any]) -> None:
     job_id = job["job_id"]
     job_type = job.get("job_type", "")
     target = job.get("target", "")
+
+    # A grade batch "collect" is a follow-up poll, not a fresh job: it manages
+    # its own status/lock lifecycle and needs no exercise materialize (it reads
+    # the stashed scratch + Claude only), so handle it before that expensive step.
+    if job_type == "grade" and job.get("phase") == "collect":
+        _process_grade_collect(job)
+        return
+
     _update_job(job_id, status="running", started_at=utc_now_iso())
+    release_lock = True
     try:
         # Lambda's image filesystem is read-only and the React SPA replaces
         # the static dashboard, so never attempt the frontend/dist/index.html rebuild.
@@ -356,7 +586,18 @@ def _process_job(job: dict[str, Any]) -> None:
         rows = _exercise_rows()
         _prune_excluded_exercises(rows)
         if job_type == "grade":
-            result = _run_grade_job(job, store)
+            # Full "grade all" (no task/tasks) → asynchronous 50%-cheaper batch.
+            # A subset or single-task regrade stays on the instant sync path.
+            if not job.get("task") and not job.get("tasks"):
+                outcome = _submit_grade_batch_job(job, store)
+                if not outcome["done"]:
+                    # A batch is in flight; the collect step owns the lock and
+                    # sets the final status. Nothing more to do here.
+                    release_lock = False
+                    return
+                result = outcome["result"]
+            else:
+                result = _run_grade_job(job, store)
         elif job_type in ("sync", "prep"):  # "prep" = pre-rename in-flight jobs
             result = _run_sync_job(job, store, rows)
         else:
@@ -373,7 +614,7 @@ def _process_job(job: dict[str, Any]) -> None:
             error=f"{type(e).__name__}: {e}",
         )
     finally:
-        if job_type and target:
+        if release_lock and job_type and target:
             _release_lock(job_type, target)
 
 
