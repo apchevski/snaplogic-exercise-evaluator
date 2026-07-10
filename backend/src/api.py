@@ -964,6 +964,11 @@ def post_grading() -> Response:
                 f"Unknown exercise folder {slug!r}. Omit 'task'/'tasks' to grade everything."
             )
         _reject_archived(slug, "grade")
+    # A full run (no task/tasks) is judged via the 50%-cheaper Message Batches
+    # API (asynchronous — the worker polls a batch to completion); a subset or
+    # single-task run stays on the instant synchronous path. The worker routes
+    # off the scope; `mode` is stored on the job purely for observability.
+    is_full_run = not task and not tasks
     payload = {
         "student": student,
         "student_slug": student_slug,
@@ -971,6 +976,7 @@ def post_grading() -> Response:
         "project": _opt_str(body, "project") or card.get("project"),
         "task": task,
         "tasks": tasks,
+        "mode": "batch" if is_full_run else "sync",
     }
     job = _create_job("grade", student_slug, payload, _email(claims))
     return Response(

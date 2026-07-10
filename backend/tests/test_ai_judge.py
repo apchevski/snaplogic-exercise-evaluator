@@ -175,3 +175,118 @@ def test_non_text_response_raises_judge_error():
     judge = AIJudge(client=EmptyClient())
     with pytest.raises(JudgeError):
         judge.judge_exercise(_bundle())
+
+
+# ----- Message Batches API (50% cheaper full runs) -----
+
+
+class StubBatchClient:
+    """Records batch requests and replays canned batch results."""
+
+    def __init__(self, results, status="ended"):
+        self.created_requests = None
+        self._results = results
+        self._status = status
+        self.messages = SimpleNamespace(
+            batches=SimpleNamespace(
+                create=self._create,
+                retrieve=self._retrieve,
+                results=self._results_fn,
+            )
+        )
+
+    def _create(self, requests):
+        self.created_requests = requests
+        return SimpleNamespace(id="batch_1")
+
+    def _retrieve(self, batch_id):
+        return SimpleNamespace(processing_status=self._status)
+
+    def _results_fn(self, batch_id):
+        return iter(self._results)
+
+
+def _batch_result(custom_id, payload=None, *, kind="succeeded", error_type=None):
+    if kind == "succeeded":
+        message = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=json.dumps(payload))],
+            usage=SimpleNamespace(
+                input_tokens=1_000,
+                output_tokens=200,
+                cache_creation_input_tokens=500,
+                cache_read_input_tokens=300,
+            ),
+            stop_reason="end_turn",
+        )
+        return SimpleNamespace(
+            custom_id=custom_id,
+            result=SimpleNamespace(type="succeeded", message=message),
+        )
+    return SimpleNamespace(
+        custom_id=custom_id,
+        result=SimpleNamespace(type=kind, error=SimpleNamespace(type=error_type)),
+    )
+
+
+def test_usage_cost_estimate_batch_is_half():
+    kw = dict(
+        input_tokens=1_000_000,
+        output_tokens=100_000,
+        cache_creation_input_tokens=200_000,
+        cache_read_input_tokens=400_000,
+        model="claude-sonnet-4-6",
+    )
+    assert JudgeUsage(batch=True, **kw).est_cost_usd == pytest.approx(
+        JudgeUsage(**kw).est_cost_usd / 2
+    )
+    assert JudgeUsage(batch=True, **kw).to_dict()["batch"] is True
+
+
+def test_build_batch_requests_matches_sync_params():
+    judge = AIJudge(client=StubClient([]))
+    bundle = _bundle()
+    reqs = judge.build_batch_requests({"task_01": bundle})
+    assert len(reqs) == 1
+    assert reqs[0]["custom_id"] == "task_01"
+    # The batched request reuses the exact synchronous params (shared cached
+    # rules prefix), only wrapped with a custom_id.
+    assert reqs[0]["params"] == judge._judge_params(bundle)
+    assert reqs[0]["params"]["model"] == DEFAULT_JUDGE_MODEL
+
+
+def test_submit_and_retrieve_batch():
+    stub = StubBatchClient(results=[], status="in_progress")
+    judge = AIJudge(client=stub)
+    reqs = judge.build_batch_requests({"task_01": _bundle()})
+    assert judge.submit_batch(reqs) == "batch_1"
+    assert stub.created_requests == reqs
+    assert judge.retrieve_batch_status("batch_1") == "in_progress"
+
+
+def test_collect_batch_finalizes_and_discounts_cost():
+    results = [
+        _batch_result("task_a", _raw(verdict="pass", deductions=[2])),
+        _batch_result("task_b", kind="errored", error_type="invalid_request"),
+    ]
+    judge = AIJudge(client=StubBatchClient(results=results))
+    bundles = {"task_a": _bundle(), "task_b": _bundle()}
+
+    evaluations, usage, errors = judge.collect_batch("batch_1", bundles)
+
+    assert set(evaluations) == {"task_a"}
+    assert evaluations["task_a"]["verdict"] == "pass"
+    assert evaluations["task_a"]["points"] == 8
+    assert "task_b" in errors  # errored result → no evaluation, logged
+    assert usage.batch is True and usage.calls == 1
+
+    sync = JudgeUsage(model=judge.model)
+    sync.add_response_usage(
+        SimpleNamespace(
+            input_tokens=1_000,
+            output_tokens=200,
+            cache_creation_input_tokens=500,
+            cache_read_input_tokens=300,
+        )
+    )
+    # Half the synchronous cost, within the 6-decimal rounding of est_cost_usd.
+    assert usage.est_cost_usd == pytest.approx(sync.est_cost_usd / 2, abs=1e-6)

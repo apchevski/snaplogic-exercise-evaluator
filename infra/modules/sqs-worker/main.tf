@@ -61,6 +61,13 @@ data "aws_iam_policy_document" "worker" {
     resources = ["${var.bucket_arn}/*"]
   }
   statement {
+    # Batch grading stashes its scratch under jobs/<id>/ and deletes it after
+    # the collect step finalizes the report. Delete is scoped to that prefix.
+    sid       = "S3DeleteScratch"
+    actions   = ["s3:DeleteObject"]
+    resources = ["${var.bucket_arn}/jobs/*"]
+  }
+  statement {
     sid       = "S3List"
     actions   = ["s3:ListBucket"]
     resources = [var.bucket_arn]
@@ -76,6 +83,9 @@ data "aws_iam_policy_document" "worker" {
       "sqs:ReceiveMessage",
       "sqs:DeleteMessage",
       "sqs:GetQueueAttributes",
+      # Self-redrive: a full-run grade job re-enqueues delayed "poll the batch"
+      # messages to its own queue until the async grading batch ends.
+      "sqs:SendMessage",
     ]
     resources = [aws_sqs_queue.jobs.arn]
   }
@@ -115,10 +125,12 @@ resource "aws_lambda_function" "worker" {
 
   environment {
     variables = {
-      TABLE_NAME                   = var.table_name
-      DATA_BUCKET                  = var.bucket_name
-      SECRET_ARN                   = var.secret_arn
-      JUDGE_MODEL                  = var.judge_model
+      TABLE_NAME  = var.table_name
+      DATA_BUCKET = var.bucket_name
+      SECRET_ARN  = var.secret_arn
+      JUDGE_MODEL = var.judge_model
+      # Full-run grade jobs re-enqueue delayed batch-poll messages to this queue.
+      QUEUE_URL                    = aws_sqs_queue.jobs.url
       EVALUATOR_EXERCISES_DIR      = "/tmp/evaluator/exercises"
       EVALUATOR_TMP_DIR            = "/tmp/evaluator/scratch"
       EVALUATOR_GRADES_DIR         = "/tmp/evaluator/grades"

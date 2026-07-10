@@ -24,10 +24,17 @@ tables, tabbed sub-nav):
   picker opens with every active exercise preselected — keep them all for a
   full run, or check just the exercises you want. A job queues, a worker
   Lambda runs the deterministic hard gates against SnapLogic, sends each
-  surviving exercise to Claude (Sonnet 4.6, ~$0.95 per full run), renders
-  the report, and the row refreshes live with points and per-task detail. A
-  full run also refreshes the AI Overall summary; a subset run only replaces
-  the selected exercises' results.
+  surviving exercise to Claude (Sonnet 4.6), renders the report, and the row
+  refreshes with points and per-task detail. A full run also refreshes the AI
+  Overall summary; a subset run only replaces the selected exercises' results.
+  - **Full runs use the Batch API (~50% cheaper).** Grading *all* exercises
+    submits the AI judging as one Anthropic Message **batch** billed at half
+    the standard token rate. The batch is **asynchronous**, so results are not
+    instant — usually a few minutes, occasionally up to an hour. The grade
+    dialog says so before you confirm; the row shows a **Batch grading…**
+    status and the report appears when the batch finishes (you can leave the
+    page). A **subset** selection and the per-card **Regrade** stay on the
+    instant **synchronous** path (normal cost).
 - **Add a student** (mentor or admin): click **Add Student** in the toolbar.
   The dialog takes the student's name plus the SnapLogic **project space**
   (prefilled with the configured default, `SNAPLOGIC_STUDENT_PROJECT_SPACE`)
@@ -125,6 +132,8 @@ Browser (VPN/office IPs only)
         │        space/project dictate later grading runs; an email creates a
         │        read-only Cognito login for the student      (mentor or admin)
         ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
+        │        (no task/tasks = full run → async 50%-off Batch API;
+        │         subset/single = instant synchronous)
         ├─ PATCH /v1/students/{slug}/report — edit evaluation (mentor or admin)
         │        (overall summary, or a task's summary/deductions/bonus/points;
         │        deductions recompute points unless a manual override pins them;
@@ -140,6 +149,8 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
           ├─ SnapLogic REST (GET-only, creds from Secrets Manager)
           ├─ grade: hard gates → Claude (Sonnet 4.6, structured outputs,
           │         prompt-cached rules) → report.md/.json → S3 + DynamoDB
+          │         (full run: Message Batches API @ 50% off, async
+          │          submit → self-redrive poll → collect; subset/single: sync)
           └─ sync:  evaluator.sync sync → artifacts to S3 ($0 AI)
 ```
 

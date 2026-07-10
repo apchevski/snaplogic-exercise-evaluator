@@ -41,6 +41,11 @@ class GradeRunResult:
     report: dict[str, Any]
     judged_count: int
     usage: JudgeUsage = field(default_factory=JudgeUsage)
+    # Set on the batch path only: the Overall call is a normal (full-price)
+    # request even when the per-exercise judging was batched at 50%, so the
+    # worker sums it as a separate usage record instead of folding it into the
+    # discounted `usage` above. None on the synchronous path (already merged).
+    overall_usage: JudgeUsage | None = None
 
     @property
     def counts(self) -> dict[str, int]:
@@ -166,4 +171,167 @@ def run_grade(
         report=report,
         judged_count=len(ready),
         usage=usage,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Batch full-run grading (submit → collect), used only by the cloud worker.
+#
+# A full "grade all exercises" run judges every ready exercise through the
+# Message Batches API at 50% of the standard token cost. Because the batch is
+# asynchronous, the run is split across two worker invocations: `submit`
+# (plan → fire the batch → stash scratch) and, once the batch ends, `collect`
+# (write evaluations → render report → Overall). Subset and single-task runs
+# stay on the synchronous `run_grade` above.
+# ---------------------------------------------------------------------------
+
+
+def _finalize_full_report(
+    student: str,
+    project_space: str | None,
+    *,
+    judge: AIJudge,
+    exercise_usage: JudgeUsage,
+    judged_count: int,
+) -> GradeRunResult:
+    """Render the full report from the on-disk manifest, then write Overall.
+
+    Shared by the batch submit fast path (no exercise needed AI) and the batch
+    collect step. Assumes `cmd_plan` already wrote the manifest and every
+    per-slug `evaluation.json` is present in the scratch tree. `cmd_report`
+    deletes the scratch dir on success, so this is the end of the run.
+    """
+    rc = grade.cmd_report(student, project_space, None)
+    if rc != 0:
+        raise GradeRunError(f"Report rendering failed for {student!r} (exit code {rc}).")
+
+    report_dir = GRADES_DIR / student
+    report_md_path = report_dir / "report.md"
+    report_json_path = report_dir / "report.json"
+    report = json.loads(report_json_path.read_text(encoding="utf-8"))
+
+    overall, overall_usage = judge.overall_summary(report)
+    if overall:
+        md = report_md_path.read_text(encoding="utf-8")
+        report_md_path.write_text(_replace_overall_in_md(md, overall), encoding="utf-8")
+        report["overall_summary"] = overall
+        report_json_path.write_text(
+            json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+    return GradeRunResult(
+        student=student,
+        report_dir=report_dir,
+        report_md_path=report_md_path,
+        report_json_path=report_json_path,
+        report=report,
+        judged_count=judged_count,
+        usage=exercise_usage,
+        overall_usage=overall_usage,
+    )
+
+
+def submit_grade_batch(
+    student: str,
+    *,
+    project_space: str | None,
+    project: str | None,
+    judge: AIJudge,
+    store: Any,
+    job_id: str,
+) -> dict[str, Any]:
+    """Plan a full run and submit the AI judging as one Message Batch.
+
+    Returns one of:
+      - ``{"done": True,  "result": GradeRunResult}`` — no exercise needed AI
+        (all resolved by hard gates), so the report was rendered synchronously.
+      - ``{"done": False, "batch_id": str, "judged_count": int}`` — a batch is
+        in flight; the scratch tree has been stashed in S3 for the collect step.
+    """
+    rc = grade.cmd_plan(student, project_space, None, project=project)
+    if rc != 0:
+        raise GradeRunError(
+            f"Hard-gate planning failed for {student!r} (exit code {rc}). "
+            "See the run log for the underlying error."
+        )
+    manifest_file = _manifest_path(student)
+    if not manifest_file.exists():
+        raise GradeRunError(f"Planner wrote no manifest at {manifest_file}.")
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+
+    ready = [e for e in manifest.get("entries", []) if e.get("status") == "ready_for_ai"]
+    if not ready:
+        # Nothing to judge — render the report (and Overall) now, no batch.
+        result = _finalize_full_report(
+            student,
+            project_space,
+            judge=judge,
+            exercise_usage=JudgeUsage(model=judge.model),
+            judged_count=0,
+        )
+        return {"done": True, "result": result}
+
+    bundles_by_id: dict[str, dict[str, Any]] = {}
+    for entry in ready:
+        bundle_path = grade._resolve_manifest_path(entry["ai_context_path"])
+        bundles_by_id[entry["slug"]] = json.loads(bundle_path.read_text(encoding="utf-8"))
+
+    batch_id = judge.submit_batch(judge.build_batch_requests(bundles_by_id))
+    store.upload_scratch(job_id, student)
+    return {"done": False, "batch_id": batch_id, "judged_count": len(ready)}
+
+
+def batch_status(batch_id: str, *, judge: AIJudge) -> str:
+    """Thin pass-through so the worker doesn't import AIJudge internals."""
+    return judge.retrieve_batch_status(batch_id)
+
+
+def collect_grade_batch(
+    student: str,
+    *,
+    project_space: str | None,
+    batch_id: str,
+    judge: AIJudge,
+    store: Any,
+    job_id: str,
+) -> GradeRunResult:
+    """Read a finished batch, write evaluations, and render the full report.
+
+    The scratch tree (manifest + per-slug ai_context.json) is restored from S3
+    first; the manifest is the single source of truth for which slugs were
+    batched. A slug whose batch result errored simply has no evaluation.json —
+    the renderer scores it 0 (missing evaluation), and the error is logged.
+    """
+    store.download_scratch(job_id, student)
+    manifest_file = _manifest_path(student)
+    if not manifest_file.exists():
+        raise GradeRunError(f"Scratch manifest missing after restore: {manifest_file}.")
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+
+    ready = [e for e in manifest.get("entries", []) if e.get("status") == "ready_for_ai"]
+    bundles_by_id: dict[str, dict[str, Any]] = {}
+    for entry in ready:
+        bundle_path = grade._resolve_manifest_path(entry["ai_context_path"])
+        bundles_by_id[entry["slug"]] = json.loads(bundle_path.read_text(encoding="utf-8"))
+
+    evaluations, usage, errors = judge.collect_batch(batch_id, bundles_by_id)
+    for entry in ready:
+        evaluation = evaluations.get(entry["slug"])
+        if evaluation is None:
+            continue
+        eval_path = grade._resolve_manifest_path(entry["evaluation_path"])
+        eval_path.parent.mkdir(parents=True, exist_ok=True)
+        eval_path.write_text(
+            json.dumps(evaluation, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        print(f"[{entry['slug']}] judged -> {evaluation['verdict']} ({evaluation['points']}/10)")
+    for slug, detail in errors.items():
+        print(f"[{slug}] batch result unusable: {detail}")
+
+    return _finalize_full_report(
+        student,
+        project_space,
+        judge=judge,
+        exercise_usage=usage,
+        judged_count=len(evaluations),
     )

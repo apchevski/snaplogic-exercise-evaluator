@@ -173,6 +173,62 @@ plan → judge → report loop the skill used to drive interactively.
   require a second factor for everyone (then the hosted UI handles enrollment and
   the in-app flow is unnecessary).
 
+## Batch grading for full runs (July 2026)
+
+To cut AI cost, a **full "grade all exercises" run** judges every exercise
+through Anthropic's **Message Batches API**, billed at **50%** of standard
+token rates. The batch is asynchronous (usually minutes, max 24h), which
+doesn't fit the synchronous worker (one invocation, 15-min cap), so a full
+grade is a **two-phase job on the existing SQS + worker** — no new AWS
+services:
+
+- **submit** (`worker._submit_grade_batch_job` → `runner.submit_grade_batch`):
+  materialize + `grade.cmd_plan` (hard gates for all exercises) → build one
+  batch from the `ready_for_ai` bundles (`AIJudge.build_batch_requests`,
+  `custom_id = slug`) → `batches.create` → stash the plan scratch
+  (`manifest.json` + per-slug `ai_context.json`/`evaluation.json`) in S3 under
+  `jobs/<job_id>/` (`S3Store.upload_scratch`) → set the JOB to
+  `batch_processing` + `batch_id` → **re-enqueue a delayed SQS message to our
+  own queue** (`_enqueue_delayed`, `phase: "collect"`). If the plan found
+  nothing to judge (all deterministic), the report is rendered synchronously
+  and there's no batch.
+- **collect** (`worker._process_grade_collect` → `runner.collect_grade_batch`):
+  the delayed message fires → `batches.retrieve`. Still processing → refresh
+  the lock TTL, bump `poll_attempts`, re-enqueue (bounded by
+  `_BATCH_MAX_POLLS`). Ended → restore the scratch, write each result's
+  `evaluation.json`, `grade.cmd_report` (full), one **synchronous** (full-price,
+  negligible) `overall_summary` call, upload the report + write the REPORT /
+  STUDENT rows (shared `_finalize_grade_rows`), release the lock, delete the S3
+  scratch.
+
+Why this shape:
+
+- **The wait is on Anthropic's side, not the worker.** submit and collect are
+  each a few seconds; between them the delayed poll message is invisible in
+  SQS, so the single-concurrency worker is free to grade other students.
+- **Scratch path invariance.** Manifest entries store paths anchored under
+  `TMP_DIR` (absolute `/tmp/...` on Lambda — `TMP_DIR` isn't under `REPO_ROOT`,
+  so `grade._rel_to_repo` falls back to absolute). Restoring the scratch to the
+  same `/tmp` path makes `grade._resolve_manifest_path` resolve unchanged, so
+  `cmd_report` runs as if it were one invocation.
+- **Lock across the gap.** The per-student `LOCK#grade#<slug>` (TTL 30 min) is
+  held from submit through collect and its TTL refreshed on each poll
+  (`_refresh_lock_ttl`), so a batch longer than 30 min can't lose its lock and
+  let a concurrent grade start. The lock is released only on a terminal outcome.
+- **Retry is safe.** Re-reading a *finished* batch costs nothing, so a
+  transient collect error re-enqueues (bounded) rather than dead-lettering a
+  grade whose paid batch already succeeded — unlike the general "never
+  auto-retry a paid job" DLQ rule, which still governs the sync path and submit.
+- **Cost accounting.** `JudgeUsage.batch` halves `est_cost_usd`; the per-exercise
+  batch usage carries it, the synchronous Overall call is recorded separately at
+  full price (`GradeRunResult.overall_usage`, summed by `_finalize_grade_rows`).
+
+Only the **full run** batches; a subset selection or single-task **Regrade**
+stays on the synchronous `run_grade` path (instant). The API routes on scope
+(`no task/tasks → batch`); it also stamps a cosmetic `mode` on the JOB row.
+Infra delta: the worker Lambda gains `sqs:SendMessage` on its own queue, a
+scoped `s3:DeleteObject` on `jobs/*`, and a `QUEUE_URL` env var.
+
 ## Canonical pipeline form
 
 We do **not** maintain an internal `PipelineIR` Pydantic model. The

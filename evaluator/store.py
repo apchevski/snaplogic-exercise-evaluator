@@ -61,6 +61,17 @@ class LocalStore:
             "report_json_key": str(report_dir / "report.json"),
         }
 
+    # Batch grading persists its scratch across the submit→collect gap. Local
+    # dev is one process, so the scratch stays on disk — these are no-ops.
+    def upload_scratch(self, job_id: str, student: str) -> int:
+        return 0
+
+    def download_scratch(self, job_id: str, student: str) -> int:
+        return 0
+
+    def delete_scratch(self, job_id: str) -> None:
+        return None
+
 
 class S3Store:
     """Lambda store: merged /tmp exercises dir + S3 for artifacts/reports."""
@@ -188,6 +199,74 @@ class S3Store:
             self._s3.upload_file(str(path), self.bucket, key)
             seeded.append(key)
         return seeded
+
+    # ----- batch grading scratch (survives the submit→collect gap) -----
+    #
+    # A full-run grade job submits an async Message Batch in one Lambda
+    # invocation and finalizes the report in a later one, after the batch ends.
+    # /tmp is wiped between invocations, so the plan's scratch tree
+    # (manifest.json + per-slug ai_context.json/evaluation.json) is stashed in
+    # S3 and restored to the SAME /tmp path — grade._resolve_manifest_path
+    # anchors on those absolute paths, so the report renderer works unchanged.
+
+    def _scratch_prefix(self, job_id: str) -> str:
+        return f"jobs/{job_id}/scratch/"
+
+    def _student_scratch_dir(self, student: str) -> Path:
+        return TMP_DIR / "grades" / student
+
+    def upload_scratch(self, job_id: str, student: str) -> int:
+        """Stash the student's scratch tree in S3; returns files uploaded.
+
+        The big per-slug ``student/`` pipeline dumps are skipped — cmd_report
+        never reads them, so shipping them would only bloat the payload.
+        """
+        base = self._student_scratch_dir(student)
+        prefix = self._scratch_prefix(job_id)
+        count = 0
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(base)
+            if "student" in rel.parts[1:]:  # skip <slug>/student/*
+                continue
+            self._s3.upload_file(str(path), self.bucket, prefix + rel.as_posix())
+            count += 1
+        return count
+
+    def download_scratch(self, job_id: str, student: str) -> int:
+        """Restore a stashed scratch tree into the same /tmp path; returns files."""
+        base = self._student_scratch_dir(student)
+        prefix = self._scratch_prefix(job_id)
+        count = 0
+        paginator = self._s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                rel = key[len(prefix):]
+                if not rel or rel.endswith("/"):
+                    continue
+                target = base / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                self._s3.download_file(self.bucket, key, str(target))
+                count += 1
+        return count
+
+    def delete_scratch(self, job_id: str) -> None:
+        """Delete the job's stashed scratch prefix after a successful collect."""
+        prefix = self._scratch_prefix(job_id)
+        paginator = self._s3.get_paginator("list_objects_v2")
+        to_delete: list[dict[str, str]] = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                to_delete.append({"Key": obj["Key"]})
+                if len(to_delete) == 1000:  # DeleteObjects caps at 1000/call
+                    self._s3.delete_objects(
+                        Bucket=self.bucket, Delete={"Objects": to_delete}
+                    )
+                    to_delete = []
+        if to_delete:
+            self._s3.delete_objects(Bucket=self.bucket, Delete={"Objects": to_delete})
 
     # ----- outbound: grading reports -----
 

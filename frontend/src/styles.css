@@ -280,8 +280,10 @@ tr.expand-row:hover td { background: #f8f9fb; }
 }
 .status-pill::before { content: "●"; font-size: 8px; }
 .status-pill.running::before { content: none; }
+.status-pill.batch_processing::before { content: none; }
 .status-pill.queued { color: #78909c; }
 .status-pill.running { color: var(--sl-blue); }
+.status-pill.batch_processing { color: var(--sl-blue); }
 .status-pill.succeeded { color: #2e7d32; }
 .status-pill.failed { color: #c62828; }
 .status-pill .spinner {
@@ -534,6 +536,16 @@ tr.expand-row:hover td { background: #f8f9fb; }
   min-height: 140px; resize: vertical;
 }
 .modal-body .hint { color: var(--sl-muted); font-size: 11.5px; margin-top: 3px; }
+.modal-body .info-note {
+  margin-top: 8px; padding: 9px 11px; border-radius: 6px;
+  font-size: 12px; line-height: 1.45;
+  color: #0d3c61; background: #e8f2fb; border: 1px solid #b6d8f2;
+}
+@media (prefers-color-scheme: dark) {
+  .modal-body .info-note {
+    color: #cfe6fb; background: #14304a; border-color: #24547e;
+  }
+}
 .modal-body p { margin: 0; }
 .modal-field input[type="file"] { font-size: 12.5px; color: #4a5560; display: block; }
 .modal > footer {

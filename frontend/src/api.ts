@@ -224,19 +224,30 @@ export async function uploadToPresignedUrl(url: string, file: File): Promise<voi
   }
 }
 
-/** Poll a job until it reaches a terminal state. */
+interface PollOptions {
+  intervalMs?: number;
+  timeoutMs?: number;
+  /** On timeout: "throw" a 408 (default), or "stop" and return the last job.
+   * A full "grade all" batch runs in the background and can outlast a browser
+   * poll, so it stops quietly — the report shows up on the next refresh. */
+  onTimeout?: "throw" | "stop";
+}
+
+/** Poll a job until it reaches a terminal state (or the timeout policy fires). */
 export async function pollJob(
   fetchJob: () => Promise<Job>,
   onUpdate: (job: Job) => void,
-  intervalMs = 3000,
-  timeoutMs = 20 * 60 * 1000,
+  { intervalMs = 3000, timeoutMs = 20 * 60 * 1000, onTimeout = "throw" }: PollOptions = {},
 ): Promise<Job> {
   const deadline = Date.now() + timeoutMs;
+  let last: Job | null = null;
   for (;;) {
     const job = await fetchJob();
+    last = job;
     onUpdate(job);
     if (job.status === "succeeded" || job.status === "failed") return job;
     if (Date.now() > deadline) {
+      if (onTimeout === "stop") return last;
       throw new ApiError(408, "Timed out waiting for the job to finish.");
     }
     await new Promise((r) => setTimeout(r, intervalMs));

@@ -149,10 +149,13 @@ export default function StudentDetail() {
 
   const name = student?.display_name ?? report?.student ?? slug;
 
-  // The backend holds one grade lock per student, so any queued/running
-  // job (full or single-task) disables every Regrade button.
+  // The backend holds one grade lock per student, so any in-flight job (full,
+  // batch, or single-task) disables every Regrade button.
   const anyBusy = Object.values(jobs).some(
-    (j) => j.status === "queued" || j.status === "running",
+    (j) =>
+      j.status === "queued" ||
+      j.status === "running" ||
+      j.status === "batch_processing",
   );
 
   const runGrading = useCallback(
@@ -160,9 +163,16 @@ export default function StudentDetail() {
       setError(null);
       try {
         const { id } = await api.startGrading(token, name, tasks);
+        // "Grade all" (no tasks) runs as an async batch — poll longer and stop
+        // quietly if it outlasts the page (the report shows on next refresh);
+        // a single-task Regrade stays instant on the default poll.
+        const fullRun = tasks === undefined;
         const job = await pollJob(
           () => api.getGrading(token, id),
           (j) => setJobs((prev) => ({ ...prev, [jobKey]: j })),
+          fullRun
+            ? { intervalMs: 8000, timeoutMs: 2 * 60 * 60 * 1000, onTimeout: "stop" }
+            : undefined,
         );
         if (job.status === "succeeded") {
           // Drop any in-progress text edit: the regraded report replaces it.

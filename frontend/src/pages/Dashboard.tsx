@@ -123,9 +123,16 @@ export default function Dashboard() {
       setError(null);
       try {
         const { id } = await api.startGrading(token, studentName, tasks ?? undefined);
+        // A full "grade all" run (tasks == null) judges via the async Batch
+        // API — it can take minutes to ~1h, so poll longer and, if it outlasts
+        // the browser, stop quietly (the report lands on the next refresh).
+        const fullRun = tasks == null;
         const job = await pollJob(
           () => api.getGrading(token, id),
           (j) => setJobs((prev) => ({ ...prev, [key]: j })),
+          fullRun
+            ? { intervalMs: 8000, timeoutMs: 2 * 60 * 60 * 1000, onTimeout: "stop" }
+            : undefined,
         );
         if (job.status === "succeeded") void refresh();
       } catch (e) {
@@ -176,7 +183,12 @@ export default function Dashboard() {
 
   const jobBusy = (key: string) => {
     const j = jobs[key];
-    return !!j && (j.status === "queued" || j.status === "running");
+    return (
+      !!j &&
+      (j.status === "queued" ||
+        j.status === "running" ||
+        j.status === "batch_processing")
+    );
   };
 
   const toggleExpanded = (slug: string) =>
