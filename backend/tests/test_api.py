@@ -1345,6 +1345,221 @@ def test_edit_report_without_stored_report_400(aws):
     assert resp["statusCode"] == 400
 
 
+def test_edit_task_differences_recomputes_points(aws):
+    slug, json_key, _ = _seed_student_report(aws, slug="edit-diffs", name="Edit Diffs")
+    resp = _call(
+        api_event(
+            "PATCH",
+            f"/v1/students/{slug}/report",
+            groups=("mentor",),
+            email="m@x.io",
+            body={
+                "task": "task_a",
+                "differences": [
+                    {
+                        "area": "Sort/Filter order",
+                        "description": "Sort runs before Filter.",
+                        "points_deducted": 2,
+                        "rule_source": "general_rules: filter before sort",
+                        "reasoning": "Wastes work.",
+                    },
+                    # Mention-only note: no rule_source/reasoning → defaulted.
+                    {"description": "Minor label nit.", "points_deducted": 0},
+                ],
+            },
+        )
+    )
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    task_a = next(t for t in data["report"]["tasks"] if t["slug"] == "task_a")
+    assert task_a["points"] == 8  # 10 − 2, verdict untouched
+    assert task_a["verdict"] == "pass"
+    assert len(task_a["differences"]) == 2
+    assert task_a["differences"][1]["rule_source"] == "none"
+    assert task_a["differences"][1]["area"] == "(unspecified)"
+    assert task_a["edited_by"] == "m@x.io"
+    # Student total drops 10 → 8 (task_b MISSING still contributes 0).
+    assert data["report"]["points_earned"] == 8
+    assert data["student"]["points_earned"] == 8
+
+    bucket = os.environ["DATA_BUCKET"]
+    stored = json.loads(aws["s3"].get_object(Bucket=bucket, Key=json_key)["Body"].read())
+    assert stored["points_earned"] == 8
+    stored_a = next(t for t in stored["tasks"] if t["slug"] == "task_a")
+    assert stored_a["points"] == 8
+    item = dynamo_table().get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"})["Item"]
+    assert int(item["points_earned"]) == 8
+
+
+def test_edit_task_bonus_answer(aws):
+    slug, json_key, _ = _seed_student_report(aws, slug="edit-bonus", name="Edit Bonus")
+    bucket = os.environ["DATA_BUCKET"]
+
+    def stored_task_a():
+        obj = aws["s3"].get_object(Bucket=bucket, Key=json_key)["Body"].read()
+        return next(t for t in json.loads(obj)["tasks"] if t["slug"] == "task_a")
+
+    resp = _call(
+        api_event(
+            "PATCH",
+            f"/v1/students/{slug}/report",
+            body={"task": "task_a", "bonus_question_answer": "Correct and clear."},
+        )
+    )
+    assert resp["statusCode"] == 200
+    assert stored_task_a()["bonus_question_answer"] == "Correct and clear."
+    assert stored_task_a()["points"] == 10  # bonus edit never moves points
+
+    # Empty string clears the answer (stored as null).
+    resp2 = _call(
+        api_event(
+            "PATCH",
+            f"/v1/students/{slug}/report",
+            body={"task": "task_a", "bonus_question_answer": ""},
+        )
+    )
+    assert resp2["statusCode"] == 200
+    assert stored_task_a()["bonus_question_answer"] is None
+
+
+def test_edit_deductions_or_bonus_on_missing_task_400(aws):
+    slug, _, _ = _seed_student_report(aws, slug="edit-miss", name="Edit Miss")
+
+    def patch(body):
+        return _call(api_event("PATCH", f"/v1/students/{slug}/report", body=body))
+
+    # task_b is MISSING — it has no verdict, deductions, or bonus to edit.
+    assert patch({"task": "task_b", "differences": []})["statusCode"] == 400
+    assert patch({"task": "task_b", "bonus_question_answer": "x"})["statusCode"] == 400
+    # Its summary can still be edited (unchanged behavior).
+    assert patch({"task": "task_b", "summary": "Mentor note."})["statusCode"] == 200
+
+
+def test_edit_differences_validation(aws):
+    slug, _, _ = _seed_student_report(aws, slug="edit-dv", name="Edit DV")
+
+    def patch(body):
+        return _call(api_event("PATCH", f"/v1/students/{slug}/report", body=body))
+
+    assert patch({"task": "task_a", "differences": "nope"})["statusCode"] == 400
+    # Each difference must describe itself.
+    assert (
+        patch({"task": "task_a", "differences": [{"area": "x", "points_deducted": 2}]})[
+            "statusCode"
+        ]
+        == 400
+    )
+    # A task field with no task slug is rejected.
+    assert patch({"differences": []})["statusCode"] == 400
+
+
+def _seed_one_task_report(aws, slug, task):
+    """Seed a student whose report has a single, caller-supplied task."""
+    bucket = os.environ["DATA_BUCKET"]
+    json_key = f"students/{slug}/v1/report.json"
+    report = {
+        "student": slug,
+        "counts": {"pass": 0, "fail": 1, "missing": 0, "needs_sync": 0, "total": 1},
+        "points_earned": task.get("points") or 0,
+        "points_possible": 10,
+        "tasks": [task],
+    }
+    aws["s3"].put_object(Bucket=bucket, Key=json_key, Body=json.dumps(report).encode())
+    dynamo_table().put_item(
+        Item={
+            "pk": f"STUDENT#{slug}",
+            "sk": "META",
+            "entity": "student",
+            "slug": slug,
+            "display_name": slug,
+            "report_json_key": json_key,
+        }
+    )
+    return json_key
+
+
+def test_edit_differences_on_procedural_fail_400(aws):
+    # A pipeline-name mismatch is a procedural FAIL: 0 points, no AI, empty
+    # deductions. Editing its deductions must be rejected so the fixed 0 isn't
+    # silently recomputed to 10 (= 10 − Σ of an empty list).
+    json_key = _seed_one_task_report(
+        aws,
+        "edit-proc",
+        {
+            "slug": "task_a",
+            "status": "evaluated",
+            "verdict": "fail",
+            "points": 0,
+            "summary": "Hard gate failed: pipeline_name_match",
+            "differences": [],
+            "failing_gate": "pipeline_name_match",
+        },
+    )
+
+    def patch(body):
+        return _call(api_event("PATCH", "/v1/students/edit-proc/report", body=body))
+
+    assert (
+        patch({"task": "task_a", "differences": [{"description": "x"}]})["statusCode"]
+        == 400
+    )
+    assert patch({"task": "task_a", "bonus_question_answer": "x"})["statusCode"] == 400
+    # The summary stays editable (fix the wording, not the fixed score).
+    assert patch({"task": "task_a", "summary": "Rename the pipeline."})["statusCode"] == 200
+    stored = json.loads(
+        aws["s3"].get_object(Bucket=os.environ["DATA_BUCKET"], Key=json_key)["Body"].read()
+    )
+    assert stored["tasks"][0]["points"] == 0
+
+
+def test_edit_differences_on_output_mismatch_fail_allowed(aws):
+    # An output-mismatch FAIL went to the AI for partial credit, so its
+    # deductions are editable and points recompute — but the verdict stays FAIL.
+    json_key = _seed_one_task_report(
+        aws,
+        "edit-om",
+        {
+            "slug": "task_a",
+            "status": "evaluated",
+            "verdict": "fail",
+            "points": 6,
+            "summary": "Close, but the output differs.",
+            "differences": [
+                {
+                    "area": "Mapper",
+                    "description": "Wrong column.",
+                    "points_deducted": 4,
+                    "rule_source": "none",
+                    "reasoning": "",
+                }
+            ],
+            "failing_gate": "output_match",
+        },
+    )
+    resp = _call(
+        api_event(
+            "PATCH",
+            "/v1/students/edit-om/report",
+            body={
+                "task": "task_a",
+                "differences": [
+                    {"area": "Mapper", "description": "Minor slip.", "points_deducted": 1}
+                ],
+            },
+        )
+    )
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    task_a = data["report"]["tasks"][0]
+    assert task_a["points"] == 9  # 10 − 1
+    assert task_a["verdict"] == "fail"  # output still wrong → verdict unchanged
+    assert data["report"]["points_earned"] == 9
+    stored = json.loads(
+        aws["s3"].get_object(Bucket=os.environ["DATA_BUCKET"], Key=json_key)["Body"].read()
+    )
+    assert stored["tasks"][0]["points"] == 9
+
+
 def test_list_exercises_s3_description_wins_over_image_copy(aws, evaluator_dirs):
     """After a UI edit the S3 copy is canonical — a stale image copy of the
     same folder must not shadow it."""

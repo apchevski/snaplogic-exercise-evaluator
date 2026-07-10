@@ -183,7 +183,8 @@ history.
   API Lambda re-checks source IP and enforces the role matrix (the UI only
   hides buttons — the backend is the real gate).
 - **Role matrix:** admins do everything (sync, exercise authoring/archiving,
-  hard deletes); mentors grade, register students, and edit report text;
+  hard deletes); mentors grade, register students, and edit evaluations
+  (summary, deductions, and bonus answer);
   students are read-only **and scoped to their own grades** — a signed-in
   student lands on `/students/<own-slug>` and sees only their own card
   (`GET /v1/students` returns just that card; any other student's detail or
@@ -204,8 +205,10 @@ topo-sorted snap flows + both raw pipeline JSONs → Python recomputes points �
 `report.md`/`report.json` written as a new immutable S3 version, card + JOB
 updated, row refreshes live. Full runs regenerate the AI **Overall** summary;
 scoped runs merge into the existing report and leave it untouched. Per-task
-**Regrade** and $0 inline **report-text editing** (PATCH) work on the same
-stored report.
+**Regrade** and $0 inline **evaluation editing** (PATCH — overall summary, or a
+task's summary / deductions / bonus answer; editing deductions recomputes that
+task's points as `10 − Σ` and the student total, verdict untouched) work on the
+same stored report.
 
 **Sync** (admin, $0 — no AI): per exercise or Sync All. The worker synthesizes
 `task.json` from the row's `task_config`, fetches the solution pipeline and its

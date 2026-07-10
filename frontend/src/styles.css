@@ -364,6 +364,46 @@ tr.expand-row:hover td { background: #f8f9fb; }
 }
 .editor-actions { display: flex; gap: 6px; }
 
+/* inline editing of a whole task evaluation (summary + deductions + bonus) */
+.eval-editor {
+  margin: 8px 0 4px; display: flex; flex-direction: column; gap: 12px; flex: 1;
+}
+.eval-field { display: flex; flex-direction: column; gap: 3px; }
+.eval-field.grow { flex: 1 1 0; min-width: 0; }
+.eval-field.points { flex: 0 0 84px; }
+.eval-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--sl-muted);
+}
+.eval-sublabel { font-size: 10.5px; font-weight: 600; color: var(--sl-muted); }
+.eval-editor textarea, .eval-editor input {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--sl-input-border);
+  border-radius: 3px; font-size: 13px; line-height: 1.5; color: inherit;
+  font-family: inherit;
+}
+.eval-editor textarea { resize: vertical; }
+.eval-editor input[type="number"] { text-align: right; }
+.eval-section {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 10px; border: 1px solid var(--sl-row-border);
+  border-radius: 3px; background: #fafbfc;
+}
+.eval-section-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.eval-points-preview {
+  font-size: 12px; font-weight: 600; font-family: var(--mono); color: #256d29;
+}
+.eval-points-hint { color: var(--sl-muted); font-weight: 400; }
+.eval-empty { margin: 0; font-size: 12.5px; color: var(--sl-muted); }
+.eval-diff {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px; border: 1px solid var(--sl-row-border);
+  border-radius: 3px; background: white;
+}
+.eval-diff-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.eval-diff-kind { margin: 0; font-size: 11px; color: var(--sl-muted); }
+
 /* ---------- task results ---------- */
 .tasks { display: flex; flex-direction: column; gap: 10px; }
 .task {

@@ -33,12 +33,13 @@ function DiffItem({ d }: { d: Difference }) {
 export function TaskCard({
   task,
   action,
-  summaryEditor,
+  editor,
 }: {
   task: TaskResult;
   action?: ReactNode;
-  /** When set, rendered in place of the summary paragraph (inline editing). */
-  summaryEditor?: ReactNode;
+  /** When set, replaces the whole evaluation body (summary + deductions +
+   * notes + bonus) with an inline editor. The header (verdict, points) stays. */
+  editor?: ReactNode;
 }) {
   const verdict = task.verdict || task.status || "unknown";
   const pts = typeof task.points === "number" ? task.points : null;
@@ -61,42 +62,45 @@ export function TaskCard({
       {task.student_pipeline_name && (
         <p className="task-pipeline">Pipeline: {task.student_pipeline_name}</p>
       )}
-      {summaryEditor ??
-        ((task.summary || task.reason) && (
-          <p className="summary">{task.summary || task.reason}</p>
-        ))}
-      {task.failing_gate && (
+      {editor ?? (
         <>
-          <p className="failing-gate">Failing gate: {task.failing_gate}</p>
-          {task.failing_gate_detail && (
-            <pre className="failing-gate">{task.failing_gate_detail}</pre>
+          {(task.summary || task.reason) && (
+            <p className="summary">{task.summary || task.reason}</p>
+          )}
+          {task.failing_gate && (
+            <>
+              <p className="failing-gate">Failing gate: {task.failing_gate}</p>
+              {task.failing_gate_detail && (
+                <pre className="failing-gate">{task.failing_gate_detail}</pre>
+              )}
+            </>
+          )}
+          {deductions.length > 0 && (
+            <>
+              <div className="section-label">
+                Deductions<span className="total-cost">(−{totalCost})</span>
+              </div>
+              <ul className="diff-list">
+                {deductions.map((d, i) => (
+                  <DiffItem key={i} d={d} />
+                ))}
+              </ul>
+            </>
+          )}
+          {notes.length > 0 && (
+            <>
+              <div className="section-label">Notes (no deduction)</div>
+              <ul className="diff-list">
+                {notes.map((d, i) => (
+                  <DiffItem key={i} d={d} />
+                ))}
+              </ul>
+            </>
+          )}
+          {task.bonus_question_answer && (
+            <p className="bonus">Bonus: {task.bonus_question_answer}</p>
           )}
         </>
-      )}
-      {deductions.length > 0 && (
-        <>
-          <div className="section-label">
-            Deductions<span className="total-cost">(−{totalCost})</span>
-          </div>
-          <ul className="diff-list">
-            {deductions.map((d, i) => (
-              <DiffItem key={i} d={d} />
-            ))}
-          </ul>
-        </>
-      )}
-      {notes.length > 0 && (
-        <>
-          <div className="section-label">Notes (no deduction)</div>
-          <ul className="diff-list">
-            {notes.map((d, i) => (
-              <DiffItem key={i} d={d} />
-            ))}
-          </ul>
-        </>
-      )}
-      {task.bonus_question_answer && (
-        <p className="bonus">Bonus: {task.bonus_question_answer}</p>
       )}
     </div>
   );

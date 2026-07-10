@@ -977,20 +977,87 @@ def post_grading() -> Response:
     )
 
 
+# Hard-gate failures that still route to the AI judge for partial credit
+# (points = 10 − Σ deductions). Mirrors evaluator.evaluate._OUTPUT_MISMATCH_GATES;
+# kept here so the API doesn't import the SnapLogic-touching evaluate module.
+_OUTPUT_MISMATCH_GATES = frozenset({"output_match", "triggered_task_responses_match"})
+
+
+def _task_is_ai_judged(task: dict[str, Any]) -> bool:
+    """True when the task's score came from the AI judge — so its deductions
+    and bonus can be edited and points safely recomputed as 10 − Σ deductions.
+
+    False for a MISSING / NEEDS-SYNC task (never reached the AI) and for a
+    *procedural* FAIL such as a pipeline-name mismatch, which is fixed at 0
+    points with no AI call and an empty deduction list: recomputing 10 − Σ
+    there would wrongly hand it full marks.
+    """
+    if task.get("status") != "evaluated":
+        return False
+    if task.get("verdict") == "fail":
+        gate = task.get("failing_gate")
+        if gate and gate not in _OUTPUT_MISMATCH_GATES:
+            return False
+    return True
+
+
+def _clean_difference(d: Any) -> dict[str, Any]:
+    """Coerce a mentor-supplied difference into the canonical report shape.
+
+    Mirrors evaluator.ai_judge._finalize_evaluation so a hand-edited
+    deduction is indistinguishable from an AI-produced one: five known keys,
+    points_deducted an int clamped to [0, MAX_POINTS_PER_EXERCISE], and the
+    two "source"/"reasoning" fields defaulted rather than left blank.
+    """
+    from evaluator.grade import MAX_POINTS_PER_EXERCISE
+
+    if not isinstance(d, dict):
+        raise BadRequestError("Each difference must be an object.")
+    try:
+        pts = int(d.get("points_deducted") or 0)
+    except (TypeError, ValueError):
+        pts = 0
+    pts = max(0, min(pts, MAX_POINTS_PER_EXERCISE))
+    description = str(d.get("description") or "").strip()
+    if not description:
+        raise BadRequestError("Each difference needs a non-empty 'description'.")
+    return {
+        "area": (str(d.get("area") or "").strip() or "(unspecified)"),
+        "description": description,
+        "points_deducted": pts,
+        "rule_source": (str(d.get("rule_source") or "").strip() or "none"),
+        "reasoning": str(d.get("reasoning") or "").strip(),
+    }
+
+
 @app.patch("/v1/students/<slug>/report")
 def patch_student_report(slug: str) -> dict[str, Any]:
-    """Edit AI-written report text in place (admin or mentor).
+    """Edit a graded report in place (admin or mentor) — no re-grade, no AI cost.
 
-    Accepted keys — only the ones present are applied:
-      overall_summary    replacement text for the report's Overall paragraph
-      task + summary     replacement summary text for one task
+    Report-level key:
+      overall_summary          replacement text for the Overall paragraph
 
-    Rewrites the latest stored report.json (and the report.md Overall
-    section) at its existing S3 key — verdicts, points and deductions are
-    untouched. This lets a mentor fix the AI's wording without paying for a
-    re-grade. Edits to a task's summary are overwritten by the next re-grade
-    of that task, which is the intended semantics: new grading, new text.
+    Task-level keys (all need 'task' = the exercise slug; only the ones
+    present are applied):
+      summary                  replacement summary text
+      differences              full replacement list of deductions + notes;
+                               each item is {area, description, points_deducted,
+                               rule_source, reasoning}. The task's points are
+                               recomputed as max(0, 10 - Σ points_deducted) —
+                               the same invariant the AI judge uses — and the
+                               student's points_earned total is refreshed.
+      bonus_question_answer    replacement bonus text, or null/"" to clear it
+
+    'differences' and 'bonus_question_answer' apply only to an AI-judged task
+    (see _task_is_ai_judged): a MISSING / NEEDS-SYNC task or a procedural FAIL
+    (e.g. name mismatch) has a fixed score and no deductions to edit.
+    Rewrites the latest stored report.json at its existing S3 key (and the
+    report.md Overall section for an overall edit); verdicts are never changed.
+    Any of these edits is overwritten by the next re-grade of that task, which
+    is the intended semantics: new grading, new evaluation.
     """
+    from evaluator.grade import MAX_POINTS_PER_EXERCISE, _sum_points
+
     claims = _require_role(ROLE_ADMIN, ROLE_MENTOR)
     body = app.current_event.json_body or {}
 
@@ -999,18 +1066,41 @@ def patch_student_report(slug: str) -> dict[str, Any]:
         new_overall = str(body.get("overall_summary") or "").strip()
         if not new_overall:
             raise BadRequestError("overall_summary must not be empty.")
-    task_edit: tuple[str, str] | None = None
-    if "task" in body or "summary" in body:
-        task_slug = str(body.get("task") or "").strip()
-        task_summary = str(body.get("summary") or "").strip()
-        if not task_slug or not task_summary:
-            raise BadRequestError(
-                "Editing a task summary needs non-empty 'task' and 'summary'."
-            )
-        task_edit = (task_slug, task_summary)
-    if new_overall is None and task_edit is None:
+
+    task_slug = str(body.get("task") or "").strip()
+    edit_summary = "summary" in body
+    edit_diffs = "differences" in body
+    edit_bonus = "bonus_question_answer" in body
+    if (edit_summary or edit_diffs or edit_bonus) and not task_slug:
+        raise BadRequestError("Editing a task needs a non-empty 'task' slug.")
+
+    new_summary: str | None = None
+    if edit_summary:
+        new_summary = str(body.get("summary") or "").strip()
+        if not new_summary:
+            raise BadRequestError("summary must not be empty.")
+
+    new_diffs: list[dict[str, Any]] | None = None
+    if edit_diffs:
+        raw_diffs = body.get("differences")
+        if not isinstance(raw_diffs, list):
+            raise BadRequestError("'differences' must be a list.")
+        new_diffs = [_clean_difference(d) for d in raw_diffs]
+
+    new_bonus: str | None = None
+    if edit_bonus:
+        raw_bonus = body.get("bonus_question_answer")
+        # null or "" clears the bonus answer; any other value is stored as text.
+        new_bonus = None if raw_bonus is None else (str(raw_bonus).strip() or None)
+
+    if new_overall is None and not task_slug:
         raise BadRequestError(
-            "Body must include 'overall_summary' and/or 'task' + 'summary'."
+            "Body must include 'overall_summary' and/or a task edit."
+        )
+    if task_slug and not (edit_summary or edit_diffs or edit_bonus):
+        raise BadRequestError(
+            "A task edit needs 'summary', 'differences', and/or "
+            "'bonus_question_answer'."
         )
 
     item = dynamo_table().get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"}).get("Item")
@@ -1027,22 +1117,46 @@ def patch_student_report(slug: str) -> dict[str, Any]:
     report = json.loads(obj["Body"].read().decode("utf-8"))
     editor = _email(claims)
     now = utc_now_iso()
+    points_changed = False
 
-    if task_edit is not None:
-        task_slug, task_summary = task_edit
+    if task_slug:
         task = next(
             (t for t in report.get("tasks") or [] if t.get("slug") == task_slug), None
         )
         if task is None:
             raise NotFoundError(f"No task {task_slug!r} in the stored report.")
-        task["summary"] = task_summary
-        task["summary_edited_by"] = editor
-        task["summary_edited_at"] = now
+        # Deductions and the bonus answer only exist for an AI-judged task. A
+        # MISSING / NEEDS-SYNC one has no verdict, and a procedural FAIL is
+        # fixed at 0 points with no AI call — neither has deductions to edit or
+        # a 10 − Σ score to recompute.
+        if (edit_diffs or edit_bonus) and not _task_is_ai_judged(task):
+            raise BadRequestError(
+                "Only an AI-judged exercise has deductions or a bonus answer to "
+                "edit. A missing or name-mismatch result has a fixed score."
+            )
+        if new_summary is not None:
+            task["summary"] = new_summary
+            task["summary_edited_by"] = editor
+            task["summary_edited_at"] = now
+        if edit_diffs:
+            task["differences"] = new_diffs
+            total_ded = sum(int(d["points_deducted"]) for d in new_diffs or [])
+            # Same invariant as the AI judge: points = 10 − Σ deductions, floored
+            # at 0. The verdict is a hard-gate outcome and is left untouched.
+            task["points"] = max(0, MAX_POINTS_PER_EXERCISE - total_ded)
+            points_changed = True
+        if edit_bonus:
+            task["bonus_question_answer"] = new_bonus
+        task["edited_by"] = editor
+        task["edited_at"] = now
 
     if new_overall is not None:
         report["overall_summary"] = new_overall
         report["overall_summary_edited_by"] = editor
         report["overall_summary_edited_at"] = now
+
+    if points_changed:
+        report["points_earned"] = _sum_points(report.get("tasks") or [])
 
     s3.put_object(
         Bucket=data_bucket(),
@@ -1072,6 +1186,9 @@ def patch_student_report(slug: str) -> dict[str, Any]:
     if new_overall is not None:
         update_expr += ", overall_summary = :s"
         values[":s"] = new_overall
+    if points_changed:
+        update_expr += ", points_earned = :pe"
+        values[":pe"] = report["points_earned"]
     dynamo_table().update_item(
         Key={"pk": f"STUDENT#{slug}", "sk": "META"},
         UpdateExpression=update_expr,
@@ -1081,6 +1198,8 @@ def patch_student_report(slug: str) -> dict[str, Any]:
     meta["report_edited_at"] = now
     if new_overall is not None:
         meta["overall_summary"] = new_overall
+    if points_changed:
+        meta["points_earned"] = report["points_earned"]
     # Same shape as GET /v1/students/{slug} so the UI can swap state directly.
     return {"student": meta, "report": report}
 

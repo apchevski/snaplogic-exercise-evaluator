@@ -60,12 +60,18 @@ tables, tabbed sub-nav):
   as **not graded** cards on the detail page — each with its own **Grade**
   button — plus a **Not Graded** count column on the dashboard (next to
   Pass/Fail/Missing) and a badge in the grade summary.
-- **Edit report text** (mentor or admin): next to each task card's Regrade
+- **Edit an evaluation** (mentor or admin): next to each task card's Regrade
   button — and beside the Overall summary — a pencil button opens an inline
-  editor to rewrite the AI's summary text. Edits are saved into the stored
-  report in place ($0 — no re-grade); verdicts, points, and deductions are
-  untouched. Regrading a task later replaces its edited summary with fresh
-  AI text.
+  editor. Beside the Overall paragraph it rewrites that summary; on a task card
+  it opens the **whole evaluation**: the summary, the list of deductions and
+  notes (add/edit/remove each one's area, description, −points, rule source and
+  reasoning), and the bonus-question assessment. Editing the deductions
+  recomputes that exercise's points the same way the AI judge does
+  (`points = 10 − Σ deductions`, floored at 0) and refreshes the student's
+  total — a live preview shows the new score as you edit. Edits are saved into
+  the stored report in place ($0 — no re-grade); the pass/fail verdict (a
+  hard-gate outcome) is never changed. Regrading a task later replaces its
+  edited evaluation with fresh AI text.
 - **Sync** (admin only): click Sync on an exercise to refresh its solution
   cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
 - **Remove a student** (admin only): a red **Remove** button on the
@@ -111,7 +117,9 @@ Browser (VPN/office IPs only)
         │        space/project dictate later grading runs; an email creates a
         │        read-only Cognito login for the student      (mentor or admin)
         ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
-        ├─ PATCH /v1/students/{slug}/report — edit AI text    (mentor or admin)
+        ├─ PATCH /v1/students/{slug}/report — edit evaluation (mentor or admin)
+        │        (overall summary, or a task's summary/deductions/bonus; editing
+        │        deductions recomputes that task's points + the student total)
         ├─ POST /v1/syncs {slug?}                             (admin only)
         ├─ POST/PUT /v1/exercises — create / edit / archive   (admin only)
         ├─ DELETE /v1/students/{slug} — purge everything      (admin only)

@@ -24,6 +24,25 @@ export interface TaskResult {
   failing_gate_detail?: string | null;
 }
 
+// Hard-gate failures that still route to the AI judge for partial credit
+// (points = 10 − Σ deductions). Mirrors backend _OUTPUT_MISMATCH_GATES.
+const OUTPUT_MISMATCH_GATES = new Set(["output_match", "triggered_task_responses_match"]);
+
+/** True when the task's score came from the AI judge, so its deductions and
+ * bonus answer can be edited (points recompute as 10 − Σ deductions). False for
+ * MISSING / NEEDS-SYNC tasks and procedural FAILs (e.g. name mismatch), whose
+ * score is fixed and whose empty deduction list must not be recomputed. */
+export function isAiJudged(task: TaskResult): boolean {
+  if (task.status !== "evaluated") return false;
+  if (
+    task.verdict === "fail" &&
+    task.failing_gate &&
+    !OUTPUT_MISMATCH_GATES.has(task.failing_gate)
+  )
+    return false;
+  return true;
+}
+
 export interface Counts {
   pass: number;
   fail: number;

@@ -7,10 +7,15 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/table";
 import { TaskCard, tierForRatio } from "../components/TaskCard";
+import {
+  TaskEvaluationEditor,
+  type TaskEvaluationPayload,
+} from "../components/TaskEvaluationEditor";
 import type { Exercise, Job, Report, StudentMeta, TaskResult } from "../types";
 
-// Edit target for the AI-written text: the report's Overall paragraph or one
-// task's summary. Saving PATCHes the stored report in place — no re-grade.
+// Edit target for the AI-written evaluation: the report's Overall paragraph,
+// or one task's whole evaluation (summary + deductions + bonus). Saving
+// PATCHes the stored report in place — no re-grade.
 type EditTarget = { kind: "overall" } | { kind: "task"; slug: string };
 
 function PencilIcon() {
@@ -116,9 +121,14 @@ export default function StudentDetail() {
 
   const gradeAll = useCallback(() => runGrading("__all__"), [runGrading]);
 
-  const startEdit = (target: EditTarget, currentText: string) => {
-    setEditing(target);
+  const startOverallEdit = (currentText: string) => {
+    setEditing({ kind: "overall" });
     setDraft(currentText);
+    setEditError(null);
+  };
+
+  const startTaskEdit = (taskSlug: string) => {
+    setEditing({ kind: "task", slug: taskSlug });
     setEditError(null);
   };
 
@@ -127,17 +137,14 @@ export default function StudentDetail() {
     setEditError(null);
   };
 
-  const saveEdit = async () => {
-    if (!editing) return;
-    const text = draft.trim();
-    if (!text) return;
+  // Push a report edit and swap in the returned state. `payload` is either the
+  // overall summary or a task's edited fields (summary/differences/bonus).
+  const applyEdit = async (
+    payload: Parameters<typeof api.updateStudentReport>[2],
+  ) => {
     setSavingEdit(true);
     setEditError(null);
     try {
-      const payload =
-        editing.kind === "overall"
-          ? { overall_summary: text }
-          : { task: editing.slug, summary: text };
       const updated = await api.updateStudentReport(token, slug, payload);
       setStudent(updated.student);
       setReport(updated.report);
@@ -149,6 +156,17 @@ export default function StudentDetail() {
     } finally {
       setSavingEdit(false);
     }
+  };
+
+  const saveOverall = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    await applyEdit({ overall_summary: text });
+  };
+
+  const saveTaskEval = async (payload: TaskEvaluationPayload) => {
+    if (editing?.kind !== "task") return;
+    await applyEdit({ task: editing.slug, ...payload });
   };
 
   if (loading) return <main className="page">Loading…</main>;
@@ -194,8 +212,9 @@ export default function StudentDetail() {
     report?.student_project_path ?? student?.student_project_path;
   const gradedAt = report?.graded_at ?? student?.graded_at;
 
-  // Shared inline editor rendered in place of whichever text is being edited.
-  const editorNode = (
+  // Overall-summary editor: a single textarea. Task evaluations use the richer
+  // TaskEvaluationEditor (summary + deductions + bonus) rendered per-card.
+  const overallEditorNode = (
     <div className="summary-editor">
       <textarea
         value={draft}
@@ -207,7 +226,7 @@ export default function StudentDetail() {
       <div className="editor-actions">
         <button
           className="btn small primary"
-          onClick={() => void saveEdit()}
+          onClick={() => void saveOverall()}
           disabled={savingEdit || !draft.trim()}
         >
           {savingEdit ? "Saving…" : "Save"}
@@ -234,7 +253,15 @@ export default function StudentDetail() {
     ) : null;
 
   const taskEditor = (t: TaskResult) =>
-    editing?.kind === "task" && editing.slug === t.slug ? editorNode : undefined;
+    editing?.kind === "task" && editing.slug === t.slug ? (
+      <TaskEvaluationEditor
+        task={t}
+        saving={savingEdit}
+        error={editError}
+        onSave={(payload) => void saveTaskEval(payload)}
+        onCancel={cancelEdit}
+      />
+    ) : undefined;
 
   return (
     <main className="page">
@@ -288,7 +315,7 @@ export default function StudentDetail() {
             </div>
           )}
           {editing?.kind === "overall" ? (
-            editorNode
+            overallEditorNode
           ) : report ? (
             <div className="overall-row">
               {overallText ? (
@@ -297,7 +324,7 @@ export default function StudentDetail() {
                 <p className="overall muted">No overall summary yet.</p>
               )}
               {editPencil("Edit overall summary", () =>
-                startEdit({ kind: "overall" }, overallText),
+                startOverallEdit(overallText),
               )}
             </div>
           ) : (
@@ -335,17 +362,12 @@ export default function StudentDetail() {
                 <TaskCard
                   key={t.slug}
                   task={t}
-                  summaryEditor={taskEditor(t)}
+                  editor={taskEditor(t)}
                   action={
                     canGrade ? (
                       <span className="actions-cell">
                         {jobs[t.slug] && <StatusPill job={jobs[t.slug]} kind="grade" />}
-                        {editPencil("Edit summary", () =>
-                          startEdit(
-                            { kind: "task", slug: t.slug },
-                            t.summary || t.reason || "",
-                          ),
-                        )}
+                        {editPencil("Edit evaluation", () => startTaskEdit(t.slug))}
                         <button
                           className="btn small"
                           onClick={() =>

@@ -8,6 +8,7 @@ import type {
   CreateExerciseResult,
   DeleteExerciseSummary,
   DeleteStudentSummary,
+  Difference,
   Exercise,
   ExerciseDetail,
   Job,
@@ -89,12 +90,20 @@ export const api = {
       `/v1/students/${encodeURIComponent(slug)}`,
     ),
 
-  // Rewrite AI-written report text in place (overall summary or one task's
-  // summary) — no re-grade, no AI cost. Returns the same shape as getStudent.
+  // Edit a graded report in place — no re-grade, no AI cost. Either the
+  // report's overall summary, or one task's summary / deductions (differences)
+  // / bonus answer. Editing differences recomputes that task's points and the
+  // student total server-side. Returns the same shape as getStudent.
   updateStudentReport: (
     token: string,
     slug: string,
-    payload: { overall_summary?: string; task?: string; summary?: string },
+    payload: {
+      overall_summary?: string;
+      task?: string;
+      summary?: string;
+      differences?: Difference[];
+      bonus_question_answer?: string | null;
+    },
   ) =>
     request<{ student: StudentMeta; report: Report }>(
       token,
