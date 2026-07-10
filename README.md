@@ -41,11 +41,15 @@ tables, tabbed sub-nav):
   additionally creates a read-only web login for the student: Cognito emails
   them a temporary password, they change it on first sign-in, and from then
   on they can watch their grades (see the `student` role below).
-- **Student sign-in** (read-only): users in the `student` Cognito group see
-  the same Students and Exercises pages mentors see — grades, summaries,
-  task descriptions, downloadable input files — but every action is gone
-  (and 403s server-side): no grading, no registering, no report edits, no
-  instructor notes.
+- **Student sign-in** (read-only, own grades only): a user in the `student`
+  Cognito group lands directly on their **own** grades page
+  (`/students/<their-slug>`) and sees nothing else — no roster of other
+  students, no navigation. They get their verdicts, points, overall summary,
+  and per-exercise feedback, but every action is gone (and 403s server-side):
+  no grading, no registering, no report edits, no instructor notes. The
+  backend enforces the scope too — `GET /v1/students` returns only the
+  student's own card, and any other student's detail/reports 403s. The link
+  between the login and the card is the email stored at registration.
 - **Regrade one exercise** (mentor or admin): on a student's detail page,
   every task card has a **Regrade** button that re-runs just that exercise
   (one Claude call instead of one per exercise — faster and cheaper than a
@@ -99,7 +103,8 @@ python -m evaluator run <student>   # local twin of the cloud grade job
 Browser (VPN/office IPs only)
   ├─► CloudFront ── CF Function (IP allowlist) ──► S3 (React SPA, frontend/)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
-        ├─ GET  students / reports / exercises / files  (any role, students too)
+        ├─ GET  exercises / files                       (any role, students too)
+        ├─ GET  students / detail / reports  (students: own card only; else 403)
         ├─ GET  /v1/config, job status, authored content       (mentor or admin)
         ├─ POST /v1/students {student, space?, project?, email?} — register, no
         │        grading; 400 unless the SnapLogic project exists; the stored
@@ -132,8 +137,10 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
 | CI/CD (GitHub OIDC, no stored keys) | `.github/workflows/` |
 
 **Roles** (Cognito groups; the API enforces, the UI only hides buttons):
-admins sync + grade + view; mentors grade + view; students view only (no
-grading, no edits, no instructor notes). Admin/mentor users are invite-only
+admins sync + grade + view; mentors grade + view; students view **their own
+grades only** (no roster, no other students, no grading, no edits, no
+instructor notes) — a signed-in student lands straight on their own detail
+page and the backend 403s any other student's card. Admin/mentor users are invite-only
 (admin-created in the Cognito console — no self-signup); student logins are
 created by the app itself when a registration includes an email — never add
 someone to the `student` group by hand alongside an admin/mentor invite.

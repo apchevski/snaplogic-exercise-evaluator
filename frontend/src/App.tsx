@@ -1,9 +1,22 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
-import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import {
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from "react-router-dom";
 
-import { onUnauthorized } from "./api";
-import { signOut, useDisplayName, useGroups } from "./auth";
+import { api, onUnauthorized } from "./api";
+import {
+  signOut,
+  useDisplayName,
+  useGroups,
+  useIsStudentOnly,
+  useToken,
+} from "./auth";
 import { SettingsModal } from "./components/SettingsModal";
 import Dashboard from "./pages/Dashboard";
 import Exercises from "./pages/Exercises";
@@ -116,25 +129,12 @@ function Login({ onLogin, error }: { onLogin: () => void; error?: string }) {
   );
 }
 
-function Shell() {
-  const auth = useAuth();
+/** Full app for admins and mentors: Students + Exercises nav and every page. */
+function StaffRoutes() {
   const { pathname } = useLocation();
   const studentsActive = pathname === "/" || pathname.startsWith("/students");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <>
-      <header className="topbar">
-        <Brand />
-        <UserMenu onOpenSettings={() => setSettingsOpen(true)} />
-      </header>
-      {settingsOpen && (
-        <SettingsModal
-          // Refresh tokens so a new display name shows in the header. Best
-          // effort — it still updates on the next sign-in if this fails.
-          onProfileChanged={() => void auth.signinSilent().catch(() => {})}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
       <nav className="subnav">
         <NavLink to="/" className={studentsActive ? "active" : ""}>
           Students
@@ -155,6 +155,97 @@ function Shell() {
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Dashboard />} />
       </Routes>
+    </>
+  );
+}
+
+/** A student may only ever be on their OWN detail page; any other slug (or
+ * path) bounces to it. The backend 403s a mismatched slug regardless — this
+ * just keeps the URL honest. */
+function OwnStudentGuard({ ownSlug }: { ownSlug: string }) {
+  const { slug } = useParams();
+  if (slug !== ownSlug) {
+    return <Navigate to={`/students/${encodeURIComponent(ownSlug)}`} replace />;
+  }
+  return <StudentDetail />;
+}
+
+/** Read-only shell for the `student` role: no nav, no roster — every route
+ * lands on the student's own grades page. The student's slug isn't in the
+ * token, so we resolve it from GET /v1/students, which for a student returns
+ * only the card their login owns. */
+function StudentRoutes() {
+  const token = useToken();
+  // undefined = still loading; null = no card is linked to this login.
+  const [slug, setSlug] = useState<string | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listStudents(token)
+      .then(({ students }) => {
+        if (!cancelled) setSlug(students[0]?.slug ?? null);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  if (error) {
+    return (
+      <main className="page">
+        <div className="error-banner">{error}</div>
+      </main>
+    );
+  }
+  if (slug === undefined) {
+    return <main className="page">Loading…</main>;
+  }
+  if (slug === null) {
+    return (
+      <main className="page">
+        <div className="empty-cell">
+          <h3>No grades linked to your account yet</h3>
+          Your grades will appear here once your mentor has graded your work.
+          If you think this is a mistake, please contact your mentor.
+        </div>
+      </main>
+    );
+  }
+  return (
+    <Routes>
+      <Route path="/students/:slug" element={<OwnStudentGuard ownSlug={slug} />} />
+      <Route
+        path="*"
+        element={<Navigate to={`/students/${encodeURIComponent(slug)}`} replace />}
+      />
+    </Routes>
+  );
+}
+
+function Shell() {
+  const auth = useAuth();
+  const isStudentOnly = useIsStudentOnly();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  return (
+    <>
+      <header className="topbar">
+        <Brand />
+        <UserMenu onOpenSettings={() => setSettingsOpen(true)} />
+      </header>
+      {settingsOpen && (
+        <SettingsModal
+          // Refresh tokens so a new display name shows in the header. Best
+          // effort — it still updates on the next sign-in if this fails.
+          onProfileChanged={() => void auth.signinSilent().catch(() => {})}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {isStudentOnly ? <StudentRoutes /> : <StaffRoutes />}
     </>
   );
 }

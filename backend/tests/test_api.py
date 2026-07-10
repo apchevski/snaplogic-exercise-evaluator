@@ -347,6 +347,114 @@ def test_student_role_is_read_only(aws, evaluator_dirs):
         assert resp["statusCode"] == 403, f"{method} {path}"
 
 
+# ---------- student data isolation (a student sees only their own grades) ----------
+
+
+def _seed_student_card(slug, name, *, email=None, **extra):
+    item = {
+        "pk": f"STUDENT#{slug}",
+        "sk": "META",
+        "entity": "student",
+        "slug": slug,
+        "display_name": name,
+        **extra,
+    }
+    if email is not None:
+        item["email"] = email
+    dynamo_table().put_item(Item=item)
+
+
+def test_student_list_returns_only_own_card(aws):
+    _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
+    _seed_student_card("foggy-nelson", "Foggy Nelson", email="foggy@example.com")
+    resp = _call(
+        api_event("GET", "/v1/students", groups=("student",), email="matt@example.com")
+    )
+    assert resp["statusCode"] == 200
+    assert [s["slug"] for s in _body(resp)["students"]] == ["matt-murdock"]
+
+
+def test_student_email_match_is_case_insensitive(aws):
+    # The card stores the email lowercased; a token whose email claim differs
+    # only in case must still resolve to the same card.
+    _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
+    resp = _call(
+        api_event("GET", "/v1/students", groups=("student",), email="Matt@Example.com")
+    )
+    assert [s["slug"] for s in _body(resp)["students"]] == ["matt-murdock"]
+
+
+def test_student_without_matching_card_sees_empty_list(aws):
+    _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
+    resp = _call(
+        api_event("GET", "/v1/students", groups=("student",), email="nobody@example.com")
+    )
+    assert resp["statusCode"] == 200
+    assert _body(resp)["students"] == []
+
+
+def test_student_can_view_own_detail_but_not_others(aws):
+    _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
+    _seed_student_card("foggy-nelson", "Foggy Nelson", email="foggy@example.com")
+
+    own = _call(
+        api_event(
+            "GET",
+            "/v1/students/matt-murdock",
+            groups=("student",),
+            email="matt@example.com",
+        )
+    )
+    assert own["statusCode"] == 200
+    assert _body(own)["student"]["display_name"] == "Matt Murdock"
+
+    other = _call(
+        api_event(
+            "GET",
+            "/v1/students/foggy-nelson",
+            groups=("student",),
+            email="matt@example.com",
+        )
+    )
+    assert other["statusCode"] == 403
+
+
+def test_student_reports_scoped_to_own_card(aws):
+    _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
+    _seed_student_card("foggy-nelson", "Foggy Nelson", email="foggy@example.com")
+
+    own = _call(
+        api_event(
+            "GET",
+            "/v1/students/matt-murdock/reports",
+            groups=("student",),
+            email="matt@example.com",
+        )
+    )
+    assert own["statusCode"] == 200
+
+    other = _call(
+        api_event(
+            "GET",
+            "/v1/students/foggy-nelson/reports",
+            groups=("student",),
+            email="matt@example.com",
+        )
+    )
+    assert other["statusCode"] == 403
+
+
+def test_staff_see_all_students_and_any_detail(aws):
+    # Regression: admins/mentors are never scoped — full roster, any detail.
+    _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
+    _seed_student_card("foggy-nelson", "Foggy Nelson", email="foggy@example.com")
+
+    listed = _body(_call(api_event("GET", "/v1/students", groups=("mentor",))))["students"]
+    assert {s["slug"] for s in listed} == {"matt-murdock", "foggy-nelson"}
+    resp = _call(api_event("GET", "/v1/students/foggy-nelson", groups=("mentor",)))
+    assert resp["statusCode"] == 200
+
+
 # ---------- config ----------
 
 

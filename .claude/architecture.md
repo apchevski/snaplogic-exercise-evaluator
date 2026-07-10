@@ -132,10 +132,20 @@ plan → judge → report loop the skill used to drive interactively.
 - **Auth**: Cognito (admin-created users; groups `admin`/`mentor`/`student`)
   + API Gateway JWT authorizer; the Lambda re-checks source IP and enforces
   the role matrix (mentors get 403 on /v1/syncs; `student` is read-only —
-  student/exercise dashboards yes, but 403 on every action and on
+  exercise list + input files yes, but 403 on every action and on
   config/job-polling/`GET /v1/exercises/{slug}`, the last because it carries
   notes.md, i.e. instructor hints). IP allowlist also runs at the edge via a
   CloudFront Function.
+  **Student self-scoping (July 2026)**: a `student` sees only their OWN grades,
+  not the roster. `GET /v1/students` returns only the card whose stored email
+  matches the caller's email claim (`_own_student_slug` / `_is_student_only` in
+  `api.py`); `GET /v1/students/{slug}` and `.../reports` 403 on any slug that
+  isn't the caller's own card. Admins/mentors are never scoped. The email is
+  the link between the Cognito login and the card — set when the login is
+  created (see below), stored lowercased on the card, compared case-folded
+  here. The SPA confines student-only users to `/students/<own-slug>` (no
+  sub-nav; every route redirects there), resolving the slug from the scoped
+  `GET /v1/students`; the backend is the real boundary, the UI is cosmetic.
   **Student logins (July 2026)** are app-created, never console-created: an
   optional email on POST /v1/students makes the API `AdminCreateUser` the
   student into the `student` group — Cognito emails the temporary password
