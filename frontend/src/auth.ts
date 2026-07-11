@@ -71,9 +71,10 @@ export function useCanGrade(): boolean {
 }
 
 /** A pure student — in the `student` group and nothing more privileged. Such
- * users are confined to their own grades page (no roster, no exercises tab);
- * anyone who is also admin/mentor gets the full app. The backend enforces the
- * same scoping (GET /v1/students returns only their card) — this is cosmetic. */
+ * users get their own grades page plus a read-only exercise catalog (no
+ * roster, no sync/edit controls); anyone who is also admin/mentor gets the
+ * full app. The backend enforces the same scoping (GET /v1/students returns
+ * only their card) — this is cosmetic. */
 export function useIsStudentOnly(): boolean {
   const groups = useGroups();
   return (
