@@ -16,6 +16,8 @@ import type {
   ReportEdit,
   StudentMeta,
   UpdateExercisePayload,
+  UpdateUserSettingsPayload,
+  UserSettings,
 } from "./types";
 
 const API_URL: string = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
@@ -80,6 +82,15 @@ export const api = {
   // Non-secret SnapLogic settings (default student project space etc.).
   getConfig: (token: string) =>
     request<{ config: AppConfig }>(token, "GET", "/v1/config"),
+
+  // The caller's own credentials (masked) + judge model (admin/mentor).
+  getSettings: (token: string) =>
+    request<{ settings: UserSettings }>(token, "GET", "/v1/settings"),
+
+  // Partial update of the caller's own credentials/model; only keys present
+  // are applied, null/"" clears. SnapLogic credentials are admin-only.
+  updateSettings: (token: string, payload: UpdateUserSettingsPayload) =>
+    request<{ settings: UserSettings }>(token, "PUT", "/v1/settings", payload),
 
   listStudents: (token: string) =>
     request<{ students: StudentMeta[] }>(token, "GET", "/v1/students"),

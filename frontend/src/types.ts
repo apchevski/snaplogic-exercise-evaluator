@@ -141,6 +141,39 @@ export interface AppConfig {
   solution_project?: string | null;
 }
 
+/** One selectable AI judge model (GET /v1/settings `allowed_models`). */
+export interface JudgeModelOption {
+  id: string;
+  label: string;
+}
+
+/** The caller's own credentials + judge model from GET/PUT /v1/settings.
+ * Secrets never come back — only whether one is stored (plus a short tail
+ * of the API key so the owner can tell which key it is). */
+export interface UserSettings {
+  email: string;
+  // Personal SnapLogic login (admins only; grading/sync jobs the user starts
+  // run under it — otherwise the shared credentials apply).
+  snaplogic_username?: string | null;
+  snaplogic_password_set: boolean;
+  // Personal Anthropic API key for grading (admin or mentor).
+  anthropic_api_key_set: boolean;
+  anthropic_api_key_hint?: string | null;
+  // Judge model for gradings this user starts; null = project default.
+  judge_model?: string | null;
+  default_model: string;
+  allowed_models: JudgeModelOption[];
+  updated_at?: string | null;
+}
+
+/** PUT /v1/settings body: only keys present are applied; null/"" clears. */
+export interface UpdateUserSettingsPayload {
+  snaplogic_username?: string | null;
+  snaplogic_password?: string | null;
+  anthropic_api_key?: string | null;
+  judge_model?: string | null;
+}
+
 export interface Job {
   job_id: string;
   job_type: "grade" | "sync";

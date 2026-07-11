@@ -2,7 +2,15 @@ import { useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import QRCode from "qrcode";
 
-import { signOut, useAccessToken, useHasSelfServiceScope } from "../auth";
+import { api } from "../api";
+import {
+  signOut,
+  useAccessToken,
+  useCanGrade,
+  useHasSelfServiceScope,
+  useIsAdmin,
+  useToken,
+} from "../auth";
 import {
   associateSoftwareToken,
   changePassword,
@@ -12,9 +20,11 @@ import {
   updateDisplayName,
   verifySoftwareToken,
 } from "../cognito";
+import type { UpdateUserSettingsPayload, UserSettings } from "../types";
 import {
   IconCheck,
   IconClose,
+  IconGrade,
   IconKey,
   IconLogout,
   IconShield,
@@ -31,12 +41,14 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Account settings: display name, password, and TOTP two-factor auth. All
- * three talk to the Cognito self-service API with the access token. */
+/** Account settings: display name, password, and TOTP two-factor auth (all
+ * three talk to the Cognito self-service API with the access token) — plus,
+ * for admins and mentors, their own grading credentials (REST API). */
 export function SettingsModal({ onProfileChanged, onClose }: Props) {
   const auth = useAuth();
   const accessToken = useAccessToken();
   const hasScope = useHasSelfServiceScope();
+  const canGrade = useCanGrade();
   const email = auth.user?.profile?.email ?? "";
 
   const [loading, setLoading] = useState(hasScope);
@@ -111,6 +123,7 @@ export function SettingsModal({ onProfileChanged, onClose }: Props) {
               />
             </>
           )}
+          {canGrade && <GradingCredentialsSection />}
         </div>
         <footer>
           <button type="button" className="btn" onClick={onClose}>
@@ -369,6 +382,291 @@ function MfaSection({
       )}
 
       {note && <p className={`settings-note mfa-result ${note.ok ? "ok" : "err"}`}>{note.text}</p>}
+    </section>
+  );
+}
+
+/** Personal grading credentials (REST API, not Cognito): the caller's own
+ * SnapLogic login (admins), Anthropic API key, and judge model. Anything
+ * left unset falls back to the shared deployment credentials. Secrets are
+ * write-only — the API only reports that one is stored. */
+function GradingCredentialsSection() {
+  const token = useToken();
+  const isAdmin = useIsAdmin();
+  const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .getSettings(token)
+      .then((r) => alive && setSettings(r.settings))
+      .catch((e) => alive && setLoadError(errText(e)));
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
+  if (loadError) {
+    return (
+      <section className="settings-section">
+        <h3>Grading credentials</h3>
+        <div className="error-banner">{loadError}</div>
+      </section>
+    );
+  }
+  if (!settings) {
+    return (
+      <section className="settings-section">
+        <h3>Grading credentials</h3>
+        <p className="cell-muted">Loading your credentials…</p>
+      </section>
+    );
+  }
+  return (
+    <>
+      {isAdmin && (
+        <SnapLogicCredsSection token={token} settings={settings} onSaved={setSettings} />
+      )}
+      <AnthropicKeySection token={token} settings={settings} onSaved={setSettings} />
+      <JudgeModelSection token={token} settings={settings} onSaved={setSettings} />
+    </>
+  );
+}
+
+/** Shared save handler shape for the three credential groups. */
+function useSaveSettings(
+  token: string,
+  onSaved: (s: UserSettings) => void,
+): {
+  busy: boolean;
+  note: { ok: boolean; text: string } | null;
+  save: (payload: UpdateUserSettingsPayload, okText: string) => Promise<boolean>;
+} {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const save = async (payload: UpdateUserSettingsPayload, okText: string) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await api.updateSettings(token, payload);
+      onSaved(r.settings);
+      setNote({ ok: true, text: okText });
+      return true;
+    } catch (e) {
+      setNote({ ok: false, text: errText(e) });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { busy, note, save };
+}
+
+function SnapLogicCredsSection({
+  token,
+  settings,
+  onSaved,
+}: {
+  token: string;
+  settings: UserSettings;
+  onSaved: (s: UserSettings) => void;
+}) {
+  const [username, setUsername] = useState(settings.snaplogic_username ?? "");
+  const [password, setPassword] = useState("");
+  const { busy, note, save } = useSaveSettings(token, onSaved);
+
+  const dirty =
+    username.trim() !== (settings.snaplogic_username ?? "") || password !== "";
+  const hasStored = Boolean(settings.snaplogic_username) || settings.snaplogic_password_set;
+
+  const submit = async () => {
+    const payload: UpdateUserSettingsPayload = {};
+    if (username.trim() !== (settings.snaplogic_username ?? "")) {
+      payload.snaplogic_username = username.trim() || null;
+    }
+    if (password) payload.snaplogic_password = password;
+    if (await save(payload, "SnapLogic credentials saved.")) setPassword("");
+  };
+
+  const clear = async () => {
+    if (
+      await save(
+        { snaplogic_username: null, snaplogic_password: null },
+        "SnapLogic credentials cleared — jobs you start use the shared credentials again.",
+      )
+    ) {
+      setUsername("");
+      setPassword("");
+    }
+  };
+
+  return (
+    <section className="settings-section">
+      <h3>My SnapLogic credentials</h3>
+      <p className="section-hint">
+        Gradings, syncs, and student registrations you start run under this
+        login instead of the shared deployment credentials. Both fields must
+        be set for it to take effect.
+      </p>
+      <form
+        className="settings-row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <label>SnapLogic username</label>
+        <input
+          type="text"
+          autoComplete="off"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="you@example.com"
+        />
+        <label>SnapLogic password</label>
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={settings.snaplogic_password_set ? "•••••••• (saved)" : ""}
+        />
+        <div className="settings-actions">
+          <button type="submit" className="btn primary" disabled={!dirty || busy}>
+            <IconCheck />
+            {busy ? "Saving…" : "Save"}
+          </button>
+          {hasStored && (
+            <button type="button" className="btn" onClick={() => void clear()} disabled={busy}>
+              <IconClose />
+              Clear
+            </button>
+          )}
+          {note && <span className={`settings-note ${note.ok ? "ok" : "err"}`}>{note.text}</span>}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function AnthropicKeySection({
+  token,
+  settings,
+  onSaved,
+}: {
+  token: string;
+  settings: UserSettings;
+  onSaved: (s: UserSettings) => void;
+}) {
+  const [key, setKey] = useState("");
+  const { busy, note, save } = useSaveSettings(token, onSaved);
+
+  const submit = async () => {
+    if (await save({ anthropic_api_key: key.trim() }, "Anthropic API key saved.")) {
+      setKey("");
+    }
+  };
+
+  const clear = async () => {
+    if (
+      await save(
+        { anthropic_api_key: null },
+        "Key cleared — gradings you start bill the shared key again.",
+      )
+    ) {
+      setKey("");
+    }
+  };
+
+  const savedHint = settings.anthropic_api_key_set
+    ? `Saved key ${settings.anthropic_api_key_hint ?? ""}`.trim()
+    : "";
+
+  return (
+    <section className="settings-section">
+      <h3>My Anthropic API key</h3>
+      <p className="section-hint">
+        Gradings you start are billed to this key instead of the shared one.
+      </p>
+      <form
+        className="settings-row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <label>API key</label>
+        <input
+          type="password"
+          autoComplete="off"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          placeholder={savedHint || "sk-ant-…"}
+        />
+        <div className="settings-actions">
+          <button type="submit" className="btn primary" disabled={!key.trim() || busy}>
+            <IconKey />
+            {busy ? "Saving…" : "Save"}
+          </button>
+          {settings.anthropic_api_key_set && (
+            <button type="button" className="btn" onClick={() => void clear()} disabled={busy}>
+              <IconClose />
+              Clear
+            </button>
+          )}
+          {note && <span className={`settings-note ${note.ok ? "ok" : "err"}`}>{note.text}</span>}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function JudgeModelSection({
+  token,
+  settings,
+  onSaved,
+}: {
+  token: string;
+  settings: UserSettings;
+  onSaved: (s: UserSettings) => void;
+}) {
+  const [model, setModel] = useState(settings.judge_model ?? "");
+  const { busy, note, save } = useSaveSettings(token, onSaved);
+
+  const dirty = model !== (settings.judge_model ?? "");
+  const defaultLabel =
+    settings.allowed_models.find((m) => m.id === settings.default_model)?.label ??
+    settings.default_model;
+
+  const submit = async () => {
+    await save({ judge_model: model || null }, "Model preference saved.");
+  };
+
+  return (
+    <section className="settings-section">
+      <h3>AI judge model</h3>
+      <p className="section-hint">
+        The Claude model that evaluates the gradings you start. More capable
+        models cost more per grading run.
+      </p>
+      <div className="settings-row">
+        <select value={model} onChange={(e) => setModel(e.target.value)}>
+          <option value="">Project default ({defaultLabel})</option>
+          {settings.allowed_models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="settings-actions">
+        <button type="button" className="btn primary" onClick={() => void submit()} disabled={!dirty || busy}>
+          <IconGrade />
+          {busy ? "Saving…" : "Save"}
+        </button>
+        {note && <span className={`settings-note ${note.ok ? "ok" : "err"}`}>{note.text}</span>}
+      </div>
     </section>
   );
 }

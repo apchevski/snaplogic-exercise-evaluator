@@ -1,11 +1,14 @@
 locals {
   routes = [
     "GET /v1/config",
+    "GET /v1/settings",
+    "PUT /v1/settings",
     "GET /v1/students",
     "POST /v1/students",
     "GET /v1/students/{slug}",
     "GET /v1/students/{slug}/reports",
     "PATCH /v1/students/{slug}/report",
+    "GET /v1/students/{slug}/report/edits",
     "DELETE /v1/students/{slug}",
     "GET /v1/exercises",
     "GET /v1/exercises/{slug}",

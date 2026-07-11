@@ -8,6 +8,7 @@ Single DynamoDB table (see infra/modules/data). Item shapes:
     JOB#<id>        / META            entity="job", slug=<id> — job lifecycle
     LOCK#<key>      / META            conditional-put dedupe lock, ttl 30 min
     EXERCISE#<slug> / META            entity="exercise", slug — sync status
+    USER#<email>    / SETTINGS        per-user credentials + judge model
 
 GSI ``gsi1`` is sparse on (entity, slug): only items that carry both
 attributes are listable, which keeps REPORT/AUDIT/LOCK rows out of list
@@ -54,6 +55,84 @@ def load_secrets_into_env() -> bool:
         if value:
             os.environ[key] = value
     return True
+
+
+# ---------- per-user credentials ----------
+#
+# Admins and mentors may store their own credentials (USER#<email>/SETTINGS):
+# SnapLogic username/password (admins), an Anthropic API key, and a judge
+# model choice. Jobs run under the requester's credentials when present and
+# fall back to the shared app secret otherwise. The row deliberately carries
+# no entity/slug attributes, so it never appears in the sparse-GSI listings.
+
+#: Env keys a user's stored settings may override for one request/job.
+USER_OVERRIDE_ENV_KEYS = (
+    "SNAPLOGIC_ADMIN_USERNAME",
+    "SNAPLOGIC_ADMIN_PASSWORD",
+    "ANTHROPIC_API_KEY",
+    "JUDGE_MODEL",
+)
+
+# Snapshot of the shared (base) values, taken the first time overrides are
+# applied — warm Lambda containers reuse the process env across invocations,
+# so the previous job's per-user values must be scrubbed before each job.
+_base_env: dict[str, str] | None = None
+
+
+def user_settings_pk(email: str) -> str:
+    return f"USER#{email.strip().lower()}"
+
+
+def get_user_settings(email: str) -> dict[str, Any]:
+    """The stored USER settings row for an email (raw, secrets included)."""
+    if not email or email.strip().lower() == "unknown":
+        return {}
+    item = (
+        dynamo_table()
+        .get_item(Key={"pk": user_settings_pk(email), "sk": "SETTINGS"})
+        .get("Item")
+    )
+    return from_dynamo(item) if item else {}
+
+
+def reset_base_env_snapshot() -> None:
+    """Test hook: forget the shared-credentials snapshot."""
+    global _base_env
+    _base_env = None
+
+
+def apply_user_overrides(email: str | None) -> None:
+    """Overlay the requesting user's own credentials onto the process env.
+
+    Always restores the shared values first (the container may still carry a
+    previous requester's overrides), then applies whatever the user stored:
+    SnapLogic credentials only as a complete username+password pair, the
+    Anthropic key and judge model independently. Call after
+    load_secrets_into_env() and before any evaluator/SDK client is built.
+    """
+    global _base_env
+    load_secrets_into_env()
+    if _base_env is None:
+        _base_env = {k: os.environ.get(k, "") for k in USER_OVERRIDE_ENV_KEYS}
+    for key, value in _base_env.items():
+        if value:
+            os.environ[key] = value
+        else:
+            os.environ.pop(key, None)
+    settings = get_user_settings(email or "")
+    if not settings:
+        return
+    sl_user = str(settings.get("snaplogic_username") or "").strip()
+    sl_pass = str(settings.get("snaplogic_password") or "").strip()
+    if sl_user and sl_pass:  # half a credential pair is unusable — ignore it
+        os.environ["SNAPLOGIC_ADMIN_USERNAME"] = sl_user
+        os.environ["SNAPLOGIC_ADMIN_PASSWORD"] = sl_pass
+    api_key = str(settings.get("anthropic_api_key") or "").strip()
+    if api_key:
+        os.environ["ANTHROPIC_API_KEY"] = api_key
+    model = str(settings.get("judge_model") or "").strip()
+    if model:
+        os.environ["JUDGE_MODEL"] = model
 
 
 def table_name() -> str:

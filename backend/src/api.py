@@ -12,6 +12,7 @@ Defense layers (outer → inner):
        | GET  /v1/students (list)          |  ✅   |  ✅    |  ✅ own card only |
        | GET  /v1/students/{slug} (+ /reports) | ✅ | ✅    |  ✅ own card only (else 403) |
        | GET  /v1/config, /v1/exercises/{slug} (authored content incl. notes.md), job polling | ✅ | ✅ | ❌ 403 |
+       | GET/PUT /v1/settings (own credentials + judge model) | ✅ | ✅ (no SnapLogic creds) | ❌ 403 |
        | GET  /v1/students/{slug}/report/edits (audit log) | ✅ | ✅ | ❌ 403 |
        | POST /v1/students                 |  ✅   |  ✅    |  ❌ 403 |
        | POST /v1/gradings                 |  ✅   |  ✅    |  ❌ 403 |
@@ -58,11 +59,13 @@ from boto3.dynamodb.conditions import Key
 
 from .common import (
     LOCK_TTL_SECONDS,
+    apply_user_overrides,
     cognito_client,
     data_bucket,
     dynamo_table,
     epoch_in,
     from_dynamo,
+    get_user_settings,
     load_secrets_into_env,
     lock_key,
     public_item,
@@ -70,6 +73,7 @@ from .common import (
     slugify,
     sqs_client,
     to_dynamo,
+    user_settings_pk,
     utc_now_iso,
 )
 
@@ -445,6 +449,122 @@ def get_config() -> dict[str, Any]:
     }
 
 
+# ---------- per-user settings (own credentials + judge model) ----------
+
+#: Judge models a user may pick in Settings. Kept in lockstep with the
+#: pricing table in evaluator.ai_judge so cost estimates stay accurate.
+ALLOWED_JUDGE_MODELS: tuple[dict[str, str], ...] = (
+    {"id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6"},
+    {"id": "claude-sonnet-5", "label": "Claude Sonnet 5"},
+    {"id": "claude-opus-4-8", "label": "Claude Opus 4.8"},
+    {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5"},
+)
+
+#: SETTINGS-row keys only an admin may write (mentors run grading against the
+#: shared SnapLogic credentials; syncs are admin-only anyway).
+_ADMIN_ONLY_SETTINGS_KEYS = ("snaplogic_username", "snaplogic_password")
+
+
+def _masked_settings(email: str, row: dict[str, Any]) -> dict[str, Any]:
+    """The caller-visible view of their SETTINGS row — secrets never leave
+    the server; the UI only learns *that* a value is stored (plus a short
+    tail of the API key so the owner can tell which key it is)."""
+    from evaluator.ai_judge import DEFAULT_JUDGE_MODEL
+
+    api_key = str(row.get("anthropic_api_key") or "")
+    return {
+        "email": email,
+        "snaplogic_username": str(row.get("snaplogic_username") or "") or None,
+        "snaplogic_password_set": bool(str(row.get("snaplogic_password") or "").strip()),
+        "anthropic_api_key_set": bool(api_key.strip()),
+        "anthropic_api_key_hint": ("…" + api_key[-4:]) if len(api_key) >= 12 else None,
+        "judge_model": str(row.get("judge_model") or "") or None,
+        "default_model": DEFAULT_JUDGE_MODEL,
+        "allowed_models": [dict(m) for m in ALLOWED_JUDGE_MODELS],
+        "updated_at": row.get("updated_at"),
+    }
+
+
+@app.get("/v1/settings")
+def get_settings() -> dict[str, Any]:
+    """The caller's own stored credentials (masked) + the model choices."""
+    claims = _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    email = _email(claims).strip().lower()
+    return {"settings": _masked_settings(email, get_user_settings(email))}
+
+
+@app.put("/v1/settings")
+def put_settings() -> dict[str, Any]:
+    """Partial update of the caller's own credentials and judge model.
+
+    Accepted keys — only the ones present are applied; null or "" clears:
+      snaplogic_username    admin only — personal SnapLogic login
+      snaplogic_password    admin only — stored write-only, never returned
+      anthropic_api_key     own Anthropic key for grading (admin or mentor)
+      judge_model           model used when this user starts a grading; must
+                            be one of ALLOWED_JUDGE_MODELS (null = default)
+
+    Jobs started by this user (grade, sync, the registration project check)
+    run under these values; anything unset falls back to the shared app
+    secret. SnapLogic credentials only take effect as a complete
+    username+password pair.
+    """
+    claims = _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    body = app.current_event.json_body or {}
+    if not isinstance(body, dict):
+        raise BadRequestError("Body must be a JSON object.")
+    email = _email(claims).strip().lower()
+    if not email or email == "unknown":
+        raise BadRequestError(
+            "Your token carries no email claim — settings need one to be stored."
+        )
+    is_admin = ROLE_ADMIN in _groups(claims)
+
+    editable = (
+        "snaplogic_username",
+        "snaplogic_password",
+        "anthropic_api_key",
+        "judge_model",
+    )
+    unknown = sorted(set(body) - set(editable))
+    if unknown:
+        raise BadRequestError(f"Unknown settings key(s): {', '.join(unknown)}.")
+    for key in _ADMIN_ONLY_SETTINGS_KEYS:
+        if key in body and not is_admin:
+            raise ServiceError(
+                403, "Only admins may store personal SnapLogic credentials."
+            )
+
+    if "judge_model" in body and body.get("judge_model"):
+        model = str(body["judge_model"]).strip()
+        allowed = {m["id"] for m in ALLOWED_JUDGE_MODELS}
+        if model not in allowed:
+            raise BadRequestError(
+                f"judge_model must be one of {sorted(allowed)} (or null for the default)."
+            )
+
+    row = get_user_settings(email)
+    for key in editable:
+        if key not in body:
+            continue
+        value = str(body.get(key) or "").strip()
+        if value:
+            row[key] = value
+        else:
+            row.pop(key, None)
+
+    row.update(
+        {
+            "pk": user_settings_pk(email),
+            "sk": "SETTINGS",
+            "email": email,
+            "updated_at": utc_now_iso(),
+        }
+    )
+    dynamo_table().put_item(Item=to_dynamo(row))
+    return {"settings": _masked_settings(email, row)}
+
+
 @app.get("/v1/students")
 def list_students() -> dict[str, Any]:
     claims = _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
@@ -729,19 +849,20 @@ def _opt_str(body: dict[str, Any], key: str) -> str | None:
     return str(raw).strip() or None
 
 
-def _verify_student_project(project: str, space: str | None) -> None:
+def _verify_student_project(project: str, space: str | None, requester: str) -> None:
     """Reject registration when SnapLogic has no project with that name.
 
     The project (by default named exactly after the student) must exist in
     the student project space, or every subsequent grading run would fail.
     One GET (asset list) settles it: 404 → clear 400 back to the UI.
-    Credentials come from the app secret (deployed) or the ambient env
-    (local dev); when they aren't configured at all the check is skipped so
-    registration keeps working in credential-less environments (e.g. tests).
+    Credentials are the requester's own stored SnapLogic login when set,
+    otherwise the app secret (deployed) or the ambient env (local dev); when
+    none are configured at all the check is skipped so registration keeps
+    working in credential-less environments (e.g. tests).
     """
     import httpx
 
-    load_secrets_into_env()
+    apply_user_overrides(requester)
     base_url = os.environ.get("SNAPLOGIC_BASE_URL", "").strip().rstrip("/")
     username = os.environ.get("SNAPLOGIC_ADMIN_USERNAME", "").strip()
     password = os.environ.get("SNAPLOGIC_ADMIN_PASSWORD", "").strip()
@@ -888,7 +1009,7 @@ def post_student() -> Response:
     # column) always carries the value grading will actually use.
     space = _opt_str(body, "space") or _default_student_space()
     project = _opt_str(body, "project")
-    _verify_student_project(project or student, space)
+    _verify_student_project(project or student, space, _email(claims))
     row = {
         "pk": f"STUDENT#{slug}",
         "sk": "META",

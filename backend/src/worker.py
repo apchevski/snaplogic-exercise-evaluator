@@ -27,11 +27,11 @@ from boto3.dynamodb.conditions import Key
 
 from .common import (
     LOCK_TTL_SECONDS,
+    apply_user_overrides,
     data_bucket,
     dynamo_table,
     epoch_in,
     from_dynamo,
-    load_secrets_into_env,
     lock_key,
     slugify,
     sqs_client,
@@ -433,7 +433,9 @@ def _process_grade_collect(job: dict[str, Any]) -> None:
 
     try:
         os.environ.setdefault("EVALUATOR_DISABLE_UI_REBUILD", "1")
-        load_secrets_into_env()
+        # The collect step must judge/price under the same credentials the
+        # submit ran with — the requester's own, when they stored any.
+        apply_user_overrides(job.get("requested_by"))
         judge = AIJudge()
 
         if batch_status(batch_id, judge=judge) != "ended":
@@ -577,7 +579,9 @@ def _process_job(job: dict[str, Any]) -> None:
         # Lambda's image filesystem is read-only and the React SPA replaces
         # the static dashboard, so never attempt the frontend/dist/index.html rebuild.
         os.environ.setdefault("EVALUATOR_DISABLE_UI_REBUILD", "1")
-        load_secrets_into_env()
+        # Shared secret first, then the requester's own credentials on top
+        # (their SnapLogic login, Anthropic key, and judge model, when stored).
+        apply_user_overrides(job.get("requested_by"))
         store = _make_store()
         store.materialize_exercises()
         # Archived and hard-deleted exercises are dropped from the working
