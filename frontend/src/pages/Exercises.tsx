@@ -99,6 +99,9 @@ export default function Exercises() {
   // Confirmation dialog target for sync: "all" = Sync All Exercises,
   // otherwise the single exercise being synced.
   const [syncConfirm, setSyncConfirm] = useState<Exercise | "all" | null>(null);
+  // Row selection (admin): the toolbar's Sync/Edit/Archive/Delete buttons act
+  // on this exercise. Stored as the slug so a refresh keeps the selection.
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
 
   const toggleExpanded = (slug: string) =>
     setExpanded((prev) => {
@@ -198,6 +201,7 @@ export default function Exercises() {
     async (slug: string) => {
       await api.deleteExercise(token, slug);
       setDeleting(null);
+      setSelectedSlug((cur) => (cur === slug ? null : cur));
       await refresh();
     },
     [token, refresh],
@@ -254,14 +258,20 @@ export default function Exercises() {
 
   const onSort = (key: string) => setSort((s) => nextSort(s, key, DEFAULT_DIR[key] ?? "asc"));
   const sc = (key: string) => (sort.key === key ? "sorted" : "");
-  const colCount = isAdmin ? 6 : 5;
+  const colCount = isAdmin ? 6 : 5; // admin gets the leading Select column
+
+  // The exercise the toolbar actions target (null once it's deleted/filtered away).
+  const selected = useMemo(
+    () => exercises.find((ex) => ex.slug === selectedSlug) ?? null,
+    [exercises, selectedSlug],
+  );
 
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
       <Panel
         title="Exercise Sync Status of All Projects"
-        hint="Every authored exercise and whether its grading artifacts are synced and current. Click a task name to view its description; click a file to download its input data."
+        hint="Every authored exercise and whether its grading artifacts are synced and current. Click a task name to view its description; click a file to download its input data. Select a row to enable the Sync, Edit, Archive and Delete buttons in the toolbar."
         toolbar={
           <>
             <SearchBox
@@ -273,6 +283,43 @@ export default function Exercises() {
             {isAdmin && (
               <>
                 {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="sync" />}
+                <button
+                  className="btn"
+                  onClick={() => selected && setSyncConfirm(selected)}
+                  disabled={!selected || anyBusy || selected.archived}
+                  title={selected ? undefined : "Select an exercise first"}
+                >
+                  <IconSync />
+                  Sync
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => selected && void openEdit(selected.slug)}
+                  disabled={!selected || editLoading !== null}
+                  title={selected ? undefined : "Select an exercise first"}
+                >
+                  <IconEdit />
+                  {selected && editLoading === selected.slug ? "…" : "Edit"}
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => selected && onArchiveClick(selected)}
+                  disabled={!selected || archiving !== null || anyBusy}
+                  title={selected ? undefined : "Select an exercise first"}
+                >
+                  {selected?.archived ? <IconUnarchive /> : <IconArchive />}
+                  {selected?.archived ? "Unarchive" : "Archive"}
+                </button>
+                <button
+                  className="btn danger"
+                  onClick={() => selected && setDeleting(selected)}
+                  disabled={!selected || anyBusy}
+                  title={selected ? undefined : "Select an exercise first"}
+                >
+                  <IconTrash />
+                  Delete
+                </button>
+                <span className="toolbar-sep" aria-hidden="true" />
                 <button className="btn" onClick={() => setShowAdd(true)} disabled={anyBusy}>
                   <IconPlus />
                   Add New Exercise
@@ -317,12 +364,12 @@ export default function Exercises() {
           <table className="data-table">
             <thead>
               <tr>
+                {isAdmin && <th className="plain select-col" aria-label="Select" />}
                 <SortableTh label="Exercise" sortKey="exercise" sort={sort} onSort={onSort} />
                 <SortableTh label="Task Type" sortKey="type" sort={sort} onSort={onSort} />
                 <th className="plain">Files</th>
                 <SortableTh label="Status" sortKey="status" sort={sort} onSort={onSort} />
                 <SortableTh label="Last Synced" sortKey="synced" sort={sort} onSort={onSort} />
-                {isAdmin && <th className="plain">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -330,7 +377,32 @@ export default function Exercises() {
                 const isOpen = expanded.has(ex.slug);
                 return (
                   <Fragment key={ex.slug}>
-                    <tr className={ex.archived ? "row-archived" : undefined}>
+                    <tr
+                      className={
+                        [
+                          ex.archived ? "row-archived" : "",
+                          selectedSlug === ex.slug ? "row-selected" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ") || undefined
+                      }
+                    >
+                      {isAdmin && (
+                        <td className="select-cell">
+                          <input
+                            type="radio"
+                            className="row-select"
+                            name="exercise-select"
+                            checked={selectedSlug === ex.slug}
+                            onChange={() => setSelectedSlug(ex.slug)}
+                            onClick={() => {
+                              // Clicking the already-selected row deselects it.
+                              if (selectedSlug === ex.slug) setSelectedSlug(null);
+                            }}
+                            aria-label={`Select ${ex.title ?? ex.slug}`}
+                          />
+                        </td>
+                      )}
                       <td className={sc("exercise")}>
                         {ex.description ? (
                           <button
@@ -382,50 +454,12 @@ export default function Exercises() {
                         {ex.archived && <span className="sync-status archived">archived</span>}{" "}
                         {ex.missing_from_image && (
                           <span className="sync-status config_error">missing from image</span>
-                        )}
+                        )}{" "}
+                        {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="sync" />}
                       </td>
                       <td className={`${sc("synced")} cell-muted`}>
                         {ex.last_synced_at ?? "—"}
                       </td>
-                      {isAdmin && (
-                        <td>
-                          <span className="actions-cell">
-                            <button
-                              className="btn small"
-                              onClick={() => setSyncConfirm(ex)}
-                              disabled={anyBusy || ex.archived}
-                            >
-                              <IconSync />
-                              Sync
-                            </button>
-                            <button
-                              className="btn small"
-                              onClick={() => void openEdit(ex.slug)}
-                              disabled={editLoading === ex.slug}
-                            >
-                              <IconEdit />
-                              {editLoading === ex.slug ? "…" : "Edit"}
-                            </button>
-                            <button
-                              className="btn small"
-                              onClick={() => onArchiveClick(ex)}
-                              disabled={archiving === ex.slug || anyBusy}
-                            >
-                              {ex.archived ? <IconUnarchive /> : <IconArchive />}
-                              {ex.archived ? "Unarchive" : "Archive"}
-                            </button>
-                            <button
-                              className="btn small danger"
-                              onClick={() => setDeleting(ex)}
-                              disabled={anyBusy}
-                            >
-                              <IconTrash />
-                              Delete
-                            </button>
-                            {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="sync" />}
-                          </span>
-                        </td>
-                      )}
                     </tr>
                     {isOpen && ex.description && (
                       <tr className="expand-row">
