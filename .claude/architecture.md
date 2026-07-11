@@ -143,8 +143,9 @@ plan → judge → report loop the skill used to drive interactively.
   isn't the caller's own card. Admins/mentors are never scoped. The email is
   the link between the Cognito login and the card — set when the login is
   created (see below), stored lowercased on the card, compared case-folded
-  here. The SPA confines student-only users to `/students/<own-slug>` (no
-  sub-nav; every route redirects there), resolving the slug from the scoped
+  here. The SPA confines student-only users to `/students/<own-slug>` (a
+  My Grades / Exercises / Manager top-bar nav only; every other route
+  redirects there), resolving the slug from the scoped
   `GET /v1/students`; the backend is the real boundary, the UI is cosmetic.
   **Student logins (July 2026)** are app-created, never console-created: an
   optional email on POST /v1/students makes the API `AdminCreateUser` the
@@ -160,15 +161,17 @@ plan → judge → report loop the skill used to drive interactively.
   prompts anyone to enroll a TOTP authenticator (that auto-prompt only fires when
   MFA is `"ON"`), and no admin API can register a TOTP device for another user
   (associate/verify needs the shared secret + a live code) — so the SPA drives
-  enrollment itself from an in-app **Settings** dialog (`components/SettingsModal`,
-  `src/cognito.ts`): associate → QR/secret → verify → set-preference, all via the
+  enrollment itself from the in-app **Manager** page (`pages/Manager`,
+  `src/cognito.ts`; originally a Settings modal, made a top-bar tab July 2026
+  to mirror the classic console's Designer/Manager/Dashboard header):
+  associate → QR/secret → verify → set-preference, all via the
   Cognito user-pools JSON API authorized by the signed-in user's **access token**
-  (plain fetch, no AWS SDK/SigV4). The same dialog changes the password and sets a
+  (plain fetch, no AWS SDK/SigV4). The same page changes the password and sets a
   **display name** (the `name` attribute — Cognito usernames are immutable, so
   there's no true rename; login email is unchanged). All of this requires the
   `aws.cognito.signin.user.admin` scope on the SPA app client + `oidcConfig`; the
   scope only lands in freshly issued tokens, so after adding it every existing
-  session must sign out and back in once (the dialog reads the access-token
+  session must sign out and back in once (the page reads the access-token
   `scope` claim and shows a notice if it's absent). Flip the pool to `"ON"` to
   require a second factor for everyone (then the hosted UI handles enrollment and
   the in-app flow is unnecessary).
