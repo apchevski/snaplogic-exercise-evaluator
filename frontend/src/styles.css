@@ -220,13 +220,35 @@ button.btn.icon-btn {
 
 .actions-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-/* row selection: the leading radio column that arms the toolbar actions */
-th.select-col { width: 30px; }
+/* row selection: the leading checkbox column that arms the toolbar actions.
+   SnapLogic-style squares — navy fill with a white check when selected; the
+   header checkbox selects the whole page and shows a dash (indeterminate)
+   when only some of its rows are selected. */
+th.select-col { width: 30px; text-align: center; }
 td.select-cell { width: 30px; text-align: center; }
 .row-select {
-  accent-color: var(--sl-navy); cursor: pointer;
-  width: 14px; height: 14px; margin: 0; vertical-align: middle;
+  appearance: none; -webkit-appearance: none;
+  width: 15px; height: 15px; margin: 0; vertical-align: middle;
+  border: 1.5px solid #8a97a3; border-radius: 2px; background: white;
+  cursor: pointer; display: inline-grid; place-content: center;
 }
+.row-select:hover:not(:disabled) { border-color: var(--sl-navy); }
+.row-select:focus-visible { outline: 2px solid var(--sl-navy); outline-offset: 1px; }
+.row-select:checked, .row-select:indeterminate {
+  background: var(--sl-navy); border-color: var(--sl-navy);
+}
+.row-select:checked::after {
+  content: ""; width: 4px; height: 8px; margin-top: -2px;
+  border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.row-select:indeterminate::after {
+  content: ""; width: 7px; height: 2px; background: white;
+}
+.row-select:disabled { opacity: 0.5; cursor: default; }
+
+/* names listed in bulk-action confirmation dialogs */
+.modal-body ul.bulk-list { margin: 6px 0 0 18px; padding: 0; max-height: 180px; overflow-y: auto; }
+.modal-body ul.bulk-list li { margin: 2px 0; }
 .data-table tbody tr.row-selected td { background: #e7f0f9; }
 .data-table tbody tr.row-selected td.sorted { background: #e2e5f5; }
 .data-table tbody tr.row-selected:hover td { background: #ddeaf7; }
