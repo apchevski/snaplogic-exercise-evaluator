@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { isAiJudged } from "../types";
 import type { Difference, TaskResult } from "../types";
+import { IconCheck, IconClose, IconPlus, IconTrash } from "./icons";
 
 const MAX_POINTS = 10;
 
@@ -238,6 +239,7 @@ export function TaskEvaluationEditor({
                       disabled={saving}
                       title="Remove this item"
                     >
+                      <IconTrash />
                       Remove
                     </button>
                   </div>
@@ -292,7 +294,8 @@ export function TaskEvaluationEditor({
               onClick={addDiff}
               disabled={saving}
             >
-              + Add deduction / note
+              <IconPlus />
+              Add deduction / note
             </button>
           </div>
 
@@ -315,9 +318,11 @@ export function TaskEvaluationEditor({
           onClick={save}
           disabled={!canSave}
         >
+          <IconCheck />
           {saving ? "Saving…" : "Save"}
         </button>
         <button className="btn small" onClick={onCancel} disabled={saving}>
+          <IconClose />
           Cancel
         </button>
       </div>

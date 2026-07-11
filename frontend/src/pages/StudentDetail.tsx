@@ -4,6 +4,12 @@ import { Link, useParams } from "react-router-dom";
 import { api, pollJob } from "../api";
 import { useCanGrade, useIsStudentOnly, useToken } from "../auth";
 import { ConfirmModal } from "../components/ConfirmModal";
+import {
+  IconCheck,
+  IconClose,
+  IconGrade,
+  IconHistory,
+} from "../components/icons";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/table";
 import { TaskCard, tierForRatio } from "../components/TaskCard";
@@ -303,9 +309,11 @@ export default function StudentDetail() {
           onClick={() => void saveOverall()}
           disabled={savingEdit || !draft.trim()}
         >
+          <IconCheck />
           {savingEdit ? "Saving…" : "Save"}
         </button>
         <button className="btn small" onClick={cancelEdit} disabled={savingEdit}>
+          <IconClose />
           Cancel
         </button>
       </div>
@@ -423,6 +431,7 @@ export default function StudentDetail() {
                     onClick={() => setGradeConfirm({ kind: "all" })}
                     disabled={anyBusy}
                   >
+                    <IconGrade />
                     Grade all exercises
                   </button>
                   {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="grade" />}
@@ -449,6 +458,7 @@ export default function StudentDetail() {
                           }
                           disabled={anyBusy}
                         >
+                          <IconGrade />
                           Regrade
                         </button>
                       </span>
@@ -480,6 +490,7 @@ export default function StudentDetail() {
                           }
                           disabled={anyBusy}
                         >
+                          <IconGrade />
                           Grade
                         </button>
                       </span>
@@ -503,6 +514,7 @@ export default function StudentDetail() {
         >
           <div className="panel-body">
             <button className="btn small" onClick={toggleHistory}>
+              <IconHistory />
               {historyOpen ? "Hide edit history" : "Show edit history"}
             </button>
             {historyOpen && (
@@ -555,6 +567,7 @@ export default function StudentDetail() {
                 ? "Regrade"
                 : "Grade"
           }
+          confirmIcon={<IconGrade />}
           confirmClassName="btn primary"
           busyLabel="Starting…"
           onConfirm={async () => {

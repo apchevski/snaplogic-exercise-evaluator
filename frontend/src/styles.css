@@ -83,10 +83,11 @@ body {
   font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
 }
 .user-menu-item {
-  display: block; width: 100%; text-align: left; padding: 8px 14px;
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 8px 14px;
   background: none; border: none; font: inherit; font-size: 13px;
   color: #38414b; cursor: pointer;
 }
+.user-menu-item .btn-ico { color: var(--sl-muted); }
 .user-menu-item:hover { background: #f3f7fb; }
 
 /* ---------- sub-nav tabs ---------- */
@@ -151,10 +152,13 @@ input:focus, select:focus, textarea:focus {
 
 /* ---------- buttons ---------- */
 button.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 5px 12px; border-radius: 3px; border: 1px solid var(--sl-input-border);
   background: white; font-size: 13px; font-weight: 500; color: #38414b; cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
+/* icon that sits next to a button label (or on its own for icon-only buttons) */
+.btn-ico { flex: none; }
 button.btn:hover:not(:disabled) { background: #f1f4f6; border-color: #9fb0bf; }
 button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 button.btn.primary { background: var(--sl-navy); border-color: var(--sl-navy); color: white; }

@@ -1,11 +1,16 @@
 import { useState, type ReactNode } from "react";
 
+import { IconClose } from "./icons";
+
 interface Props {
   title: string;
   /** Body copy spelling out exactly what the action will do. */
   children: ReactNode;
   /** Confirm button label, e.g. `Delete "Jane Doe"` or `Archive`. */
   confirmLabel: string;
+  /** Optional icon rendered before the confirm label (e.g. a trash icon for
+   * a delete, a sync icon for a sync). */
+  confirmIcon?: ReactNode;
   /** Confirm button styling. Defaults to the red danger button used by
    * destructive actions; pass `"btn primary"` for reversible ones. */
   confirmClassName?: string;
@@ -24,6 +29,7 @@ export function ConfirmModal({
   title,
   children,
   confirmLabel,
+  confirmIcon,
   confirmClassName = "btn danger",
   busyLabel = "Deleting…",
   onConfirm,
@@ -69,6 +75,7 @@ export function ConfirmModal({
         <footer>
           {busy && <span className="modal-busy">{busyLabel}</span>}
           <button type="button" className="btn" onClick={onClose} disabled={busy}>
+            <IconClose />
             Cancel
           </button>
           <button
@@ -77,6 +84,7 @@ export function ConfirmModal({
             onClick={() => void confirm()}
             disabled={busy}
           >
+            {confirmIcon}
             {confirmLabel}
           </button>
         </footer>

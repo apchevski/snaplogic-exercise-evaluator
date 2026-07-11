@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { IconClose, IconPlus } from "./icons";
+
 interface Props {
   /** Default student project space (from GET /v1/config); prefills the field. */
   defaultSpace: string;
@@ -92,9 +94,9 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
               placeholder="e.g. jane.doe@example.com"
             />
             <p className="hint">
-              When set, a read-only login is created and the student is
-              emailed a temporary password — after changing it they can sign
-              in and see the grades, but never grade or edit anything.
+              Add an email to give this student their own login. They&rsquo;ll
+              get a temporary password by email; once they sign in they can view
+              their grades, but can&rsquo;t change anything.
             </p>
           </div>
           <div className="modal-field">
@@ -108,8 +110,8 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
               placeholder={defaultSpace || "e.g. Training_Program_Demo"}
             />
             <p className="hint">
-              The SnapLogic project space grading will search for this
-              student&rsquo;s pipelines.
+              The SnapLogic project space where this student&rsquo;s work is
+              saved.
             </p>
           </div>
           <div className="modal-field">
@@ -121,18 +123,19 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
               placeholder={name.trim() || "Defaults to the student name"}
             />
             <p className="hint">
-              Leave empty when the project is named exactly after the
-              student (the usual case).
+              Leave this empty if the project has the same name as the student
+              — that&rsquo;s the usual case.
             </p>
           </div>
           <p className="hint">
-            Adding a student never grades anything — the matching SnapLogic
-            project is verified, then the student appears on the dashboard
-            ungraded.
+            Adding a student doesn&rsquo;t grade anything yet. We just check that
+            their SnapLogic project exists and add them to the dashboard, ready
+            to grade whenever you like.
           </p>
         </div>
         <footer>
           <button type="button" className="btn" onClick={onClose}>
+            <IconClose />
             Cancel
           </button>
           <button
@@ -140,6 +143,7 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
             className="btn primary"
             disabled={!name.trim() || !space.trim() || busy}
           >
+            <IconPlus />
             {busy ? "Adding…" : "Add Student"}
           </button>
         </footer>
