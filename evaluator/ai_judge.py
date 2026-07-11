@@ -38,11 +38,15 @@ DEFAULT_MAX_TOKENS = 4096
 OVERALL_MAX_TOKENS = 300
 
 # USD per 1M tokens: (input, output). Cache writes bill at 1.25x input,
-# cache reads at 0.10x input. Matched by model-id prefix; unknown models
-# fall back to the Sonnet 4.6 rates so the estimate is never silently zero.
+# cache reads at 0.10x input. Matched by model-id prefix (first match wins,
+# so more-specific ids come first); unknown models fall back to the Sonnet
+# 4.6 rates so the estimate is never silently zero. Keep in lockstep with
+# ALLOWED_JUDGE_MODELS in backend/src/api.py (the Settings model picker).
 _PRICING_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-5": (3.00, 15.00),
     "claude-haiku-4-5": (1.00, 5.00),
+    "claude-opus-4-8": (5.00, 25.00),
     "claude-opus-4": (5.00, 25.00),
 }
 _FALLBACK_PRICING = (3.00, 15.00)

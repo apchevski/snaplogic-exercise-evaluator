@@ -56,6 +56,7 @@ def aws(monkeypatch):
     """Moto context with the single table, data bucket, and job queue."""
     with mock_aws():
         common.reset_cached_clients()
+        common.reset_base_env_snapshot()
 
         dynamodb = boto3.client("dynamodb")
         dynamodb.create_table(
@@ -93,6 +94,11 @@ def aws(monkeypatch):
         yield {"queue_url": queue_url, "s3": s3, "sqs": sqs}
 
         common.reset_cached_clients()
+        # apply_user_overrides writes credentials straight into os.environ;
+        # scrub them (and the base snapshot) so nothing leaks across tests.
+        common.reset_base_env_snapshot()
+        for _key in common.USER_OVERRIDE_ENV_KEYS:
+            os.environ.pop(_key, None)
 
 
 @pytest.fixture()

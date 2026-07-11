@@ -127,6 +127,8 @@ Browser (VPN/office IPs only)
         ├─ GET  students / detail / reports  (students: own card only; else 403)
         ├─ GET  /v1/config, job status, authored content       (mentor or admin)
         ├─ GET  /v1/students/{slug}/report/edits — audit log   (mentor or admin)
+        ├─ GET/PUT /v1/settings — own credentials + judge model (mentor or admin;
+        │        SnapLogic credentials admin-only; secrets are write-only)
         ├─ POST /v1/students {student, space?, project?, email?} — register, no
         │        grading; 400 unless the SnapLogic project exists; the stored
         │        space/project dictate later grading runs; an email creates a
@@ -146,9 +148,12 @@ Browser (VPN/office IPs only)
                   ▼
 SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-retry)
           ├─ authored + generated exercise content from S3 (image = seed only)
-          ├─ SnapLogic REST (GET-only, creds from Secrets Manager)
-          ├─ grade: hard gates → Claude (Sonnet 4.6, structured outputs,
-          │         prompt-cached rules) → report.md/.json → S3 + DynamoDB
+          ├─ SnapLogic REST (GET-only; the requester's own stored credentials
+          │         when set, else the shared Secrets Manager creds)
+          ├─ grade: hard gates → Claude (requester's model choice, default
+          │         Sonnet 4.6; requester's own API key when stored, else the
+          │         shared key; structured outputs, prompt-cached rules)
+          │         → report.md/.json → S3 + DynamoDB
           │         (full run: Message Batches API @ 50% off, async
           │          submit → self-redrive poll → collect; subset/single: sync)
           └─ sync:  evaluator.sync sync → artifacts to S3 ($0 AI)
@@ -181,7 +186,27 @@ code, done; next sign-in then asks for a code). That Settings dialog also lets
 users change their password and set a display name, and it relies on the
 `aws.cognito.signin.user.admin` scope granted to the SPA app client — after
 deploying that scope, existing sessions must sign out and back in once before
-Settings works. Set the pool to `"ON"` to require a second factor for everyone
+Settings works.
+
+**Per-user grading credentials** (Settings dialog, admin/mentor): every
+admin and mentor can store their own credentials — jobs *they* start run
+under them, and anything left unset falls back to the shared deployment
+secret. Three independent settings, stored on a `USER#<email>/SETTINGS`
+DynamoDB row and applied per job via the `requested_by` email:
+
+- **SnapLogic credentials** (admins only): a personal username + password
+  used by the gradings, syncs, and registration project checks that admin
+  starts, replacing the shared `SNAPLOGIC_ADMIN_*` login. Only takes effect
+  as a complete pair.
+- **Anthropic API key** (admin or mentor): gradings the user starts are
+  billed to their own key instead of the shared `ANTHROPIC_API_KEY`.
+- **AI judge model** (admin or mentor): the Claude model used for gradings
+  the user starts, picked from a server-side allowlist (Sonnet 4.6 — the
+  default — Sonnet 5, Opus 4.8, Haiku 4.5). Priced per model in the job's
+  cost estimate.
+
+Secrets are write-only: `GET /v1/settings` only reports that one is stored
+(plus the API key's last four characters), never the value. Set the pool to `"ON"` to require a second factor for everyone
 (then the hosted UI drives enrollment at sign-in and the in-app flow isn't
 needed). **Session length:** a sign-in lasts up to **12 hours** (the Cognito
 `refresh_token_validity`; access/id tokens are 60 min and renew silently in the
