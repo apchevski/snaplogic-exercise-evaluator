@@ -7,10 +7,12 @@ import { AddStudentModal } from "../components/AddStudentModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
 import { IconGrade, IconPlus, IconTrash } from "../components/icons";
+import { InfoModal } from "../components/InfoModal";
 import { StatusPill } from "../components/StatusPill";
 import {
   PagerFooter,
   Panel,
+  RowCheckbox,
   SearchBox,
   SortableTh,
   nextSort,
@@ -73,11 +75,14 @@ export default function Dashboard() {
   const [defaultSpace, setDefaultSpace] = useState("");
   // Grade-scope picker: which student a grading is being configured for.
   const [scopeFor, setScopeFor] = useState<{ name: string; slug: string } | null>(null);
-  // Confirmation dialog target for the admin-only permanent Remove.
-  const [removing, setRemoving] = useState<StudentMeta | null>(null);
-  // Row selection (graders): the toolbar's Grade/Remove buttons act on this
-  // student. Stored as the slug so a refresh keeps the selection.
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  // Confirmation dialog targets for the admin-only permanent Remove.
+  const [removing, setRemoving] = useState<StudentMeta[] | null>(null);
+  // Row selection (graders): the toolbar's Grade/Remove buttons act on these
+  // students. Stored as slugs so a refresh keeps the selection.
+  const [selectedSlugs, setSelectedSlugs] = useState<Set<string>>(new Set());
+  // Grading is one student at a time — clicking Grade with several rows
+  // selected explains that instead of silently picking one.
+  const [gradeWarning, setGradeWarning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -157,15 +162,30 @@ export default function Dashboard() {
     [token, refresh],
   );
 
-  // Permanent removal (admin only): the API purges the card, report history,
-  // job rows, and every stored report file. Errors propagate to the
-  // confirmation dialog, which stays open and shows them.
-  const removeStudent = useCallback(
-    async (slug: string) => {
-      await api.deleteStudent(token, slug);
-      setRemoving(null);
-      setSelectedSlug((cur) => (cur === slug ? null : cur));
+  // Permanent removal (admin only): the API purges each card, report history,
+  // job rows, and every stored report file. Runs sequentially so a failure
+  // names the student it hit; already-removed students stay removed. Errors
+  // propagate to the confirmation dialog, which stays open and shows them.
+  const removeStudents = useCallback(
+    async (targets: StudentMeta[]) => {
+      const failures: string[] = [];
+      for (const s of targets) {
+        try {
+          await api.deleteStudent(token, s.slug);
+          setSelectedSlugs((prev) => {
+            const next = new Set(prev);
+            next.delete(s.slug);
+            return next;
+          });
+        } catch (e) {
+          failures.push(
+            `${s.display_name}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
       void refresh();
+      if (failures.length > 0) throw new Error(failures.join(" — "));
+      setRemoving(null);
     },
     [token, refresh],
   );
@@ -212,13 +232,44 @@ export default function Dashboard() {
     students.find((s) => s.slug === key || s.display_name === key)?.display_name ?? key;
   const colCount = canGrade ? 11 : 10; // Select column hidden for students
 
-  // The student the toolbar actions target (null once removed/filtered away).
-  const selected = useMemo(
-    () => students.find((s) => s.slug === selectedSlug) ?? null,
-    [students, selectedSlug],
+  // Drop selections whose student no longer exists (removed elsewhere).
+  useEffect(() => {
+    setSelectedSlugs((prev) => {
+      const alive = new Set(students.map((s) => s.slug));
+      const next = new Set([...prev].filter((slug) => alive.has(slug)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [students]);
+
+  const toggleSelected = (slug: string) =>
+    setSelectedSlugs((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+
+  // The students the toolbar actions target.
+  const selectedStudents = useMemo(
+    () => students.filter((s) => selectedSlugs.has(s.slug)),
+    [students, selectedSlugs],
   );
-  const selectedBusy =
-    !!selected && (jobBusy(selected.slug) || jobBusy(selected.display_name));
+  const selectedBusy = selectedStudents.some(
+    (s) => jobBusy(s.slug) || jobBusy(s.display_name),
+  );
+
+  // Header checkbox: selects/clears every row shown on the current page.
+  const pageSlugs = pageItems.map((s) => s.slug);
+  const allPageSelected =
+    pageSlugs.length > 0 && pageSlugs.every((slug) => selectedSlugs.has(slug));
+  const somePageSelected = pageSlugs.some((slug) => selectedSlugs.has(slug));
+  const toggleSelectPage = () =>
+    setSelectedSlugs((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) pageSlugs.forEach((slug) => next.delete(slug));
+      else pageSlugs.forEach((slug) => next.add(slug));
+      return next;
+    });
 
   return (
     <main className="page">
@@ -254,7 +305,7 @@ export default function Dashboard() {
 
       <Panel
         title="Student Grades of All Projects"
-        hint="Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Select a row to enable the Grade and Remove buttons in the toolbar."
+        hint="Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove buttons in the toolbar — Remove works on many students at once, Grade on one at a time."
         toolbar={
           <>
             <SearchBox
@@ -267,12 +318,20 @@ export default function Dashboard() {
               <>
                 <button
                   className="btn"
-                  onClick={() =>
-                    selected &&
-                    setScopeFor({ name: selected.display_name, slug: selected.slug })
+                  onClick={() => {
+                    if (selectedStudents.length === 1) {
+                      const s = selectedStudents[0];
+                      setScopeFor({ name: s.display_name, slug: s.slug });
+                    } else if (selectedStudents.length > 1) {
+                      setGradeWarning(true);
+                    }
+                  }}
+                  disabled={selectedStudents.length === 0 || selectedBusy}
+                  title={
+                    selectedStudents.length === 0
+                      ? "Select a student first"
+                      : undefined
                   }
-                  disabled={!selected || selectedBusy}
-                  title={selected ? undefined : "Select a student first"}
                 >
                   <IconGrade />
                   Grade
@@ -280,12 +339,19 @@ export default function Dashboard() {
                 {isAdmin && (
                   <button
                     className="btn danger"
-                    onClick={() => selected && setRemoving(selected)}
-                    disabled={!selected || selectedBusy}
-                    title={selected ? undefined : "Select a student first"}
+                    onClick={() =>
+                      selectedStudents.length > 0 && setRemoving(selectedStudents)
+                    }
+                    disabled={selectedStudents.length === 0 || selectedBusy}
+                    title={
+                      selectedStudents.length === 0
+                        ? "Select at least one student first"
+                        : undefined
+                    }
                   >
                     <IconTrash />
                     Remove
+                    {selectedStudents.length > 1 && ` (${selectedStudents.length})`}
                   </button>
                 )}
                 <span className="toolbar-sep" aria-hidden="true" />
@@ -325,7 +391,17 @@ export default function Dashboard() {
           <table className="data-table">
             <thead>
               <tr>
-                {canGrade && <th className="plain select-col" aria-label="Select" />}
+                {canGrade && (
+                  <th className="plain select-col">
+                    <RowCheckbox
+                      checked={allPageSelected}
+                      indeterminate={somePageSelected}
+                      onChange={toggleSelectPage}
+                      ariaLabel="Select all rows on this page"
+                      disabled={pageSlugs.length === 0}
+                    />
+                  </th>
+                )}
                 <th className="plain" aria-label="Expand" />
                 <SortableTh label="Student" sortKey="student" sort={sort} onSort={onSort} />
                 <SortableTh label="Project Space" sortKey="space" sort={sort} onSort={onSort} />
@@ -356,20 +432,13 @@ export default function Dashboard() {
                     : 0;
                 return (
                   <Fragment key={s.slug}>
-                    <tr className={selectedSlug === s.slug ? "row-selected" : undefined}>
+                    <tr className={selectedSlugs.has(s.slug) ? "row-selected" : undefined}>
                       {canGrade && (
                         <td className="select-cell">
-                          <input
-                            type="radio"
-                            className="row-select"
-                            name="student-select"
-                            checked={selectedSlug === s.slug}
-                            onChange={() => setSelectedSlug(s.slug)}
-                            onClick={() => {
-                              // Clicking the already-selected row deselects it.
-                              if (selectedSlug === s.slug) setSelectedSlug(null);
-                            }}
-                            aria-label={`Select ${s.display_name}`}
+                          <RowCheckbox
+                            checked={selectedSlugs.has(s.slug)}
+                            onChange={() => toggleSelected(s.slug)}
+                            ariaLabel={`Select ${s.display_name}`}
                           />
                         </td>
                       )}
@@ -453,7 +522,7 @@ export default function Dashboard() {
                     {canGrade ? (
                       <>
                         Use “Add Student” above to register a student (their
-                        SnapLogic project must already exist), then select
+                        SnapLogic project must already exist), then tick
                         their row and start a grading with the Grade button
                         above.
                       </>
@@ -496,22 +565,56 @@ export default function Dashboard() {
         />
       )}
 
-      {removing && isAdmin && (
+      {removing && removing.length > 0 && isAdmin && (
         <ConfirmModal
-          title="Remove Student"
-          confirmLabel={`Remove ${removing.display_name}`}
+          title={removing.length === 1 ? "Remove Student" : "Remove Students"}
+          confirmLabel={
+            removing.length === 1
+              ? `Remove ${removing[0].display_name}`
+              : `Remove ${removing.length} students`
+          }
           confirmIcon={<IconTrash />}
           busyLabel="Removing…"
-          onConfirm={() => removeStudent(removing.slug)}
+          onConfirm={() => removeStudents(removing)}
           onClose={() => setRemoving(null)}
         >
-          <p>
-            Permanently remove <strong>{removing.display_name}</strong>? This
-            deletes their grades, their full grading history, and all of their
-            records. Their SnapLogic project is left untouched.
-          </p>
+          {removing.length === 1 ? (
+            <p>
+              Permanently remove <strong>{removing[0].display_name}</strong>?
+              This deletes their grades, their full grading history, and all of
+              their records. Their SnapLogic project is left untouched.
+            </p>
+          ) : (
+            <>
+              <p>
+                Permanently remove these <strong>{removing.length} students</strong>?
+                This deletes their grades, their full grading history, and all
+                of their records. Their SnapLogic projects are left untouched.
+              </p>
+              <ul className="bulk-list">
+                {removing.map((s) => (
+                  <li key={s.slug}>{s.display_name}</li>
+                ))}
+              </ul>
+            </>
+          )}
           <p className="hint">This cannot be undone.</p>
         </ConfirmModal>
+      )}
+
+      {gradeWarning && (
+        <InfoModal
+          title="One Student at a Time"
+          onClose={() => setGradeWarning(false)}
+        >
+          <p>
+            Grading runs for <strong>one student at a time</strong>, and{" "}
+            {selectedStudents.length} rows are currently selected.
+          </p>
+          <p className="hint">
+            Keep just one student selected, then click Grade again.
+          </p>
+        </InfoModal>
       )}
     </main>
   );

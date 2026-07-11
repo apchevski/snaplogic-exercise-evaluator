@@ -73,6 +73,36 @@ export function SearchBox({
   );
 }
 
+/** SnapLogic-style square selection checkbox used in table select columns.
+ * `indeterminate` renders the header "some rows selected" dash state. */
+export function RowCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  ariaLabel,
+  disabled,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: () => void;
+  ariaLabel: string;
+  disabled?: boolean;
+}) {
+  return (
+    <input
+      type="checkbox"
+      className="row-select"
+      checked={checked}
+      disabled={disabled}
+      ref={(el) => {
+        if (el) el.indeterminate = !checked && !!indeterminate;
+      }}
+      onChange={onChange}
+      aria-label={ariaLabel}
+    />
+  );
+}
+
 export function SortableTh({
   label,
   sortKey,

@@ -16,6 +16,7 @@ import { StatusPill } from "../components/StatusPill";
 import {
   PagerFooter,
   Panel,
+  RowCheckbox,
   SearchBox,
   SortableTh,
   nextSort,
@@ -95,17 +96,17 @@ export default function Exercises() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<ExerciseDetail | null>(null);
   const [editLoading, setEditLoading] = useState<string | null>(null);
-  const [archiving, setArchiving] = useState<string | null>(null);
-  // Confirmation dialog target for archiving (unarchive is immediate).
-  const [archiveTarget, setArchiveTarget] = useState<Exercise | null>(null);
-  // Confirmation dialog target for the admin-only permanent Delete.
-  const [deleting, setDeleting] = useState<Exercise | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  // Confirmation dialog targets for archiving (unarchive is immediate).
+  const [archiveTarget, setArchiveTarget] = useState<Exercise[] | null>(null);
+  // Confirmation dialog targets for the admin-only permanent Delete.
+  const [deleting, setDeleting] = useState<Exercise[] | null>(null);
   // Confirmation dialog target for sync: "all" = Sync All Exercises,
-  // otherwise the single exercise being synced.
-  const [syncConfirm, setSyncConfirm] = useState<Exercise | "all" | null>(null);
+  // otherwise the selected exercises being synced.
+  const [syncConfirm, setSyncConfirm] = useState<Exercise[] | "all" | null>(null);
   // Row selection (admin): the toolbar's Sync/Edit/Archive/Delete buttons act
-  // on this exercise. Stored as the slug so a refresh keeps the selection.
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  // on these exercises. Stored as slugs so a refresh keeps the selection.
+  const [selectedSlugs, setSelectedSlugs] = useState<Set<string>>(new Set());
 
   const toggleExpanded = (slug: string) =>
     setExpanded((prev) => {
@@ -166,47 +167,57 @@ export default function Exercises() {
     [token],
   );
 
-  // Flip an exercise's archived flag. Throws on failure so the archive
-  // confirmation dialog can stay open and surface the error; the inline
-  // unarchive path catches it into the page banner instead.
-  const setArchived = useCallback(
-    async (ex: Exercise, archived: boolean) => {
-      setArchiving(ex.slug);
+  // Flip the archived flag on each target, sequentially so a failure names
+  // the exercise it hit. Throws on failure so the archive confirmation dialog
+  // can stay open and surface the error; the inline unarchive path catches it
+  // into the page banner instead.
+  const setArchivedMany = useCallback(
+    async (targets: Exercise[], archived: boolean) => {
+      setArchiving(true);
       try {
-        await api.updateExercise(token, ex.slug, { archived });
+        const failures: string[] = [];
+        for (const ex of targets) {
+          try {
+            await api.updateExercise(token, ex.slug, { archived });
+          } catch (e) {
+            failures.push(
+              `${ex.title ?? ex.slug}: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+        }
         await refresh();
+        if (failures.length > 0) throw new Error(failures.join(" — "));
       } finally {
-        setArchiving(null);
+        setArchiving(false);
       }
     },
     [token, refresh],
   );
 
-  // The Archive button confirms first (archiving hides an exercise from
-  // grading and student totals); Unarchive is harmless, so it runs inline.
-  const onArchiveClick = useCallback(
-    (ex: Exercise) => {
-      if (ex.archived) {
-        setError(null);
-        void setArchived(ex, false).catch((e) =>
-          setError(e instanceof Error ? e.message : String(e)),
-        );
-      } else {
-        setArchiveTarget(ex);
+  // Permanent removal (admin only): the API purges each exercise's S3 content
+  // and records and scrubs its result from every student's report. Runs
+  // sequentially; already-deleted exercises stay deleted. Errors propagate to
+  // the confirmation dialog, which stays open and shows them.
+  const deleteExercises = useCallback(
+    async (targets: Exercise[]) => {
+      const failures: string[] = [];
+      for (const ex of targets) {
+        try {
+          await api.deleteExercise(token, ex.slug);
+          setSelectedSlugs((prev) => {
+            const next = new Set(prev);
+            next.delete(ex.slug);
+            return next;
+          });
+        } catch (e) {
+          failures.push(
+            `${ex.title ?? ex.slug}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
       }
-    },
-    [setArchived],
-  );
-
-  // Permanent removal (admin only): the API purges the exercise's S3 content
-  // and records and scrubs its result from every student's report. Errors
-  // propagate to the confirmation dialog, which stays open and shows them.
-  const deleteExercise = useCallback(
-    async (slug: string) => {
-      await api.deleteExercise(token, slug);
-      setDeleting(null);
-      setSelectedSlug((cur) => (cur === slug ? null : cur));
       await refresh();
+      if (failures.length > 0) throw new Error(failures.join(" — "));
+      setDeleting(null);
     },
     [token, refresh],
   );
@@ -266,11 +277,62 @@ export default function Exercises() {
   // Admin gets the leading Select column; students lose Status + Last Synced.
   const colCount = isAdmin ? 6 : isStudent ? 3 : 5;
 
-  // The exercise the toolbar actions target (null once it's deleted/filtered away).
-  const selected = useMemo(
-    () => exercises.find((ex) => ex.slug === selectedSlug) ?? null,
-    [exercises, selectedSlug],
+  // Drop selections whose exercise no longer exists (deleted elsewhere).
+  useEffect(() => {
+    setSelectedSlugs((prev) => {
+      const alive = new Set(exercises.map((ex) => ex.slug));
+      const next = new Set([...prev].filter((slug) => alive.has(slug)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [exercises]);
+
+  const toggleSelected = (slug: string) =>
+    setSelectedSlugs((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+
+  // The exercises the toolbar actions target.
+  const selectedExercises = useMemo(
+    () => exercises.filter((ex) => selectedSlugs.has(ex.slug)),
+    [exercises, selectedSlugs],
   );
+  // Sync skips archived exercises (the backend refuses them anyway).
+  const syncTargets = selectedExercises.filter((ex) => !ex.archived);
+  // Archive/Unarchive needs a uniform selection: all archived → Unarchive,
+  // none archived → Archive, a mix → disabled (ambiguous intent).
+  const allArchived =
+    selectedExercises.length > 0 && selectedExercises.every((ex) => ex.archived);
+  const noneArchived =
+    selectedExercises.length > 0 && selectedExercises.every((ex) => !ex.archived);
+
+  // Header checkbox: selects/clears every row shown on the current page.
+  const pageSlugs = pageItems.map((ex) => ex.slug);
+  const allPageSelected =
+    pageSlugs.length > 0 && pageSlugs.every((slug) => selectedSlugs.has(slug));
+  const somePageSelected = pageSlugs.some((slug) => selectedSlugs.has(slug));
+  const toggleSelectPage = () =>
+    setSelectedSlugs((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) pageSlugs.forEach((slug) => next.delete(slug));
+      else pageSlugs.forEach((slug) => next.add(slug));
+      return next;
+    });
+
+  // The Archive button confirms first (archiving hides an exercise from
+  // grading and student totals); Unarchive is harmless, so it runs inline.
+  const onArchiveClick = () => {
+    if (allArchived) {
+      setError(null);
+      void setArchivedMany(selectedExercises, false).catch((e) =>
+        setError(e instanceof Error ? e.message : String(e)),
+      );
+    } else if (noneArchived) {
+      setArchiveTarget(selectedExercises);
+    }
+  };
 
   return (
     <main className="page">
@@ -280,7 +342,7 @@ export default function Exercises() {
         hint={
           isStudent
             ? "Every exercise in the course. Click a task name to view its description; click a file to download its input data."
-            : "Every authored exercise and whether its grading artifacts are synced and current. Click a task name to view its description; click a file to download its input data. Select a row to enable the Sync, Edit, Archive and Delete buttons in the toolbar."
+            : "Every authored exercise and whether its grading artifacts are synced and current. Click a task name to view its description; click a file to download its input data. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Sync, Edit, Archive and Delete buttons in the toolbar — Edit works on one exercise at a time."
         }
         toolbar={
           <>
@@ -295,39 +357,73 @@ export default function Exercises() {
                 {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="sync" />}
                 <button
                   className="btn"
-                  onClick={() => selected && setSyncConfirm(selected)}
-                  disabled={!selected || anyBusy || selected.archived}
-                  title={selected ? undefined : "Select an exercise first"}
+                  onClick={() => syncTargets.length > 0 && setSyncConfirm(syncTargets)}
+                  disabled={syncTargets.length === 0 || anyBusy}
+                  title={
+                    selectedExercises.length === 0
+                      ? "Select at least one exercise first"
+                      : syncTargets.length === 0
+                        ? "Archived exercises can't be synced"
+                        : undefined
+                  }
                 >
                   <IconSync />
                   Sync
+                  {syncTargets.length > 1 && ` (${syncTargets.length})`}
                 </button>
                 <button
                   className="btn"
-                  onClick={() => selected && void openEdit(selected.slug)}
-                  disabled={!selected || editLoading !== null}
-                  title={selected ? undefined : "Select an exercise first"}
+                  onClick={() =>
+                    selectedExercises.length === 1 &&
+                    void openEdit(selectedExercises[0].slug)
+                  }
+                  disabled={selectedExercises.length !== 1 || editLoading !== null}
+                  title={
+                    selectedExercises.length === 0
+                      ? "Select an exercise first"
+                      : selectedExercises.length > 1
+                        ? "Only one exercise can be edited at a time"
+                        : undefined
+                  }
                 >
                   <IconEdit />
-                  {selected && editLoading === selected.slug ? "…" : "Edit"}
+                  {editLoading !== null ? "…" : "Edit"}
                 </button>
                 <button
                   className="btn"
-                  onClick={() => selected && onArchiveClick(selected)}
-                  disabled={!selected || archiving !== null || anyBusy}
-                  title={selected ? undefined : "Select an exercise first"}
+                  onClick={onArchiveClick}
+                  disabled={
+                    (!allArchived && !noneArchived) || archiving || anyBusy
+                  }
+                  title={
+                    selectedExercises.length === 0
+                      ? "Select at least one exercise first"
+                      : !allArchived && !noneArchived
+                        ? "Selection mixes archived and active exercises — select one kind"
+                        : undefined
+                  }
                 >
-                  {selected?.archived ? <IconUnarchive /> : <IconArchive />}
-                  {selected?.archived ? "Unarchive" : "Archive"}
+                  {allArchived ? <IconUnarchive /> : <IconArchive />}
+                  {allArchived ? "Unarchive" : "Archive"}
+                  {selectedExercises.length > 1 &&
+                    (allArchived || noneArchived) &&
+                    ` (${selectedExercises.length})`}
                 </button>
                 <button
                   className="btn danger"
-                  onClick={() => selected && setDeleting(selected)}
-                  disabled={!selected || anyBusy}
-                  title={selected ? undefined : "Select an exercise first"}
+                  onClick={() =>
+                    selectedExercises.length > 0 && setDeleting(selectedExercises)
+                  }
+                  disabled={selectedExercises.length === 0 || anyBusy}
+                  title={
+                    selectedExercises.length === 0
+                      ? "Select at least one exercise first"
+                      : undefined
+                  }
                 >
                   <IconTrash />
                   Delete
+                  {selectedExercises.length > 1 && ` (${selectedExercises.length})`}
                 </button>
                 <span className="toolbar-sep" aria-hidden="true" />
                 <button className="btn" onClick={() => setShowAdd(true)} disabled={anyBusy}>
@@ -374,7 +470,17 @@ export default function Exercises() {
           <table className="data-table">
             <thead>
               <tr>
-                {isAdmin && <th className="plain select-col" aria-label="Select" />}
+                {isAdmin && (
+                  <th className="plain select-col">
+                    <RowCheckbox
+                      checked={allPageSelected}
+                      indeterminate={somePageSelected}
+                      onChange={toggleSelectPage}
+                      ariaLabel="Select all rows on this page"
+                      disabled={pageSlugs.length === 0}
+                    />
+                  </th>
+                )}
                 <SortableTh label="Exercise" sortKey="exercise" sort={sort} onSort={onSort} />
                 <SortableTh label="Task Type" sortKey="type" sort={sort} onSort={onSort} />
                 <th className="plain">Files</th>
@@ -395,7 +501,7 @@ export default function Exercises() {
                       className={
                         [
                           ex.archived ? "row-archived" : "",
-                          selectedSlug === ex.slug ? "row-selected" : "",
+                          selectedSlugs.has(ex.slug) ? "row-selected" : "",
                         ]
                           .filter(Boolean)
                           .join(" ") || undefined
@@ -403,17 +509,10 @@ export default function Exercises() {
                     >
                       {isAdmin && (
                         <td className="select-cell">
-                          <input
-                            type="radio"
-                            className="row-select"
-                            name="exercise-select"
-                            checked={selectedSlug === ex.slug}
-                            onChange={() => setSelectedSlug(ex.slug)}
-                            onClick={() => {
-                              // Clicking the already-selected row deselects it.
-                              if (selectedSlug === ex.slug) setSelectedSlug(null);
-                            }}
-                            aria-label={`Select ${ex.title ?? ex.slug}`}
+                          <RowCheckbox
+                            checked={selectedSlugs.has(ex.slug)}
+                            onChange={() => toggleSelected(ex.slug)}
+                            ariaLabel={`Select ${ex.title ?? ex.slug}`}
                           />
                         </td>
                       )}
@@ -527,15 +626,30 @@ export default function Exercises() {
       )}
       {syncConfirm && isAdmin && (
         <ConfirmModal
-          title={syncConfirm === "all" ? "Sync All Exercises" : "Sync Exercise"}
-          confirmLabel={syncConfirm === "all" ? "Sync all" : "Sync"}
+          title={
+            syncConfirm === "all"
+              ? "Sync All Exercises"
+              : syncConfirm.length === 1
+                ? "Sync Exercise"
+                : "Sync Exercises"
+          }
+          confirmLabel={
+            syncConfirm === "all"
+              ? "Sync all"
+              : syncConfirm.length === 1
+                ? "Sync"
+                : `Sync ${syncConfirm.length} exercises`
+          }
           confirmIcon={<IconSync />}
           confirmClassName="btn primary"
           busyLabel="Starting…"
           onConfirm={async () => {
             const target = syncConfirm;
             setSyncConfirm(null);
-            if (target) void startSync(target === "all" ? undefined : target.slug);
+            if (target === "all") void startSync(undefined);
+            // Each exercise gets its own background job (and per-slug lock),
+            // so the selected ones sync in parallel.
+            else if (target) target.forEach((ex) => void startSync(ex.slug));
           }}
           onClose={() => setSyncConfirm(null)}
         >
@@ -545,52 +659,108 @@ export default function Exercises() {
               uses each exercise&rsquo;s current files. It can take a while and
               runs in the background.
             </p>
-          ) : (
+          ) : syncConfirm.length === 1 ? (
             <p>
-              Get <strong>{syncConfirm.title ?? syncConfirm.slug}</strong> ready
-              for grading? This uses its current files and runs in the
+              Get <strong>{syncConfirm[0].title ?? syncConfirm[0].slug}</strong>{" "}
+              ready for grading? This uses its current files and runs in the
               background.
             </p>
+          ) : (
+            <>
+              <p>
+                Get these <strong>{syncConfirm.length} exercises</strong> ready
+                for grading? This uses each one&rsquo;s current files and runs
+                in the background.
+              </p>
+              <ul className="bulk-list">
+                {syncConfirm.map((ex) => (
+                  <li key={ex.slug}>{ex.title ?? ex.slug}</li>
+                ))}
+              </ul>
+            </>
           )}
         </ConfirmModal>
       )}
-      {archiveTarget && isAdmin && (
+      {archiveTarget && archiveTarget.length > 0 && isAdmin && (
         <ConfirmModal
-          title="Archive Exercise"
-          confirmLabel="Archive"
+          title={archiveTarget.length === 1 ? "Archive Exercise" : "Archive Exercises"}
+          confirmLabel={
+            archiveTarget.length === 1
+              ? "Archive"
+              : `Archive ${archiveTarget.length} exercises`
+          }
           confirmIcon={<IconArchive />}
           confirmClassName="btn primary"
           busyLabel="Archiving…"
           onConfirm={() =>
-            setArchived(archiveTarget, true).then(() => setArchiveTarget(null))
+            setArchivedMany(archiveTarget, true).then(() => setArchiveTarget(null))
           }
           onClose={() => setArchiveTarget(null)}
         >
-          <p>
-            Archive <strong>{archiveTarget.title ?? archiveTarget.slug}</strong>?
-            While archived, it won&rsquo;t be graded or counted toward student
-            totals.
-          </p>
+          {archiveTarget.length === 1 ? (
+            <p>
+              Archive{" "}
+              <strong>{archiveTarget[0].title ?? archiveTarget[0].slug}</strong>?
+              While archived, it won&rsquo;t be graded or counted toward student
+              totals.
+            </p>
+          ) : (
+            <>
+              <p>
+                Archive these <strong>{archiveTarget.length} exercises</strong>?
+                While archived, they won&rsquo;t be graded or counted toward
+                student totals.
+              </p>
+              <ul className="bulk-list">
+                {archiveTarget.map((ex) => (
+                  <li key={ex.slug}>{ex.title ?? ex.slug}</li>
+                ))}
+              </ul>
+            </>
+          )}
           <p className="hint">
-            Nothing is deleted — you can bring it back anytime.
+            Nothing is deleted — you can bring {archiveTarget.length === 1 ? "it" : "them"} back anytime.
           </p>
         </ConfirmModal>
       )}
-      {deleting && isAdmin && (
+      {deleting && deleting.length > 0 && isAdmin && (
         <ConfirmModal
-          title="Delete Exercise"
-          confirmLabel={`Delete ${deleting.title ?? deleting.slug}`}
+          title={deleting.length === 1 ? "Delete Exercise" : "Delete Exercises"}
+          confirmLabel={
+            deleting.length === 1
+              ? `Delete ${deleting[0].title ?? deleting[0].slug}`
+              : `Delete ${deleting.length} exercises`
+          }
           confirmIcon={<IconTrash />}
-          onConfirm={() => deleteExercise(deleting.slug)}
+          onConfirm={() => deleteExercises(deleting)}
           onClose={() => setDeleting(null)}
         >
-          <p>
-            Permanently delete <strong>{deleting.title ?? deleting.slug}</strong>?
-            This removes its description, input files, and grades, and clears
-            its result from every student&rsquo;s report (points and totals
-            update automatically). To keep it without grading it, use Archive
-            instead.
-          </p>
+          {deleting.length === 1 ? (
+            <p>
+              Permanently delete{" "}
+              <strong>{deleting[0].title ?? deleting[0].slug}</strong>? This
+              removes its description, input files, and grades, and clears its
+              result from every student&rsquo;s report (points and totals
+              update automatically). To keep it without grading it, use Archive
+              instead.
+            </p>
+          ) : (
+            <>
+              <p>
+                Permanently delete these{" "}
+                <strong>{deleting.length} exercises</strong>? This removes
+                their descriptions, input files, and grades, and clears their
+                results from every student&rsquo;s report (points and totals
+                update automatically). To keep them without grading them, use
+                Archive instead.
+              </p>
+              <ul className="bulk-list">
+                {deleting.map((ex) => (
+                  <li key={ex.slug}>{ex.title ?? ex.slug}</li>
+                ))}
+              </ul>
+            </>
+          )}
           <p className="hint">This cannot be undone.</p>
         </ConfirmModal>
       )}
