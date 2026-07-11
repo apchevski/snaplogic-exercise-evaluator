@@ -305,7 +305,7 @@ export default function Dashboard() {
 
       <Panel
         title="Student Grades of All Projects"
-        hint="Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove buttons in the toolbar — Remove works on many students at once, Grade on one at a time."
+        hint="Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Remove works on many students at once, Grade on one at a time."
         toolbar={
           <>
             <SearchBox
@@ -317,7 +317,7 @@ export default function Dashboard() {
             {canGrade && (
               <>
                 <button
-                  className="btn"
+                  className="tool-btn"
                   onClick={() => {
                     if (selectedStudents.length === 1) {
                       const s = selectedStudents[0];
@@ -329,35 +329,40 @@ export default function Dashboard() {
                   disabled={selectedStudents.length === 0 || selectedBusy}
                   title={
                     selectedStudents.length === 0
-                      ? "Select a student first"
-                      : undefined
+                      ? "Grade — select a student first"
+                      : "Grade the selected student"
                   }
+                  aria-label="Grade selected student"
                 >
-                  <IconGrade />
-                  Grade
+                  <IconGrade size={18} />
                 </button>
                 {isAdmin && (
                   <button
-                    className="btn danger"
+                    className="tool-btn danger"
                     onClick={() =>
                       selectedStudents.length > 0 && setRemoving(selectedStudents)
                     }
                     disabled={selectedStudents.length === 0 || selectedBusy}
                     title={
                       selectedStudents.length === 0
-                        ? "Select at least one student first"
-                        : undefined
+                        ? "Remove — select at least one student first"
+                        : selectedStudents.length === 1
+                          ? "Remove the selected student permanently"
+                          : `Remove ${selectedStudents.length} selected students permanently`
                     }
+                    aria-label="Remove selected students"
                   >
-                    <IconTrash />
-                    Remove
-                    {selectedStudents.length > 1 && ` (${selectedStudents.length})`}
+                    <IconTrash size={18} />
                   </button>
                 )}
                 <span className="toolbar-sep" aria-hidden="true" />
-                <button className="btn primary" onClick={() => setAdding(true)}>
-                  <IconPlus />
-                  Add Student
+                <button
+                  className="tool-btn"
+                  onClick={() => setAdding(true)}
+                  title="Add student"
+                  aria-label="Add student"
+                >
+                  <IconPlus size={18} />
                 </button>
               </>
             )}
@@ -521,10 +526,10 @@ export default function Dashboard() {
                     <h3>No students yet</h3>
                     {canGrade ? (
                       <>
-                        Use “Add Student” above to register a student (their
-                        SnapLogic project must already exist), then tick
-                        their row and start a grading with the Grade button
-                        above.
+                        Use the + icon in the toolbar above to register a
+                        student (their SnapLogic project must already exist),
+                        then tick their row and start a grading with the Grade
+                        icon.
                       </>
                     ) : (
                       <>Nothing has been graded yet — check back later.</>

@@ -25,9 +25,13 @@ tables, and — like the old console's Designer / Manager / Dashboard header —
   leftmost column. Tick any number of rows; the checkbox in the column header
   selects/clears **every row on the current page** (so with *Entries per page*
   at 100 it selects all 100), and shows a dash when only some are ticked.
-  Bulk-capable toolbar buttons show a count, e.g. **Remove (3)**.
+- **Icon-only toolbars**: like the classic SnapLogic Designer toolbar, the
+  Students and Exercises toolbars show flat icons instead of labeled buttons.
+  Hover an icon for its name and, for bulk-capable actions, the selection
+  count (e.g. *Remove 3 selected students permanently*); the confirmation
+  dialog then lists every target by name.
 - **Grade** (mentor or admin): tick a student's row (the checkbox in
-  the leftmost column) and click **Grade** in the toolbar. Grading runs for
+  the leftmost column) and click the **Grade** icon in the toolbar. Grading runs for
   **one student at a time** — clicking Grade with several rows ticked shows a
   dialog saying so instead of starting anything. A scope
   picker opens with every active exercise preselected — keep them all for a
@@ -44,7 +48,8 @@ tables, and — like the old console's Designer / Manager / Dashboard header —
     status and the report appears when the batch finishes (you can leave the
     page). A **subset** selection and the per-card **Regrade** stay on the
     instant **synchronous** path (normal cost).
-- **Add a student** (mentor or admin): click **Add Student** in the toolbar.
+- **Add a student** (mentor or admin): click the **+** (Add student) icon in
+  the toolbar.
   The dialog takes the student's name plus the SnapLogic **project space**
   (prefilled with the configured default, `SNAPLOGIC_STUDENT_PROJECT_SPACE`)
   and optionally a **project** name for when the project isn't named exactly
@@ -99,17 +104,19 @@ tables, and — like the old console's Designer / Manager / Dashboard header —
   an immutable **Edit history** (who changed what, when) in its own panel on the
   student's page. Regrading a task later replaces its edited evaluation — and
   clears any override — with fresh AI text.
-- **Sync** (admin only): tick one or more exercise rows and click **Sync** in
-  the toolbar to refresh their solution caches + expected outputs from
+- **Sync** (admin only): tick one or more exercise rows and click the **Sync**
+  icon in the toolbar to refresh their solution caches + expected outputs from
   SnapLogic into S3 ($0 — no AI involved). Each ticked exercise syncs as its
-  own background job; archived rows in the selection are skipped.
+  own background job; archived rows in the selection are skipped. There is no
+  separate sync-all button: selecting **every** active exercise (header
+  checkbox) makes Sync run the single sync-all job instead.
 - **Remove a student** (admin only): tick one or more student rows and click
-  the red **Remove** button in the toolbar; a confirmation dialog lists them,
+  the red **Remove** (trash) icon in the toolbar; a confirmation dialog lists them,
   then each student is permanently deleted from AWS — dashboard card, full report history (every S3 version),
   their grading-job records, and the web login their registration created
   (if any). Their SnapLogic projects are untouched.
 - **Delete an exercise** (admin only): tick one or more exercise rows and
-  click the red **Delete** button in the toolbar (next to Archive); a
+  click the red **Delete** (trash) icon in the toolbar (next to Archive); a
   confirmation dialog lists them, then each exercise is permanently deleted from AWS — authored content, sync artifacts and input files (every S3
   version) plus its DynamoDB and job records — and scrubs its result out of
   every student's live report (points, counts and totals are recalculated;
@@ -252,7 +259,9 @@ out, and Cognito returns to the dashboard (`/`) after a successful sign-in.
    (auto-deploys via path filters) or run a workflow manually from the Actions
    tab / `gh workflow run` against any branch. CI takes over (image → Lambdas,
    SPA → S3 + CloudFront).
-6. Click **Sync All Exercises** (admin) once. Besides generating artifacts,
+6. On the Exercises page (admin), select every exercise with the header
+   checkbox and click the **Sync** icon once — with all exercises selected it
+   runs the single sync-all job. Besides generating artifacts,
    this seeds every image-shipped exercise's authored files
    (description/notes/resources) into S3 — the canonical exercise store —
    after which the UI owns exercise content end to end.
@@ -642,8 +651,8 @@ an export, not an input.
 
 ### Creating and editing (web UI, admin only)
 
-Click **Add New Exercise** (next to *Sync All Exercises*), or tick an
-exercise row and click **Edit** in the toolbar (Edit needs exactly one row
+Click the **+** (Add new exercise) icon in the Exercises toolbar, or tick an
+exercise row and click the **Edit** (pencil) icon (Edit needs exactly one row
 ticked). The dialog takes:
 
 - **Exercise Name** (required) — the human-readable pipeline name (e.g.
@@ -671,13 +680,13 @@ ticked). The dialog takes:
 Markdown lands in S3 under `exercises/<slug>/`; the worker overlays that
 prefix onto its working tree before every job, so a UI-authored exercise is
 indistinguishable from a seeded one. Finish by ticking the row and
-clicking **Sync** in the toolbar.
+clicking the **Sync** icon in the toolbar.
 
-**Archive** (admin: tick one or more rows, then click **Archive** in the
-toolbar) soft-deletes exercises: they stop being
+**Archive** (admin: tick one or more rows, then click the **Archive** icon in
+the toolbar) soft-deletes exercises: they stop being
 synced, graded and counted toward student totals, and show greyed-out with
 an `archived` badge. Nothing is removed from S3 — **Unarchive** restores them
-fully. The button archives or unarchives depending on the selection (mixing
+fully. The icon archives or unarchives depending on the selection (mixing
 archived and active rows disables it). **Delete** (admin, same toolbar) is
 the permanent alternative — see *Delete an exercise* above.
 
