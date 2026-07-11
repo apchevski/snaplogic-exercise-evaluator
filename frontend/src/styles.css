@@ -211,6 +211,20 @@ button.btn.icon-btn {
 
 .actions-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
+/* row selection: the leading radio column that arms the toolbar actions */
+th.select-col { width: 30px; }
+td.select-cell { width: 30px; text-align: center; }
+.row-select {
+  accent-color: var(--sl-navy); cursor: pointer;
+  width: 14px; height: 14px; margin: 0; vertical-align: middle;
+}
+.data-table tbody tr.row-selected td { background: #e7f0f9; }
+.data-table tbody tr.row-selected td.sorted { background: #e2e5f5; }
+.data-table tbody tr.row-selected:hover td { background: #ddeaf7; }
+
+/* vertical divider between the selection-scoped and global toolbar buttons */
+.toolbar-sep { width: 1px; align-self: stretch; background: var(--sl-border); }
+
 /* downloadable exercise input files (Exercises page "Files" column) */
 .resource-list { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .resource-chip {
@@ -570,7 +584,7 @@ tr.expand-row:hover td { background: #f8f9fb; }
 /* archived exercises: kept forever, just excluded from sync/grade */
 .sync-status.archived { background: #eceff1; color: #5b6771; border: 1px dashed #b3bcc5; }
 tr.row-archived td { opacity: 0.62; }
-tr.row-archived td:last-child { opacity: 1; }
+tr.row-archived td.select-cell { opacity: 1; }
 
 .login-page {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;

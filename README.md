@@ -20,7 +20,8 @@ Mentors and admins log into a VPN-restricted web dashboard (styled after the
 classic SnapLogic Dashboard: navy panel headers, sortable/paginated data
 tables, tabbed sub-nav):
 
-- **Grade** (mentor or admin): click **Grade** on a student's row. A scope
+- **Grade** (mentor or admin): select a student's row (the radio button in
+  the leftmost column) and click **Grade** in the toolbar. A scope
   picker opens with every active exercise preselected — keep them all for a
   full run, or check just the exercises you want. A job queues, a worker
   Lambda runs the deterministic hard gates against SnapLogic, sends each
@@ -44,7 +45,7 @@ tables, tabbed sub-nav):
   project exists at that location (a typo gets a clear "no project named …"
   error instead of a card that every grading run would fail on), then
   registers the student with zero exercises graded (and $0 spent) — grading
-  starts later from the row's **Grade** button. An optional **student email**
+  starts later by selecting the row and clicking **Grade**. An optional **student email**
   additionally creates a read-only web login for the student: Cognito emails
   them a temporary password, they change it on first sign-in, and from then
   on they can watch their grades (see the `student` role below).
@@ -86,16 +87,17 @@ tables, tabbed sub-nav):
   an immutable **Edit history** (who changed what, when) in its own panel on the
   student's page. Regrading a task later replaces its edited evaluation — and
   clears any override — with fresh AI text.
-- **Sync** (admin only): click Sync on an exercise to refresh its solution
-  cache + expected outputs from SnapLogic into S3 ($0 — no AI involved).
-- **Remove a student** (admin only): a red **Remove** button on the
-  student's row opens a confirmation dialog, then permanently deletes the
-  student from AWS — dashboard card, full report history (every S3 version),
+- **Sync** (admin only): select an exercise row and click **Sync** in the
+  toolbar to refresh its solution cache + expected outputs from SnapLogic
+  into S3 ($0 — no AI involved).
+- **Remove a student** (admin only): select the student's row and click the
+  red **Remove** button in the toolbar; a confirmation dialog opens, then the
+  student is permanently deleted from AWS — dashboard card, full report history (every S3 version),
   their grading-job records, and the web login their registration created
   (if any). Their SnapLogic project is untouched.
-- **Delete an exercise** (admin only): a red **Delete** button next to
-  Archive opens a confirmation dialog, then permanently deletes the exercise
-  from AWS — authored content, sync artifacts and input files (every S3
+- **Delete an exercise** (admin only): select the exercise row and click the
+  red **Delete** button in the toolbar (next to Archive); a confirmation
+  dialog opens, then the exercise is permanently deleted from AWS — authored content, sync artifacts and input files (every S3
   version) plus its DynamoDB and job records — and scrubs its result out of
   every student's live report (points, counts and totals are recalculated;
   older report versions keep their history). Archive remains the reversible
@@ -625,8 +627,8 @@ an export, not an input.
 
 ### Creating and editing (web UI, admin only)
 
-Click **Add New Exercise** (next to *Sync All Exercises*), or **Edit** on any
-row. The dialog takes:
+Click **Add New Exercise** (next to *Sync All Exercises*), or select an
+exercise row and click **Edit** in the toolbar. The dialog takes:
 
 - **Exercise Name** (required) — the human-readable pipeline name (e.g.
   *Task 07 – Router Basics*). Sync looks the solution pipeline up by it, and on
@@ -652,12 +654,15 @@ row. The dialog takes:
 
 Markdown lands in S3 under `exercises/<slug>/`; the worker overlays that
 prefix onto its working tree before every job, so a UI-authored exercise is
-indistinguishable from a seeded one. Finish by clicking **Sync** on the row.
+indistinguishable from a seeded one. Finish by selecting the row and
+clicking **Sync** in the toolbar.
 
-**Archive** (admin, per row) soft-deletes an exercise: it stops being
+**Archive** (admin: select the row, then click **Archive** in the toolbar)
+soft-deletes an exercise: it stops being
 synced, graded and counted toward student totals, and shows greyed-out with
 an `archived` badge. Nothing is removed from S3 — **Unarchive** restores it
-fully. There is deliberately no hard delete.
+fully. **Delete** (admin, same toolbar) is the permanent alternative — see
+*Delete an exercise* above.
 
 ### Fallback: authoring in git
 

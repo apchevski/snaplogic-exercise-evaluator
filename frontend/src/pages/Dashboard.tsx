@@ -75,6 +75,9 @@ export default function Dashboard() {
   const [scopeFor, setScopeFor] = useState<{ name: string; slug: string } | null>(null);
   // Confirmation dialog target for the admin-only permanent Remove.
   const [removing, setRemoving] = useState<StudentMeta | null>(null);
+  // Row selection (graders): the toolbar's Grade/Remove buttons act on this
+  // student. Stored as the slug so a refresh keeps the selection.
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -161,6 +164,7 @@ export default function Dashboard() {
     async (slug: string) => {
       await api.deleteStudent(token, slug);
       setRemoving(null);
+      setSelectedSlug((cur) => (cur === slug ? null : cur));
       void refresh();
     },
     [token, refresh],
@@ -206,7 +210,15 @@ export default function Dashboard() {
   const jobEntries = Object.entries(jobs);
   const nameFor = (key: string) =>
     students.find((s) => s.slug === key || s.display_name === key)?.display_name ?? key;
-  const colCount = canGrade ? 11 : 10; // Actions column hidden for students
+  const colCount = canGrade ? 11 : 10; // Select column hidden for students
+
+  // The student the toolbar actions target (null once removed/filtered away).
+  const selected = useMemo(
+    () => students.find((s) => s.slug === selectedSlug) ?? null,
+    [students, selectedSlug],
+  );
+  const selectedBusy =
+    !!selected && (jobBusy(selected.slug) || jobBusy(selected.display_name));
 
   return (
     <main className="page">
@@ -242,7 +254,7 @@ export default function Dashboard() {
 
       <Panel
         title="Student Grades of All Projects"
-        hint="Every graded student project. Click a column header to sort, or a row's + to see the overall summary."
+        hint="Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Select a row to enable the Grade and Remove buttons in the toolbar."
         toolbar={
           <>
             <SearchBox
@@ -252,10 +264,36 @@ export default function Dashboard() {
             />
             <span className="toolbar-spacer" />
             {canGrade && (
-              <button className="btn primary" onClick={() => setAdding(true)}>
-                <IconPlus />
-                Add Student
-              </button>
+              <>
+                <button
+                  className="btn"
+                  onClick={() =>
+                    selected &&
+                    setScopeFor({ name: selected.display_name, slug: selected.slug })
+                  }
+                  disabled={!selected || selectedBusy}
+                  title={selected ? undefined : "Select a student first"}
+                >
+                  <IconGrade />
+                  Grade
+                </button>
+                {isAdmin && (
+                  <button
+                    className="btn danger"
+                    onClick={() => selected && setRemoving(selected)}
+                    disabled={!selected || selectedBusy}
+                    title={selected ? undefined : "Select a student first"}
+                  >
+                    <IconTrash />
+                    Remove
+                  </button>
+                )}
+                <span className="toolbar-sep" aria-hidden="true" />
+                <button className="btn primary" onClick={() => setAdding(true)}>
+                  <IconPlus />
+                  Add Student
+                </button>
+              </>
             )}
             <label className="field">
               Entries per Page:
@@ -287,6 +325,7 @@ export default function Dashboard() {
           <table className="data-table">
             <thead>
               <tr>
+                {canGrade && <th className="plain select-col" aria-label="Select" />}
                 <th className="plain" aria-label="Expand" />
                 <SortableTh label="Student" sortKey="student" sort={sort} onSort={onSort} />
                 <SortableTh label="Project Space" sortKey="space" sort={sort} onSort={onSort} />
@@ -297,7 +336,6 @@ export default function Dashboard() {
                 <SortableTh label="Missing" sortKey="missing" sort={sort} onSort={onSort} />
                 <SortableTh label="Not Graded" sortKey="notgraded" sort={sort} onSort={onSort} />
                 <SortableTh label="Last Graded" sortKey="graded" sort={sort} onSort={onSort} />
-                {canGrade && <th className="plain">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -318,7 +356,23 @@ export default function Dashboard() {
                     : 0;
                 return (
                   <Fragment key={s.slug}>
-                    <tr>
+                    <tr className={selectedSlug === s.slug ? "row-selected" : undefined}>
+                      {canGrade && (
+                        <td className="select-cell">
+                          <input
+                            type="radio"
+                            className="row-select"
+                            name="student-select"
+                            checked={selectedSlug === s.slug}
+                            onChange={() => setSelectedSlug(s.slug)}
+                            onClick={() => {
+                              // Clicking the already-selected row deselects it.
+                              if (selectedSlug === s.slug) setSelectedSlug(null);
+                            }}
+                            aria-label={`Select ${s.display_name}`}
+                          />
+                        </td>
+                      )}
                       <td>
                         {s.overall_summary && (
                           <button
@@ -383,32 +437,6 @@ export default function Dashboard() {
                       <td className={`${sc("graded")} cell-muted`}>
                         {s.graded_at ?? "—"}
                       </td>
-                      {canGrade && (
-                        <td>
-                          <span className="actions-cell">
-                            <button
-                              className="btn small"
-                              onClick={() =>
-                                setScopeFor({ name: s.display_name, slug: s.slug })
-                              }
-                              disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
-                            >
-                              <IconGrade />
-                              Grade
-                            </button>
-                            {isAdmin && (
-                              <button
-                                className="btn small danger"
-                                onClick={() => setRemoving(s)}
-                                disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
-                              >
-                                <IconTrash />
-                                Remove
-                              </button>
-                            )}
-                          </span>
-                        </td>
-                      )}
                     </tr>
                     {isOpen && s.overall_summary && (
                       <tr className="expand-row">
@@ -425,8 +453,9 @@ export default function Dashboard() {
                     {canGrade ? (
                       <>
                         Use “Add Student” above to register a student (their
-                        SnapLogic project must already exist), then start a
-                        grading with the row&rsquo;s Grade button.
+                        SnapLogic project must already exist), then select
+                        their row and start a grading with the Grade button
+                        above.
                       </>
                     ) : (
                       <>Nothing has been graded yet — check back later.</>
