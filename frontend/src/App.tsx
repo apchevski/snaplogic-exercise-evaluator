@@ -173,10 +173,10 @@ function OwnStudentGuard({ ownSlug }: { ownSlug: string }) {
   return <StudentDetail />;
 }
 
-/** Read-only shell for the `student` role: no nav, no roster — every route
- * lands on the student's own grades page. The student's slug isn't in the
- * token, so we resolve it from GET /v1/students, which for a student returns
- * only the card their login owns. */
+/** Read-only shell for the `student` role: a My Grades page (their own card
+ * only — no roster) plus a read-only Exercises catalog. The student's slug
+ * isn't in the token, so we resolve it from GET /v1/students, which for a
+ * student returns only the card their login owns. */
 function StudentRoutes() {
   const token = useToken();
   // undefined = still loading; null = no card is linked to this login.
@@ -208,25 +208,49 @@ function StudentRoutes() {
   if (slug === undefined) {
     return <main className="page">Loading…</main>;
   }
-  if (slug === null) {
-    return (
-      <main className="page">
-        <div className="empty-cell">
-          <h3>No grades linked to your account yet</h3>
-          Your grades will appear here once your mentor has graded your work.
-          If you think this is a mistake, please contact your mentor.
-        </div>
-      </main>
-    );
-  }
+  // A login with no linked card can still browse the exercises; My Grades
+  // shows the "nothing linked yet" notice at / instead of a detail page.
+  const gradesPath = slug ? `/students/${encodeURIComponent(slug)}` : "/";
+  const noCard = (
+    <main className="page">
+      <div className="empty-cell">
+        <h3>No grades linked to your account yet</h3>
+        Your grades will appear here once your mentor has graded your work.
+        If you think this is a mistake, please contact your mentor.
+      </div>
+    </main>
+  );
   return (
-    <Routes>
-      <Route path="/students/:slug" element={<OwnStudentGuard ownSlug={slug} />} />
-      <Route
-        path="*"
-        element={<Navigate to={`/students/${encodeURIComponent(slug)}`} replace />}
-      />
-    </Routes>
+    <>
+      <nav className="subnav">
+        <NavLink to={gradesPath} className={({ isActive }) => (isActive ? "active" : "")} end>
+          My Grades
+        </NavLink>
+        <NavLink
+          to="/exercises"
+          className={({ isActive }) => (isActive ? "active" : "")}
+        >
+          Exercises
+        </NavLink>
+      </nav>
+      <Routes>
+        <Route path="/exercises" element={<Exercises />} />
+        {slug ? (
+          <>
+            <Route
+              path="/students/:slug"
+              element={<OwnStudentGuard ownSlug={slug} />}
+            />
+            <Route path="*" element={<Navigate to={gradesPath} replace />} />
+          </>
+        ) : (
+          <>
+            <Route path="/" element={noCard} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </>
+        )}
+      </Routes>
+    </>
   );
 }
 

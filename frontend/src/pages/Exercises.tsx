@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { api, pollJob } from "../api";
-import { useIsAdmin, useToken } from "../auth";
+import { useIsAdmin, useIsStudentOnly, useToken } from "../auth";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ExerciseModal } from "../components/ExerciseModal";
 import {
@@ -79,6 +79,10 @@ function DescriptionBody({ text }: { text: string }) {
 export default function Exercises() {
   const token = useToken();
   const isAdmin = useIsAdmin();
+  // Students get a read-only catalog: descriptions and input files only. The
+  // sync machinery (Status / Last Synced columns, archived rows) is staff
+  // detail — archived exercises aren't graded or counted, so they're hidden.
+  const isStudent = useIsStudentOnly();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [search, setSearch] = useState("");
@@ -245,20 +249,22 @@ export default function Exercises() {
     const q = search.trim().toLowerCase();
     const filtered = exercises.filter(
       (ex) =>
-        !q ||
-        (ex.title ?? "").toLowerCase().includes(q) ||
-        ex.slug.toLowerCase().includes(q),
+        !(isStudent && ex.archived) &&
+        (!q ||
+          (ex.title ?? "").toLowerCase().includes(q) ||
+          ex.slug.toLowerCase().includes(q)),
     );
     const cmp = COMPARE[sort.key] ?? COMPARE.exercise;
     const sign = sort.dir === "asc" ? 1 : -1;
     return [...filtered].sort((a, b) => cmp(a, b) * sign);
-  }, [exercises, search, sort]);
+  }, [exercises, search, sort, isStudent]);
 
   const { page, setPage, pageItems, pageCount } = usePagination(visible, perPage);
 
   const onSort = (key: string) => setSort((s) => nextSort(s, key, DEFAULT_DIR[key] ?? "asc"));
   const sc = (key: string) => (sort.key === key ? "sorted" : "");
-  const colCount = isAdmin ? 6 : 5; // admin gets the leading Select column
+  // Admin gets the leading Select column; students lose Status + Last Synced.
+  const colCount = isAdmin ? 6 : isStudent ? 3 : 5;
 
   // The exercise the toolbar actions target (null once it's deleted/filtered away).
   const selected = useMemo(
@@ -270,8 +276,12 @@ export default function Exercises() {
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
       <Panel
-        title="Exercise Sync Status of All Projects"
-        hint="Every authored exercise and whether its grading artifacts are synced and current. Click a task name to view its description; click a file to download its input data. Select a row to enable the Sync, Edit, Archive and Delete buttons in the toolbar."
+        title={isStudent ? "Exercises" : "Exercise Sync Status of All Projects"}
+        hint={
+          isStudent
+            ? "Every exercise in the course. Click a task name to view its description; click a file to download its input data."
+            : "Every authored exercise and whether its grading artifacts are synced and current. Click a task name to view its description; click a file to download its input data. Select a row to enable the Sync, Edit, Archive and Delete buttons in the toolbar."
+        }
         toolbar={
           <>
             <SearchBox
@@ -368,8 +378,12 @@ export default function Exercises() {
                 <SortableTh label="Exercise" sortKey="exercise" sort={sort} onSort={onSort} />
                 <SortableTh label="Task Type" sortKey="type" sort={sort} onSort={onSort} />
                 <th className="plain">Files</th>
-                <SortableTh label="Status" sortKey="status" sort={sort} onSort={onSort} />
-                <SortableTh label="Last Synced" sortKey="synced" sort={sort} onSort={onSort} />
+                {!isStudent && (
+                  <>
+                    <SortableTh label="Status" sortKey="status" sort={sort} onSort={onSort} />
+                    <SortableTh label="Last Synced" sortKey="synced" sort={sort} onSort={onSort} />
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -443,23 +457,27 @@ export default function Exercises() {
                           <span className="cell-muted">—</span>
                         )}
                       </td>
-                      <td className={sc("status")}>
-                        {ex.sync_status === "never_synced" ? (
-                          <span className="cell-muted">—</span>
-                        ) : (
-                          <span className={`sync-status ${ex.sync_status}`}>
-                            {SYNC_STATUS_LABEL[ex.sync_status] ?? ex.sync_status.replace(/_/g, " ")}
-                          </span>
-                        )}{" "}
-                        {ex.archived && <span className="sync-status archived">archived</span>}{" "}
-                        {ex.missing_from_image && (
-                          <span className="sync-status config_error">missing from image</span>
-                        )}{" "}
-                        {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="sync" />}
-                      </td>
-                      <td className={`${sc("synced")} cell-muted`}>
-                        {ex.last_synced_at ?? "—"}
-                      </td>
+                      {!isStudent && (
+                        <>
+                          <td className={sc("status")}>
+                            {ex.sync_status === "never_synced" ? (
+                              <span className="cell-muted">—</span>
+                            ) : (
+                              <span className={`sync-status ${ex.sync_status}`}>
+                                {SYNC_STATUS_LABEL[ex.sync_status] ?? ex.sync_status.replace(/_/g, " ")}
+                              </span>
+                            )}{" "}
+                            {ex.archived && <span className="sync-status archived">archived</span>}{" "}
+                            {ex.missing_from_image && (
+                              <span className="sync-status config_error">missing from image</span>
+                            )}{" "}
+                            {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="sync" />}
+                          </td>
+                          <td className={`${sc("synced")} cell-muted`}>
+                            {ex.last_synced_at ?? "—"}
+                          </td>
+                        </>
+                      )}
                     </tr>
                     {isOpen && ex.description && (
                       <tr className="expand-row">
@@ -475,7 +493,9 @@ export default function Exercises() {
                 <tr>
                   <td colSpan={colCount} className="empty-cell">
                     <h3>No exercises found</h3>
-                    Authored exercise folders ship in the backend image.
+                    {isStudent
+                      ? "Exercises will appear here once your mentor publishes them."
+                      : "Authored exercise folders ship in the backend image."}
                   </td>
                 </tr>
               )}

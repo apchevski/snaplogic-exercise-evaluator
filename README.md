@@ -49,15 +49,18 @@ tables, tabbed sub-nav):
   additionally creates a read-only web login for the student: Cognito emails
   them a temporary password, they change it on first sign-in, and from then
   on they can watch their grades (see the `student` role below).
-- **Student sign-in** (read-only, own grades only): a user in the `student`
-  Cognito group lands directly on their **own** grades page
-  (`/students/<their-slug>`) and sees nothing else — no roster of other
-  students, no navigation. They get their verdicts, points, overall summary,
-  and per-exercise feedback, but every action is gone (and 403s server-side):
-  no grading, no registering, no report edits, no instructor notes. The
-  backend enforces the scope too — `GET /v1/students` returns only the
-  student's own card, and any other student's detail/reports 403s. The link
-  between the login and the card is the email stored at registration.
+- **Student sign-in** (read-only): a user in the `student` Cognito group
+  lands directly on their **own** grades page (`/students/<their-slug>`) with
+  a two-tab nav — **My Grades** and **Exercises** — and sees nothing else: no
+  roster of other students. My Grades shows their verdicts, points, overall
+  summary, and per-exercise feedback; Exercises is a read-only catalog of the
+  active (non-archived) exercises with descriptions and downloadable input
+  files, without the staff sync-status columns or toolbar. Every action is
+  gone (and 403s server-side): no grading, no registering, no report edits,
+  no instructor notes, no exercise editing. The backend enforces the scope
+  too — `GET /v1/students` returns only the student's own card, and any other
+  student's detail/reports 403s. The link between the login and the card is
+  the email stored at registration.
 - **Regrade one exercise** (mentor or admin): on a student's detail page,
   every task card has a **Regrade** button that re-runs just that exercise
   (one Claude call instead of one per exercise — faster and cheaper than a
@@ -173,9 +176,10 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
 
 **Roles** (Cognito groups; the API enforces, the UI only hides buttons):
 admins sync + grade + view; mentors grade + view; students view **their own
-grades only** (no roster, no other students, no grading, no edits, no
-instructor notes) — a signed-in student lands straight on their own detail
-page and the backend 403s any other student's card. Admin/mentor users are invite-only
+grades** and a **read-only exercise catalog** (no roster, no other students,
+no grading, no edits, no instructor notes) — a signed-in student lands
+straight on their own detail page and the backend 403s any other student's
+card. Admin/mentor users are invite-only
 (admin-created in the Cognito console — no self-signup); student logins are
 created by the app itself when a registration includes an email — never add
 someone to the `student` group by hand alongside an admin/mentor invite.
