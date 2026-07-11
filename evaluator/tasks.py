@@ -338,6 +338,29 @@ def read_exercise_description(folder: str) -> str | None:
     return desc.read_text(encoding="utf-8").strip() or None
 
 
+def read_task_type(folder: str) -> str | None:
+    """Return the (alias-normalized) task_type from `exercises/<folder>/task.json`.
+
+    A cheap peek at just the `task_type` field — unlike load_task() it never
+    validates the rest of the file, so a partially-authored image exercise
+    won't raise. Returns None when there's no readable task.json (e.g. a
+    UI-authored exercise, which lives only in S3). The web listing uses this
+    to show an image exercise's type before its first sync. task.json defaults
+    to file_writer when the key is absent, matching load_task().
+    """
+    cfg_path = EXERCISES_DIR / folder / "task.json"
+    if not cfg_path.exists():
+        return None
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    task_type = data.get("task_type", TASK_TYPE_FILE_WRITER)
+    return TASK_TYPE_ALIASES.get(task_type, task_type)
+
+
 #: Student-facing input files (zips, CSVs, …) live in this subfolder of each
 #: exercise. Convention: .claude/conventions/exercise-resources-folder.md.
 RESOURCES_DIR_NAME = "resources"

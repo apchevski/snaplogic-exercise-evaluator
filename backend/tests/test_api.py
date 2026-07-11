@@ -947,6 +947,41 @@ def test_list_exercises_includes_s3_authored(aws, evaluator_dirs):
     assert "api_ui_ghost" not in exercises
 
 
+def test_list_exercises_backfills_task_type_before_sync(aws, evaluator_dirs):
+    """The Task Type column reflects the author's choice immediately, instead
+    of a dash until the first sync stamps task_type on the row."""
+    # Auto / single-output: no task_config at all → reads as file_writer.
+    _create_exercise("api_tt_auto")
+    # Explicit triggered_task config → surfaces that type pre-sync.
+    _call(
+        api_event(
+            "POST",
+            "/v1/exercises",
+            groups=("admin",),
+            body={
+                "slug": "api_tt_triggered",
+                "description_md": "# Task – Triggered\n\nGo.\n",
+                "task_config": {
+                    "task_type": "triggered_task",
+                    "triggered_task_name": "Task – Triggered Task",
+                    "requests": [{"name": "addition", "params": {"mathOperation": "3+5"}}],
+                },
+            },
+        )
+    )
+    # Image folder with a triggered_task task.json, never synced → read off disk.
+    folder = evaluator_dirs["exercises"] / "api_tt_image"
+    folder.mkdir(exist_ok=True)
+    (folder / "description.md").write_text("# Task – Image\n", encoding="utf-8")
+    (folder / "task.json").write_text('{"task_type": "triggered_task"}', encoding="utf-8")
+
+    resp = _call(api_event("GET", "/v1/exercises"))
+    exercises = {e["slug"]: e for e in _body(resp)["exercises"]}
+    assert exercises["api_tt_auto"]["task_type"] == "file_writer"
+    assert exercises["api_tt_triggered"]["task_type"] == "triggered_task"
+    assert exercises["api_tt_image"]["task_type"] == "triggered_task"
+
+
 def test_download_s3_authored_resource(aws, evaluator_dirs):
     _create_exercise("api_ui_dl")
     aws["s3"].put_object(

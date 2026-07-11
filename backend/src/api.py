@@ -505,10 +505,12 @@ def list_exercises() -> dict[str, Any]:
     _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
     # Authored folders ship in this image; sync state lives in DynamoDB.
     from evaluator.tasks import (
+        TASK_TYPE_FILE_WRITER,
         list_exercise_folders,
         list_exercise_resources,
         read_exercise_description,
         read_pipeline_name_from_description,
+        read_task_type,
     )
 
     resp = dynamo_table().query(
@@ -574,6 +576,20 @@ def list_exercises() -> dict[str, Any]:
     for slug, entry in sorted(by_slug.items()):
         entry["missing_from_image"] = True
         exercises.append(entry)
+    # The top-level `task_type` is only stamped on the row at sync time, so a
+    # freshly authored exercise would otherwise show a dash in the Task Type
+    # column. Backfill it for the listing from the author's choice: the
+    # structured task_config (file_writer / triggered_task), then the on-disk
+    # task.json (image exercises), then file_writer — the type an auto /
+    # single-output exercise (no config at all) syncs into.
+    for entry in exercises:
+        if entry.get("task_type"):
+            continue
+        cfg = entry.get("task_config")
+        if isinstance(cfg, dict) and cfg.get("task_type"):
+            entry["task_type"] = str(cfg["task_type"])
+        else:
+            entry["task_type"] = read_task_type(entry["slug"]) or TASK_TYPE_FILE_WRITER
     return {"exercises": exercises}
 
 
