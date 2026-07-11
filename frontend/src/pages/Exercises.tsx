@@ -301,6 +301,10 @@ export default function Exercises() {
   );
   // Sync skips archived exercises (the backend refuses them anyway).
   const syncTargets = selectedExercises.filter((ex) => !ex.archived);
+  // With every active exercise selected, Sync runs the single sync-all job
+  // (one backend job and lock) instead of one job per exercise.
+  const activeCount = exercises.filter((ex) => !ex.archived).length;
+  const allActiveSelected = activeCount > 0 && syncTargets.length === activeCount;
   // Archive/Unarchive needs a uniform selection: all archived → Unarchive,
   // none archived → Archive, a mix → disabled (ambiguous intent).
   const allArchived =
@@ -342,7 +346,7 @@ export default function Exercises() {
         hint={
           isStudent
             ? "Every exercise in the course. Click a task name to view its description; click a file to download its input data."
-            : "Every authored exercise and whether its grading artifacts are synced and current. Click a task name to view its description; click a file to download its input data. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Sync, Edit, Archive and Delete buttons in the toolbar — Edit works on one exercise at a time."
+            : "Every authored exercise and whether its grading artifacts are synced and current. Click a task name to view its description; click a file to download its input data. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Sync, Edit, Archive and Delete toolbar icons — hover an icon for its name. Edit works on one exercise at a time; selecting every exercise makes Sync sync them all."
         }
         toolbar={
           <>
@@ -356,23 +360,29 @@ export default function Exercises() {
               <>
                 {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="sync" />}
                 <button
-                  className="btn"
-                  onClick={() => syncTargets.length > 0 && setSyncConfirm(syncTargets)}
+                  className="tool-btn"
+                  onClick={() =>
+                    syncTargets.length > 0 &&
+                    setSyncConfirm(allActiveSelected ? "all" : syncTargets)
+                  }
                   disabled={syncTargets.length === 0 || anyBusy}
                   title={
                     selectedExercises.length === 0
-                      ? "Select at least one exercise first"
+                      ? "Sync — select at least one exercise first (selecting every exercise syncs them all)"
                       : syncTargets.length === 0
-                        ? "Archived exercises can't be synced"
-                        : undefined
+                        ? "Sync — archived exercises can't be synced"
+                        : allActiveSelected
+                          ? "Sync all exercises"
+                          : syncTargets.length === 1
+                            ? "Sync the selected exercise"
+                            : `Sync ${syncTargets.length} selected exercises`
                   }
+                  aria-label="Sync selected exercises"
                 >
-                  <IconSync />
-                  Sync
-                  {syncTargets.length > 1 && ` (${syncTargets.length})`}
+                  <IconSync size={18} />
                 </button>
                 <button
-                  className="btn"
+                  className="tool-btn"
                   onClick={() =>
                     selectedExercises.length === 1 &&
                     void openEdit(selectedExercises[0].slug)
@@ -380,63 +390,66 @@ export default function Exercises() {
                   disabled={selectedExercises.length !== 1 || editLoading !== null}
                   title={
                     selectedExercises.length === 0
-                      ? "Select an exercise first"
+                      ? "Edit — select an exercise first"
                       : selectedExercises.length > 1
-                        ? "Only one exercise can be edited at a time"
-                        : undefined
+                        ? "Edit — only one exercise can be edited at a time"
+                        : "Edit the selected exercise"
                   }
+                  aria-label="Edit selected exercise"
                 >
-                  <IconEdit />
-                  {editLoading !== null ? "…" : "Edit"}
+                  <IconEdit size={18} />
                 </button>
                 <button
-                  className="btn"
+                  className="tool-btn"
                   onClick={onArchiveClick}
                   disabled={
                     (!allArchived && !noneArchived) || archiving || anyBusy
                   }
                   title={
                     selectedExercises.length === 0
-                      ? "Select at least one exercise first"
+                      ? "Archive — select at least one exercise first"
                       : !allArchived && !noneArchived
-                        ? "Selection mixes archived and active exercises — select one kind"
-                        : undefined
+                        ? "Archive — selection mixes archived and active exercises, select one kind"
+                        : `${allArchived ? "Unarchive" : "Archive"} ${
+                            selectedExercises.length === 1
+                              ? "the selected exercise"
+                              : `${selectedExercises.length} selected exercises`
+                          }`
+                  }
+                  aria-label={
+                    allArchived
+                      ? "Unarchive selected exercises"
+                      : "Archive selected exercises"
                   }
                 >
-                  {allArchived ? <IconUnarchive /> : <IconArchive />}
-                  {allArchived ? "Unarchive" : "Archive"}
-                  {selectedExercises.length > 1 &&
-                    (allArchived || noneArchived) &&
-                    ` (${selectedExercises.length})`}
+                  {allArchived ? <IconUnarchive size={18} /> : <IconArchive size={18} />}
                 </button>
                 <button
-                  className="btn danger"
+                  className="tool-btn danger"
                   onClick={() =>
                     selectedExercises.length > 0 && setDeleting(selectedExercises)
                   }
                   disabled={selectedExercises.length === 0 || anyBusy}
                   title={
                     selectedExercises.length === 0
-                      ? "Select at least one exercise first"
-                      : undefined
+                      ? "Delete — select at least one exercise first"
+                      : selectedExercises.length === 1
+                        ? "Delete the selected exercise permanently"
+                        : `Delete ${selectedExercises.length} selected exercises permanently`
                   }
+                  aria-label="Delete selected exercises"
                 >
-                  <IconTrash />
-                  Delete
-                  {selectedExercises.length > 1 && ` (${selectedExercises.length})`}
+                  <IconTrash size={18} />
                 </button>
                 <span className="toolbar-sep" aria-hidden="true" />
-                <button className="btn" onClick={() => setShowAdd(true)} disabled={anyBusy}>
-                  <IconPlus />
-                  Add New Exercise
-                </button>
                 <button
-                  className="btn primary"
-                  onClick={() => setSyncConfirm("all")}
+                  className="tool-btn"
+                  onClick={() => setShowAdd(true)}
                   disabled={anyBusy}
+                  title="Add new exercise"
+                  aria-label="Add new exercise"
                 >
-                  <IconSync />
-                  Sync All Exercises
+                  <IconPlus size={18} />
                 </button>
               </>
             )}

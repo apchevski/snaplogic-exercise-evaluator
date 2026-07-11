@@ -180,6 +180,20 @@ button.btn.icon-btn {
   padding: 4px 7px; color: #4a5560; line-height: 1;
 }
 
+/* flat icon-only toolbar buttons (classic SnapLogic Designer toolbar): navy
+   glyphs with no chrome until hover; the name lives in the title tooltip */
+button.tool-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0; flex: none;
+  border: none; border-radius: 3px; background: none;
+  color: var(--sl-navy); cursor: pointer;
+  transition: background 0.12s;
+}
+button.tool-btn:hover:not(:disabled) { background: #e7f0f9; }
+button.tool-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+button.tool-btn.danger { color: var(--sl-red); }
+button.tool-btn.danger:hover:not(:disabled) { background: #fdecea; }
+
 /* ---------- data tables ---------- */
 .table-wrap { overflow-x: auto; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
