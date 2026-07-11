@@ -18,7 +18,8 @@ rather than a rubric.
 
 Mentors and admins log into a VPN-restricted web dashboard (styled after the
 classic SnapLogic Dashboard: navy panel headers, sortable/paginated data
-tables, tabbed sub-nav):
+tables, and — like the old console's Designer / Manager / Dashboard header —
+**Students / Exercises / Manager** tabs centered in the top bar):
 
 - **Grade** (mentor or admin): select a student's row (the radio button in
   the leftmost column) and click **Grade** in the toolbar. A scope
@@ -51,7 +52,8 @@ tables, tabbed sub-nav):
   on they can watch their grades (see the `student` role below).
 - **Student sign-in** (read-only): a user in the `student` Cognito group
   lands directly on their **own** grades page (`/students/<their-slug>`) with
-  a two-tab nav — **My Grades** and **Exercises** — and sees nothing else: no
+  a three-tab nav — **My Grades**, **Exercises**, and **Manager** (their own
+  account settings) — and sees nothing else: no
   roster of other students. My Grades shows their verdicts, points, overall
   summary, and per-exercise feedback; Exercises is a read-only catalog of the
   active (non-archived) exercises with descriptions and downloadable input
@@ -187,14 +189,15 @@ someone to the `student` group by hand alongside an admin/mentor invite.
 "OPTIONAL"` with software-token MFA on. With OPTIONAL MFA the hosted UI does
 **not** prompt anyone to enroll, and you can't pre-register someone's
 authenticator from the console — so users enroll themselves from the in-app
-**Account menu → Settings → Two-factor authentication** (scan the QR, enter a
-code, done; next sign-in then asks for a code). That Settings dialog also lets
+**Manager tab → Two-factor authentication** (scan the QR, enter a
+code, done; next sign-in then asks for a code). That Manager page (also
+reachable via the account menu's **Settings** item) also lets
 users change their password and set a display name, and it relies on the
 `aws.cognito.signin.user.admin` scope granted to the SPA app client — after
 deploying that scope, existing sessions must sign out and back in once before
-Settings works.
+the account sections work.
 
-**Per-user grading credentials** (Settings dialog, admin/mentor): every
+**Per-user grading credentials** (Manager tab, admin/mentor): every
 admin and mentor can store their own credentials — jobs *they* start run
 under them, and anything left unset falls back to the shared deployment
 secret. Three independent settings, stored on a `USER#<email>/SETTINGS`

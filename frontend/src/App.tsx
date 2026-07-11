@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { useAuth } from "react-oidc-context";
 import {
   Navigate,
@@ -6,6 +7,7 @@ import {
   Route,
   Routes,
   useLocation,
+  useNavigate,
   useParams,
 } from "react-router-dom";
 
@@ -18,9 +20,9 @@ import {
   useToken,
 } from "./auth";
 import { IconLogin, IconLogout, IconSettings } from "./components/icons";
-import { SettingsModal } from "./components/SettingsModal";
 import Dashboard from "./pages/Dashboard";
 import Exercises from "./pages/Exercises";
+import Manager from "./pages/Manager";
 import StudentDetail from "./pages/StudentDetail";
 
 function BrandMark() {
@@ -54,10 +56,11 @@ function initialsFor(label: string): string {
   return (letters.join("") || "U").toUpperCase();
 }
 
-function UserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
+function UserMenu() {
   const auth = useAuth();
   const groups = useGroups();
   const displayName = useDisplayName();
+  const navigate = useNavigate();
   const email = auth.user?.profile?.email ?? "";
   const [open, setOpen] = useState(false);
   return (
@@ -95,7 +98,7 @@ function UserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
               role="menuitem"
               onClick={() => {
                 setOpen(false);
-                onOpenSettings();
+                navigate("/manager");
               }}
             >
               <IconSettings />
@@ -132,27 +135,52 @@ function Login({ onLogin, error }: { onLogin: () => void; error?: string }) {
   );
 }
 
-/** Full app for admins and mentors: Students + Exercises nav and every page. */
-function StaffRoutes() {
+/** White top bar with the brand on the left, the main tabs centered (like
+ * the classic SnapLogic console's Designer / Manager / Dashboard), and the
+ * user menu on the right. */
+function TopBar({ nav }: { nav: ReactNode }) {
+  return (
+    <header className="topbar">
+      <Brand />
+      <nav className="topnav">{nav}</nav>
+      <UserMenu />
+    </header>
+  );
+}
+
+/** Full app for admins and mentors: Students / Exercises / Manager tabs and
+ * every page. */
+function StaffShell() {
   const { pathname } = useLocation();
   const studentsActive = pathname === "/" || pathname.startsWith("/students");
   return (
     <>
-      <nav className="subnav">
-        <NavLink to="/" className={studentsActive ? "active" : ""}>
-          Students
-        </NavLink>
-        <NavLink
-          to="/exercises"
-          className={({ isActive }) => (isActive ? "active" : "")}
-        >
-          Exercises
-        </NavLink>
-      </nav>
+      <TopBar
+        nav={
+          <>
+            <NavLink to="/" className={studentsActive ? "active" : ""}>
+              Students
+            </NavLink>
+            <NavLink
+              to="/exercises"
+              className={({ isActive }) => (isActive ? "active" : "")}
+            >
+              Exercises
+            </NavLink>
+            <NavLink
+              to="/manager"
+              className={({ isActive }) => (isActive ? "active" : "")}
+            >
+              Manager
+            </NavLink>
+          </>
+        }
+      />
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/students/:slug" element={<StudentDetail />} />
         <Route path="/exercises" element={<Exercises />} />
+        <Route path="/manager" element={<Manager />} />
         {/* /login only exists while signed out; a signed-in user who lands on
             it (bookmark, back button) goes home. */}
         <Route path="/login" element={<Navigate to="/" replace />} />
@@ -174,10 +202,11 @@ function OwnStudentGuard({ ownSlug }: { ownSlug: string }) {
 }
 
 /** Read-only shell for the `student` role: a My Grades page (their own card
- * only — no roster) plus a read-only Exercises catalog. The student's slug
- * isn't in the token, so we resolve it from GET /v1/students, which for a
- * student returns only the card their login owns. */
-function StudentRoutes() {
+ * only — no roster), a read-only Exercises catalog, and the Manager page for
+ * their own account settings. The student's slug isn't in the token, so we
+ * resolve it from GET /v1/students, which for a student returns only the
+ * card their login owns. */
+function StudentShell() {
   const token = useToken();
   // undefined = still loading; null = no card is linked to this login.
   const [slug, setSlug] = useState<string | null | undefined>(undefined);
@@ -198,19 +227,51 @@ function StudentRoutes() {
     };
   }, [token]);
 
-  if (error) {
-    return (
-      <main className="page">
-        <div className="error-banner">{error}</div>
-      </main>
-    );
-  }
-  if (slug === undefined) {
-    return <main className="page">Loading…</main>;
-  }
   // A login with no linked card can still browse the exercises; My Grades
   // shows the "nothing linked yet" notice at / instead of a detail page.
   const gradesPath = slug ? `/students/${encodeURIComponent(slug)}` : "/";
+  const topbar = (
+    <TopBar
+      nav={
+        <>
+          <NavLink to={gradesPath} className={({ isActive }) => (isActive ? "active" : "")} end>
+            My Grades
+          </NavLink>
+          <NavLink
+            to="/exercises"
+            className={({ isActive }) => (isActive ? "active" : "")}
+          >
+            Exercises
+          </NavLink>
+          <NavLink
+            to="/manager"
+            className={({ isActive }) => (isActive ? "active" : "")}
+          >
+            Manager
+          </NavLink>
+        </>
+      }
+    />
+  );
+
+  if (error) {
+    return (
+      <>
+        {topbar}
+        <main className="page">
+          <div className="error-banner">{error}</div>
+        </main>
+      </>
+    );
+  }
+  if (slug === undefined) {
+    return (
+      <>
+        {topbar}
+        <main className="page">Loading…</main>
+      </>
+    );
+  }
   const noCard = (
     <main className="page">
       <div className="empty-cell">
@@ -222,19 +283,10 @@ function StudentRoutes() {
   );
   return (
     <>
-      <nav className="subnav">
-        <NavLink to={gradesPath} className={({ isActive }) => (isActive ? "active" : "")} end>
-          My Grades
-        </NavLink>
-        <NavLink
-          to="/exercises"
-          className={({ isActive }) => (isActive ? "active" : "")}
-        >
-          Exercises
-        </NavLink>
-      </nav>
+      {topbar}
       <Routes>
         <Route path="/exercises" element={<Exercises />} />
+        <Route path="/manager" element={<Manager />} />
         {slug ? (
           <>
             <Route
@@ -255,26 +307,8 @@ function StudentRoutes() {
 }
 
 function Shell() {
-  const auth = useAuth();
   const isStudentOnly = useIsStudentOnly();
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  return (
-    <>
-      <header className="topbar">
-        <Brand />
-        <UserMenu onOpenSettings={() => setSettingsOpen(true)} />
-      </header>
-      {settingsOpen && (
-        <SettingsModal
-          // Refresh tokens so a new display name shows in the header. Best
-          // effort — it still updates on the next sign-in if this fails.
-          onProfileChanged={() => void auth.signinSilent().catch(() => {})}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
-      {isStudentOnly ? <StudentRoutes /> : <StaffRoutes />}
-    </>
-  );
+  return isStudentOnly ? <StudentShell /> : <StaffShell />;
 }
 
 export default function App() {

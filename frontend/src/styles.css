@@ -33,9 +33,11 @@ body {
 .topbar {
   background: white;
   border-bottom: 1px solid var(--sl-border);
-  display: flex;
+  display: grid;
+  /* brand | centered tabs | user menu — like the classic console's
+     Designer / Manager / Dashboard header */
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   gap: 1rem;
   padding: 0 16px;
   height: 52px;
@@ -47,7 +49,30 @@ body {
   border-left: 1px solid var(--sl-border); padding-left: 9px; margin-left: 2px;
 }
 
-.user-cluster { position: relative; display: flex; align-items: center; }
+/* ---------- top-center nav tabs (Students / Exercises / Manager) ---------- */
+.topnav {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  align-self: stretch; /* tabs fill the bar so the active one meets the border */
+}
+.topnav a {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 22px;
+  font-size: 13.5px;
+  color: #4a5560;
+  text-decoration: none;
+  border-radius: 3px 3px 0 0;
+}
+.topnav a:hover { color: var(--sl-blue); background: #f1f4f6; }
+.topnav a.active {
+  background: #dfe9f2;
+  color: var(--sl-navy);
+  font-weight: 600;
+}
+
+.user-cluster { position: relative; display: flex; align-items: center; justify-self: end; }
 .user-button {
   display: flex; align-items: center; gap: 8px;
   background: none; border: none; cursor: pointer; padding: 5px 4px; font: inherit;
@@ -89,22 +114,6 @@ body {
 }
 .user-menu-item .btn-ico { color: var(--sl-muted); }
 .user-menu-item:hover { background: #f3f7fb; }
-
-/* ---------- sub-nav tabs ---------- */
-.subnav {
-  display: flex; align-items: flex-end; gap: 2px;
-  background: #f7f8f9; border-bottom: 1px solid var(--sl-border);
-  padding: 6px 16px 0;
-}
-.subnav a {
-  padding: 7px 18px 8px; font-size: 13px; color: #4a5560; text-decoration: none;
-  border: 1px solid transparent; border-radius: 3px 3px 0 0; margin-bottom: -1px;
-}
-.subnav a:hover { color: var(--sl-blue); }
-.subnav a.active {
-  background: white; color: var(--sl-blue); font-weight: 600;
-  border-color: var(--sl-border); border-bottom-color: white;
-}
 
 /* ---------- page + panels ---------- */
 .page { padding: 14px 16px 40px; }
@@ -630,7 +639,8 @@ tr.row-archived td.select-cell { opacity: 1; }
 .edit-changes { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
 .edit-changes li { margin: 1px 0; }
 
-/* ---------- settings dialog ---------- */
+/* ---------- Manager page (account + grading settings) ---------- */
+.settings-page { max-width: 920px; }
 .settings-section { padding: 2px 0 16px; border-bottom: 1px solid var(--sl-row-border); }
 .settings-section:last-child { border-bottom: none; padding-bottom: 2px; }
 .settings-section > h3 { margin: 0 0 3px; font-size: 13.5px; color: #22394f; font-weight: 600; }

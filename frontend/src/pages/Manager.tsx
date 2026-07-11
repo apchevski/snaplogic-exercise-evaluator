@@ -20,7 +20,6 @@ import {
   updateDisplayName,
   verifySoftwareToken,
 } from "../cognito";
-import type { UpdateUserSettingsPayload, UserSettings } from "../types";
 import {
   IconCheck,
   IconClose,
@@ -28,23 +27,19 @@ import {
   IconKey,
   IconLogout,
   IconShield,
-} from "./icons";
-
-interface Props {
-  /** Called after the display name changes so the shell can refresh its
-   * tokens and update the header. */
-  onProfileChanged: () => void;
-  onClose: () => void;
-}
+} from "../components/icons";
+import { Panel } from "../components/table";
+import type { UpdateUserSettingsPayload, UserSettings } from "../types";
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Account settings: display name, password, and TOTP two-factor auth (all
- * three talk to the Cognito self-service API with the access token) — plus,
- * for admins and mentors, their own grading credentials (REST API). */
-export function SettingsModal({ onProfileChanged, onClose }: Props) {
+/** Manager page (styled after the classic SnapLogic Manager tab): account
+ * self-service — display name, password, and TOTP two-factor auth (all three
+ * talk to the Cognito self-service API with the access token) — plus, for
+ * admins and mentors, their own grading credentials (REST API). */
+export default function Manager() {
   const auth = useAuth();
   const accessToken = useAccessToken();
   const hasScope = useHasSelfServiceScope();
@@ -73,18 +68,12 @@ export function SettingsModal({ onProfileChanged, onClose }: Props) {
   }, [accessToken, hasScope]);
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="modal" role="dialog" aria-label="Settings">
-        <header>
-          <h2>Settings</h2>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-        </header>
-        <div className="modal-body">
+    <main className="page settings-page">
+      <Panel
+        title="Account"
+        hint="Your display name, password, and two-factor authentication."
+      >
+        <div className="panel-body">
           {!hasScope ? (
             <div className="warn-banner">
               Your current session predates two-factor support. Sign out and sign
@@ -111,7 +100,10 @@ export function SettingsModal({ onProfileChanged, onClose }: Props) {
                 initialName={name}
                 onSaved={(saved) => {
                   setName(saved);
-                  onProfileChanged();
+                  // Refresh tokens so the new display name shows in the
+                  // header. Best effort — it still updates on the next
+                  // sign-in if this fails.
+                  void auth.signinSilent().catch(() => {});
                 }}
               />
               <PasswordSection accessToken={accessToken} />
@@ -123,16 +115,19 @@ export function SettingsModal({ onProfileChanged, onClose }: Props) {
               />
             </>
           )}
-          {canGrade && <GradingCredentialsSection />}
         </div>
-        <footer>
-          <button type="button" className="btn" onClick={onClose}>
-            <IconClose />
-            Close
-          </button>
-        </footer>
-      </div>
-    </div>
+      </Panel>
+      {canGrade && (
+        <Panel
+          title="Grading"
+          hint="Personal credentials and AI model used by the grading jobs you start. Anything left unset falls back to the shared deployment credentials."
+        >
+          <div className="panel-body">
+            <GradingCredentialsSection />
+          </div>
+        </Panel>
+      )}
+    </main>
   );
 }
 
@@ -408,20 +403,10 @@ function GradingCredentialsSection() {
   }, [token]);
 
   if (loadError) {
-    return (
-      <section className="settings-section">
-        <h3>Grading credentials</h3>
-        <div className="error-banner">{loadError}</div>
-      </section>
-    );
+    return <div className="error-banner">{loadError}</div>;
   }
   if (!settings) {
-    return (
-      <section className="settings-section">
-        <h3>Grading credentials</h3>
-        <p className="cell-muted">Loading your credentials…</p>
-      </section>
-    );
+    return <p className="cell-muted">Loading your credentials…</p>;
   }
   return (
     <>
