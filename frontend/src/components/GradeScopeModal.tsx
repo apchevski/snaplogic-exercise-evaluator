@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { Exercise } from "../types";
+import { IconClose, IconGrade } from "./icons";
 
 interface Props {
   studentName: string;
@@ -89,7 +90,7 @@ export function GradeScopeModal({
                   {e.sync_status !== "ready" && (
                     <span
                       className="warn-chip"
-                      title="Not synced — grading will skip it until it's synced on the Exercises page."
+                      title="This exercise isn't ready yet, so grading will skip it. Get it ready on the Exercises page first."
                     >
                       ⚠
                     </span>
@@ -98,8 +99,8 @@ export function GradeScopeModal({
               ))}
               {exercises.length === 0 && (
                 <p className="hint">
-                  Exercise list unavailable — grading will cover every active
-                  exercise.
+                  We couldn&rsquo;t load the exercise list, so grading will
+                  cover every active exercise.
                 </p>
               )}
             </div>
@@ -124,6 +125,7 @@ export function GradeScopeModal({
         </div>
         <footer>
           <button type="button" className="btn" onClick={onClose}>
+            <IconClose />
             Cancel
           </button>
           <button
@@ -132,6 +134,7 @@ export function GradeScopeModal({
             onClick={start}
             disabled={exercises.length > 0 && selected.size === 0}
           >
+            <IconGrade />
             {allSelected
               ? `Grade all${exercises.length > 0 ? ` ${exercises.length}` : ""} exercises`
               : `Grade ${selected.size} selected`}

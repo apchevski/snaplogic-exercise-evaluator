@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 
 import { api, uploadToPresignedUrl } from "../api";
 import type { ExerciseDetail, ExerciseResource, TaskConfig } from "../types";
+import { IconCheck, IconClose, IconPlus } from "./icons";
 
 /** "Task 07 – Router Basics" → "task_07_router_basics" — the stable exercise id
  * we derive from the name, so nobody has to type a folder slug by hand. */
@@ -210,6 +211,20 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
     }
   };
 
+  // The mandatory fields (all marked with a *) must be filled before Save is
+  // enabled: a name and description always, plus the fields the chosen task
+  // type needs. This is the same set the submit handler re-validates.
+  const outputNames = outputFilenames
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const canSubmit =
+    exerciseName.trim().length > 0 &&
+    description.trim().length > 0 &&
+    (taskType !== "file_writer" || outputNames.length > 0) &&
+    (taskType !== "triggered_task" ||
+      (triggeredName.trim().length > 0 && scenarios.some((s) => s.name.trim())));
+
   return (
     <div
       className="modal-backdrop"
@@ -248,7 +263,8 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
               required
             />
             <div className="hint">
-              This is the pipeline name — sync looks the solution pipeline up by it.
+              The exact name of the pipeline the student needs to build. We use
+              this name to find and grade their work, so it has to match.
             </div>
           </div>
 
@@ -260,10 +276,13 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
               id="ex-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder={"### Objective:\n\nDescribe what the student must build…"}
+              placeholder={"Objective:\n\nDescribe what the student needs to build…"}
               required
             />
-            <div className="hint">What the student must build. Markdown supported.</div>
+            <div className="hint">
+              Explain what the student needs to build. You can use basic
+              formatting like headings and lists.
+            </div>
           </div>
 
           <div className="modal-field">
@@ -272,7 +291,7 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
               id="ex-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Instructor hints for the AI judge (task-specific rules, deductions, edge cases)."
+              placeholder="Optional notes to help the grader — for example, common mistakes to watch for, or how strict to be."
             />
           </div>
 
@@ -283,12 +302,12 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
               value={taskType}
               onChange={(e) => onTaskTypeChange(e.target.value as TaskTypeChoice)}
             >
-              <option value="auto">File writer — single output (auto-detected by sync)</option>
-              <option value="file_writer">File writer — multiple / custom outputs</option>
-              <option value="triggered_task">Triggered task (HTTP scenarios)</option>
+              <option value="auto">Builds one output file (found automatically)</option>
+              <option value="file_writer">Builds several output files</option>
+              <option value="triggered_task">Triggered task (runs on web requests)</option>
             </select>
             <div className="hint">
-              Sync generates the task config from this — no task.json to hand-write.
+              Pick how this exercise is checked. We&rsquo;ll set up the rest for you.
             </div>
           </div>
 
@@ -296,7 +315,7 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
             <>
               <div className="modal-field">
                 <label htmlFor="ex-outputs">
-                  Output filenames<span className="req-star">*</span> (comma-separated)
+                  Output file names<span className="req-star">*</span> (separate with commas)
                 </label>
                 <input
                   id="ex-outputs"
@@ -308,15 +327,15 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
                 />
               </div>
               <div className="modal-field">
-                <label htmlFor="ex-match">Output comparison</label>
+                <label htmlFor="ex-match">How to compare the output</label>
                 <select
                   id="ex-match"
                   value={matchMode}
                   onChange={(e) => setMatchMode(e.target.value as "exact" | "columns_only")}
                 >
-                  <option value="exact">Exact — columns + rows must match</option>
+                  <option value="exact">Exact — the columns and every row must match</option>
                   <option value="columns_only">
-                    Columns only — for non-deterministic outputs
+                    Columns only — use when the rows can change each run
                   </option>
                 </select>
               </div>
@@ -338,7 +357,8 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
                   spellCheck={false}
                 />
                 <div className="hint">
-                  Convention: the pipeline name + " Task" (matching is strict).
+                  Usually the pipeline name with &ldquo; Task&rdquo; added on the
+                  end. This has to match exactly.
                 </div>
               </div>
               <div className="modal-field">
@@ -379,11 +399,12 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
                   className="btn small"
                   onClick={() => setScenarios((prev) => [...prev, { name: "", params: "" }])}
                 >
-                  + Add scenario
+                  <IconPlus />
+                  Add scenario
                 </button>
                 <div className="hint">
-                  Each scenario invokes the student's Triggered Task with those query
-                  parameters; the name becomes the expected-response filename.
+                  Each row runs the student&rsquo;s task with the values you type
+                  in. The name is used to label the expected result.
                 </div>
               </div>
             </>
@@ -442,17 +463,19 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
               </span>
             )}
             <div className="hint">
-              Stored in the exercise's resources/ folder for students to download.
-              {existing.length > 0 && " Click an existing file to mark it for deletion."}
+              These files are attached to the exercise for students to download.
+              {existing.length > 0 && " Click a file above to mark it for removal."}
             </div>
           </div>
         </div>
         <footer>
           {busy && <span className="modal-busy">{busy}</span>}
           <button type="button" className="btn" onClick={onClose} disabled={!!busy}>
+            <IconClose />
             Cancel
           </button>
-          <button type="submit" className="btn primary" disabled={!!busy}>
+          <button type="submit" className="btn primary" disabled={!!busy || !canSubmit}>
+            <IconCheck />
             {isEdit ? "Save Changes" : "Save Exercise"}
           </button>
         </footer>

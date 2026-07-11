@@ -17,6 +17,7 @@ import {
   useIsStudentOnly,
   useToken,
 } from "./auth";
+import { IconLogin, IconLogout, IconSettings } from "./components/icons";
 import { SettingsModal } from "./components/SettingsModal";
 import Dashboard from "./pages/Dashboard";
 import Exercises from "./pages/Exercises";
@@ -97,6 +98,7 @@ function UserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
                 onOpenSettings();
               }}
             >
+              <IconSettings />
               Settings
             </button>
             <button
@@ -104,6 +106,7 @@ function UserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
               role="menuitem"
               onClick={() => signOut(() => auth.removeUser())}
             >
+              <IconLogout />
               Sign out
             </button>
           </div>
@@ -118,10 +121,10 @@ function Login({ onLogin, error }: { onLogin: () => void; error?: string }) {
     <div className="login-page">
       <div className="login-card">
         <Brand />
-        <h1>Exercise Grades</h1>
         <p>Sign in with your admin, mentor, or student account to continue.</p>
         {error && <div className="error-banner">{error}</div>}
         <button className="btn primary" onClick={onLogin}>
+          <IconLogin />
           Sign in
         </button>
       </div>
@@ -284,7 +287,6 @@ export default function App() {
       <div className="login-page">
         <div className="login-card">
           <Brand />
-          <h1>Exercise Grades</h1>
           <p>Signing in…</p>
         </div>
       </div>

@@ -6,6 +6,7 @@ import { useCanGrade, useIsAdmin, useToken } from "../auth";
 import { AddStudentModal } from "../components/AddStudentModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
+import { IconGrade, IconPlus, IconTrash } from "../components/icons";
 import { StatusPill } from "../components/StatusPill";
 import {
   PagerFooter,
@@ -252,6 +253,7 @@ export default function Dashboard() {
             <span className="toolbar-spacer" />
             {canGrade && (
               <button className="btn primary" onClick={() => setAdding(true)}>
+                <IconPlus />
                 Add Student
               </button>
             )}
@@ -391,6 +393,7 @@ export default function Dashboard() {
                               }
                               disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
                             >
+                              <IconGrade />
                               Grade
                             </button>
                             {isAdmin && (
@@ -399,6 +402,7 @@ export default function Dashboard() {
                                 onClick={() => setRemoving(s)}
                                 disabled={jobBusy(s.slug) || jobBusy(s.display_name)}
                               >
+                                <IconTrash />
                                 Remove
                               </button>
                             )}
@@ -467,15 +471,15 @@ export default function Dashboard() {
         <ConfirmModal
           title="Remove Student"
           confirmLabel={`Remove ${removing.display_name}`}
+          confirmIcon={<IconTrash />}
           busyLabel="Removing…"
           onConfirm={() => removeStudent(removing.slug)}
           onClose={() => setRemoving(null)}
         >
           <p>
             Permanently remove <strong>{removing.display_name}</strong>? This
-            deletes their dashboard card, every stored grade report (including
-            history), and their grading-job records from AWS. Their SnapLogic
-            project is not touched.
+            deletes their grades, their full grading history, and all of their
+            records. Their SnapLogic project is left untouched.
           </p>
           <p className="hint">This cannot be undone.</p>
         </ConfirmModal>

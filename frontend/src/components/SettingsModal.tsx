@@ -12,6 +12,13 @@ import {
   updateDisplayName,
   verifySoftwareToken,
 } from "../cognito";
+import {
+  IconCheck,
+  IconClose,
+  IconKey,
+  IconLogout,
+  IconShield,
+} from "./icons";
 
 interface Props {
   /** Called after the display name changes so the shell can refresh its
@@ -76,6 +83,7 @@ export function SettingsModal({ onProfileChanged, onClose }: Props) {
                   className="btn primary"
                   onClick={() => signOut(() => auth.removeUser())}
                 >
+                  <IconLogout />
                   Sign out
                 </button>
               </div>
@@ -106,6 +114,7 @@ export function SettingsModal({ onProfileChanged, onClose }: Props) {
         </div>
         <footer>
           <button type="button" className="btn" onClick={onClose}>
+            <IconClose />
             Close
           </button>
         </footer>
@@ -158,6 +167,7 @@ function ProfileSection({
       </div>
       <div className="settings-actions">
         <button type="button" className="btn primary" onClick={() => void save()} disabled={!dirty || busy}>
+          <IconCheck />
           {busy ? "Saving…" : "Save"}
         </button>
         {note && <span className={`settings-note ${note.ok ? "ok" : "err"}`}>{note.text}</span>}
@@ -219,6 +229,7 @@ function PasswordSection({ accessToken }: { accessToken: string }) {
         <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
         <div className="settings-actions">
           <button type="submit" className="btn primary" disabled={!ready}>
+            <IconKey />
             {busy ? "Changing…" : "Change password"}
           </button>
           {note && <span className={`settings-note ${note.ok ? "ok" : "err"}`}>{note.text}</span>}
@@ -301,11 +312,13 @@ function MfaSection({
       <div className="settings-actions">
         {!enabled && !secret && (
           <button type="button" className="btn primary" onClick={() => void beginEnroll()} disabled={busy}>
+            <IconShield />
             {busy ? "Starting…" : "Set up authenticator app"}
           </button>
         )}
         {enabled && (
           <button type="button" className="btn" onClick={() => void disable()} disabled={busy}>
+            <IconClose />
             {busy ? "Working…" : "Turn off"}
           </button>
         )}
@@ -334,6 +347,7 @@ function MfaSection({
             />
             <div className="settings-actions">
               <button type="button" className="btn primary" onClick={() => void finishEnroll()} disabled={busy || code.length < 6}>
+                <IconCheck />
                 {busy ? "Verifying…" : "Verify & enable"}
               </button>
               <button
@@ -346,6 +360,7 @@ function MfaSection({
                 }}
                 disabled={busy}
               >
+                <IconClose />
                 Cancel
               </button>
             </div>

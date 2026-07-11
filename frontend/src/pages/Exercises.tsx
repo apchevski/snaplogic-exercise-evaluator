@@ -4,6 +4,14 @@ import { api, pollJob } from "../api";
 import { useIsAdmin, useToken } from "../auth";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ExerciseModal } from "../components/ExerciseModal";
+import {
+  IconArchive,
+  IconEdit,
+  IconPlus,
+  IconSync,
+  IconTrash,
+  IconUnarchive,
+} from "../components/icons";
 import { StatusPill } from "../components/StatusPill";
 import {
   PagerFooter,
@@ -266,6 +274,7 @@ export default function Exercises() {
               <>
                 {jobs["__all__"] && <StatusPill job={jobs["__all__"]} kind="sync" />}
                 <button className="btn" onClick={() => setShowAdd(true)} disabled={anyBusy}>
+                  <IconPlus />
                   Add New Exercise
                 </button>
                 <button
@@ -273,6 +282,7 @@ export default function Exercises() {
                   onClick={() => setSyncConfirm("all")}
                   disabled={anyBusy}
                 >
+                  <IconSync />
                   Sync All Exercises
                 </button>
               </>
@@ -385,6 +395,7 @@ export default function Exercises() {
                               onClick={() => setSyncConfirm(ex)}
                               disabled={anyBusy || ex.archived}
                             >
+                              <IconSync />
                               Sync
                             </button>
                             <button
@@ -392,6 +403,7 @@ export default function Exercises() {
                               onClick={() => void openEdit(ex.slug)}
                               disabled={editLoading === ex.slug}
                             >
+                              <IconEdit />
                               {editLoading === ex.slug ? "…" : "Edit"}
                             </button>
                             <button
@@ -399,6 +411,7 @@ export default function Exercises() {
                               onClick={() => onArchiveClick(ex)}
                               disabled={archiving === ex.slug || anyBusy}
                             >
+                              {ex.archived ? <IconUnarchive /> : <IconArchive />}
                               {ex.archived ? "Unarchive" : "Archive"}
                             </button>
                             <button
@@ -406,6 +419,7 @@ export default function Exercises() {
                               onClick={() => setDeleting(ex)}
                               disabled={anyBusy}
                             >
+                              <IconTrash />
                               Delete
                             </button>
                             {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="sync" />}
@@ -461,6 +475,7 @@ export default function Exercises() {
         <ConfirmModal
           title={syncConfirm === "all" ? "Sync All Exercises" : "Sync Exercise"}
           confirmLabel={syncConfirm === "all" ? "Sync all" : "Sync"}
+          confirmIcon={<IconSync />}
           confirmClassName="btn primary"
           busyLabel="Starting…"
           onConfirm={async () => {
@@ -472,15 +487,15 @@ export default function Exercises() {
         >
           {syncConfirm === "all" ? (
             <p>
-              Sync <strong>all active exercises</strong>? This rebuilds every
-              exercise&rsquo;s grading artifacts from its current files. It can
-              take a while and runs in the background.
+              Get <strong>all active exercises</strong> ready for grading? This
+              uses each exercise&rsquo;s current files. It can take a while and
+              runs in the background.
             </p>
           ) : (
             <p>
-              Sync <strong>{syncConfirm.title ?? syncConfirm.slug}</strong>?
-              This rebuilds its grading artifacts from its current files and
-              runs in the background.
+              Get <strong>{syncConfirm.title ?? syncConfirm.slug}</strong> ready
+              for grading? This uses its current files and runs in the
+              background.
             </p>
           )}
         </ConfirmModal>
@@ -489,6 +504,7 @@ export default function Exercises() {
         <ConfirmModal
           title="Archive Exercise"
           confirmLabel="Archive"
+          confirmIcon={<IconArchive />}
           confirmClassName="btn primary"
           busyLabel="Archiving…"
           onConfirm={() =>
@@ -498,10 +514,11 @@ export default function Exercises() {
         >
           <p>
             Archive <strong>{archiveTarget.title ?? archiveTarget.slug}</strong>?
-            It stops being synced, graded and counted toward student totals.
+            While archived, it won&rsquo;t be graded or counted toward student
+            totals.
           </p>
           <p className="hint">
-            Nothing is deleted — you can unarchive it anytime.
+            Nothing is deleted — you can bring it back anytime.
           </p>
         </ConfirmModal>
       )}
@@ -509,15 +526,16 @@ export default function Exercises() {
         <ConfirmModal
           title="Delete Exercise"
           confirmLabel={`Delete ${deleting.title ?? deleting.slug}`}
+          confirmIcon={<IconTrash />}
           onConfirm={() => deleteExercise(deleting.slug)}
           onClose={() => setDeleting(null)}
         >
           <p>
             Permanently delete <strong>{deleting.title ?? deleting.slug}</strong>?
-            This removes its description, input files and grading artifacts
-            from AWS, and erases its result from every student&rsquo;s report
-            (points and totals are recalculated). To keep it around without
-            grading it, use Archive instead.
+            This removes its description, input files, and grades, and clears
+            its result from every student&rsquo;s report (points and totals
+            update automatically). To keep it without grading it, use Archive
+            instead.
           </p>
           <p className="hint">This cannot be undone.</p>
         </ConfirmModal>
