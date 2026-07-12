@@ -155,10 +155,10 @@ def test_full_run_judges_renders_and_fills_overall(evaluator_dirs):
     assert on_disk["overall_summary"] == "1 of 1 passed with 8/10 points."
 
 
-def test_single_task_run_skips_overall(evaluator_dirs):
+def test_single_task_run_refreshes_overall(evaluator_dirs):
     student = "Runner Single Task"
     _write_fixtures(student)
-    stub = StubClient(_judge_payloads()[:1])
+    stub = StubClient(_judge_payloads())
 
     result = run_grade(
         student,
@@ -167,9 +167,76 @@ def test_single_task_run_skips_overall(evaluator_dirs):
         plan_fn=lambda s, ps, t: 0,
         report_fn=lambda s, ps, t: (_fake_report_fn(s), 0)[1],
     )
+    assert result.usage.calls == 2  # one judge call + one overall call
+    md = result.report_md_path.read_text(encoding="utf-8")
+    assert "1 of 1 passed with 8/10 points." in md
+    assert OVERALL_PLACEHOLDER not in md
+    assert result.report["overall_summary"] == "1 of 1 passed with 8/10 points."
+
+
+def test_refresh_overall_false_skips_the_call(evaluator_dirs):
+    # The worker passes refresh_overall=False for all but the last slug of a
+    # multi-slug scoped job; the Overall stays untouched on those runs.
+    student = "Runner No Refresh"
+    _write_fixtures(student)
+    stub = StubClient(_judge_payloads()[:1])
+
+    result = run_grade(
+        student,
+        task_slug="task_x",
+        refresh_overall=False,
+        judge=AIJudge(client=stub),
+        plan_fn=lambda s, ps, t: 0,
+        report_fn=lambda s, ps, t: (_fake_report_fn(s), 0)[1],
+    )
     assert result.usage.calls == 1
     md = result.report_md_path.read_text(encoding="utf-8")
-    assert OVERALL_PLACEHOLDER in md  # untouched in single-task mode
+    assert OVERALL_PLACEHOLDER in md
+
+
+def test_overall_inserted_into_report_without_section(evaluator_dirs):
+    # A scoped run on a never-graded student produces a minimal report.md with
+    # no ## Overall section — the refresh must insert one, not silently no-op.
+    # A previous human edit's provenance is dropped: the text is AI's again.
+    student = "Runner Fresh Single"
+    _write_fixtures(student)
+    stub = StubClient(_judge_payloads())
+
+    def minimal_report_fn(s: str) -> None:
+        report_dir = GRADES_DIR / s
+        report_dir.mkdir(parents=True, exist_ok=True)
+        md = (
+            f"# Grade report — {s}\n\n"
+            "- **Single-task grading**: `task_x`\n\n\n---\n\n"
+            "## task_x — ✓ PASS\n\n**Points**: 8/10\n"
+        )
+        (report_dir / "report.md").write_text(md, encoding="utf-8")
+        payload = {
+            "student": s,
+            "counts": {"pass": 1, "fail": 0, "missing": 0, "needs_sync": 0, "total": 1},
+            "points_earned": 8,
+            "points_possible": 10,
+            "overall_summary": "Edited by hand.",
+            "overall_summary_edited_by": "mentor@example.com",
+            "overall_summary_edited_at": "2026-07-01T00:00:00+00:00",
+            "tasks": [{"slug": "task_x", "verdict": "pass", "points": 8, "differences": []}],
+        }
+        (report_dir / "report.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    result = run_grade(
+        student,
+        task_slug="task_x",
+        judge=AIJudge(client=stub),
+        plan_fn=lambda s, ps, t: 0,
+        report_fn=lambda s, ps, t: (minimal_report_fn(s), 0)[1],
+    )
+    md = result.report_md_path.read_text(encoding="utf-8")
+    # Section inserted at the end of the head block, before the first task.
+    assert "## Overall\n\n1 of 1 passed with 8/10 points.\n\n---\n\n" in md
+    on_disk = json.loads(result.report_json_path.read_text(encoding="utf-8"))
+    assert on_disk["overall_summary"] == "1 of 1 passed with 8/10 points."
+    assert "overall_summary_edited_by" not in on_disk
+    assert "overall_summary_edited_at" not in on_disk
 
 
 def test_plan_failure_raises(evaluator_dirs):

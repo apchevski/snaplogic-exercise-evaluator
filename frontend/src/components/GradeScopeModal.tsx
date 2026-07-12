@@ -11,8 +11,8 @@ interface Props {
 }
 
 /** Scope picker shown before a grading starts: grade every exercise
- * (default — also refreshes the AI Overall summary) or grade a selected
- * subset. Registering a new student lives on the dashboard toolbar. */
+ * (default) or grade a selected subset. Either way the AI Overall summary
+ * is refreshed. Registering a new student lives on the dashboard toolbar. */
 export function GradeScopeModal({
   studentName,
   exercises,
@@ -115,9 +115,10 @@ export function GradeScopeModal({
             ) : (
               <p className="hint">
                 The selected exercise{selected.size === 1 ? "" : "s"} are graded{" "}
-                <strong>right away</strong> at normal cost; only their results
-                are updated. Grade <em>all</em> exercises to run the cheaper
-                background batch and refresh the overall summary.
+                <strong>right away</strong> at normal cost; their results and
+                the AI overall summary are updated, other exercises are left
+                untouched. Grade <em>all</em> exercises to run the cheaper
+                background batch instead.
               </p>
             )}
           </div>

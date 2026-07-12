@@ -633,8 +633,9 @@ def _update_report_json_in_place(
 
     If report.json already exists, the target task is replaced (or appended
     if not present), and `counts` is recomputed from the merged task list.
-    `overall_summary` is preserved as-is — a single-task re-grade does not
-    claim to have refreshed the whole submission.
+    `overall_summary` is carried over unchanged here; the runner regenerates
+    it right after this merge (`runner.run_grade`), so every grading run —
+    full or scoped — leaves a summary that reflects the just-graded task.
 
     If report.json doesn't exist yet, a minimal one is written containing
     just this task.
@@ -729,10 +730,11 @@ def _update_report_in_place(
 ) -> None:
     """Replace one task's section in the existing report.md (or create one).
 
-    Header, counts, date, and Overall are intentionally left untouched —
-    a single-task re-grade should not claim to have refreshed everything.
-    If no report exists yet, a minimal single-task report is written
-    instead.
+    Header, counts, and date are intentionally left untouched — a
+    single-task re-grade should not claim to have refreshed everything.
+    The Overall paragraph is only carried over here; the runner rewrites it
+    (inserting the section if absent) right after this merge. If no report
+    exists yet, a minimal single-task report is written instead.
     """
     new_section, _, _ = _render_entry_section(entry)
     slug = entry["slug"]

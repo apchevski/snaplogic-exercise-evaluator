@@ -1093,9 +1093,10 @@ def post_student() -> Response:
 def post_grading() -> Response:
     """Queue a grade job: everything (default), one 'task', or a 'tasks' subset.
 
-    A full run (no task/tasks) also refreshes the AI Overall summary; a
-    scoped run only replaces the selected tasks' results in the stored
+    A scoped run only replaces the selected tasks' results in the stored
     report, appending them if the student was never graded on them before.
+    Every run — full or scoped — also refreshes the AI Overall summary from
+    the merged report, so the summary never lags the latest verdicts.
 
     The project space and project name assigned at registration (the
     STUDENT card) dictate where the run looks for the student's pipelines;

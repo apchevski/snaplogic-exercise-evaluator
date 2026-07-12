@@ -10,8 +10,11 @@ deterministic halves are reused verbatim from `evaluator.grade`:
              which writes the `evaluation.json` the renderer expects.
     report — cmd_report renders `grades/<student>/report.md` + `report.json`
              and cleans up the scratch dir.
-    overall— full runs get one extra small judge call that fills in the
-             `## Overall` paragraph (replacing the old sync-overall step).
+    overall— every run ends with one extra small judge call that rewrites
+             the `## Overall` paragraph from the merged report — full and
+             scoped runs alike (replacing the old sync-overall step). The
+             worker suppresses it on all but the last slug of a multi-slug
+             scoped job via `refresh_overall=False`.
 
 Used by the cloud worker Lambda (`backend/src/worker.py`) and by the local
 dev CLI (`python -m evaluator run <student>`).
@@ -65,16 +68,48 @@ def _manifest_path(student: str) -> Path:
 
 
 def _replace_overall_in_md(md_text: str, overall: str) -> str:
-    """Swap the `## Overall` section body (TODO placeholder or stale text)."""
+    """Swap the `## Overall` section body (TODO placeholder or stale text).
+
+    A report born from a scoped run on a never-graded student has no
+    `## Overall` section yet — one is inserted at the end of the head block
+    (before the first task separator), so every run leaves a summary.
+    """
     marker = "\n## Overall\n\n"
     idx = md_text.find(marker)
     if idx < 0:
-        return md_text
+        sep = "\n\n---\n\n"
+        block = f"\n\n## Overall\n\n{overall.strip()}"
+        sep_idx = md_text.find(sep)
+        if sep_idx < 0:
+            return md_text.rstrip("\n") + block + "\n"
+        return md_text[:sep_idx].rstrip("\n") + block + md_text[sep_idx:]
     start = idx + len(marker)
     end = md_text.find("\n\n---\n\n", start)
     if end < 0:
         end = len(md_text)
     return md_text[:start] + overall.strip() + md_text[end:]
+
+
+def _write_overall(
+    report: dict[str, Any],
+    report_md_path: Path,
+    report_json_path: Path,
+    overall: str,
+) -> None:
+    """Write a fresh AI Overall into report.md and report.json.
+
+    Any human-edit provenance from a previous inline edit is dropped — the
+    paragraph is AI-written again, and the UI must not keep attributing it
+    to the editor (see conventions/report-edit-provenance).
+    """
+    md = report_md_path.read_text(encoding="utf-8")
+    report_md_path.write_text(_replace_overall_in_md(md, overall), encoding="utf-8")
+    report["overall_summary"] = overall
+    report.pop("overall_summary_edited_by", None)
+    report.pop("overall_summary_edited_at", None)
+    report_json_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def run_grade(
@@ -83,6 +118,7 @@ def run_grade(
     project_space: str | None = None,
     project: str | None = None,
     task_slug: str | None = None,
+    refresh_overall: bool = True,
     judge: AIJudge | None = None,
     plan_fn: Callable[[str, str | None, str | None], int] | None = None,
     report_fn: Callable[[str, str | None, str | None], int] | None = None,
@@ -90,7 +126,10 @@ def run_grade(
     """Grade one student end to end and return the structured result.
 
     `project` overrides the SnapLogic project name to look in (defaults to
-    the student name). `plan_fn` / `report_fn` default to the real
+    the student name). `refresh_overall=False` skips the trailing Overall
+    judge call — the worker uses it on all but the last slug of a
+    multi-slug scoped job so the summary is written once, over the fully
+    merged report. `plan_fn` / `report_fn` default to the real
     `evaluator.grade` commands; tests inject fakes so no SnapLogic access is
     needed.
     """
@@ -145,23 +184,16 @@ def run_grade(
     report_json_path = report_dir / "report.json"
     report = json.loads(report_json_path.read_text(encoding="utf-8"))
 
-    # --- Overall paragraph (full runs only; single-task re-grades keep the
-    #     existing Overall untouched, same as the old skill behavior) ---
-    if task_slug is None:
+    # --- Overall paragraph: rewritten on every run, full or scoped, so the
+    #     summary always reflects the merged report just written to disk ---
+    if refresh_overall:
         judge = judge or AIJudge()
         if not usage.calls:
             usage.model = judge.model
         overall, overall_usage = judge.overall_summary(report)
         usage.merge(overall_usage)
         if overall:
-            md = report_md_path.read_text(encoding="utf-8")
-            report_md_path.write_text(
-                _replace_overall_in_md(md, overall), encoding="utf-8"
-            )
-            report["overall_summary"] = overall
-            report_json_path.write_text(
-                json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            _write_overall(report, report_md_path, report_json_path, overall)
 
     return GradeRunResult(
         student=student,
@@ -212,12 +244,7 @@ def _finalize_full_report(
 
     overall, overall_usage = judge.overall_summary(report)
     if overall:
-        md = report_md_path.read_text(encoding="utf-8")
-        report_md_path.write_text(_replace_overall_in_md(md, overall), encoding="utf-8")
-        report["overall_summary"] = overall
-        report_json_path.write_text(
-            json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        _write_overall(report, report_md_path, report_json_path, overall)
 
     return GradeRunResult(
         student=student,

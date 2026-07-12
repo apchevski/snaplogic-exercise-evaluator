@@ -588,11 +588,11 @@ export default function StudentDetail() {
             <p>
               {gradeConfirm.regrade ? "Regrade" : "Grade"}{" "}
               <strong>{titleFor(gradeConfirm.slug)}</strong> for {name}? This
-              runs the AI grader{" "}
+              runs the AI grader,{" "}
               {gradeConfirm.regrade
-                ? "and replaces this exercise’s current result"
-                : "and records a result for this exercise"}
-              . It runs in the background.
+                ? "replaces this exercise’s current result"
+                : "records a result for this exercise"}
+              , and refreshes the overall summary. It runs in the background.
             </p>
           )}
         </ConfirmModal>

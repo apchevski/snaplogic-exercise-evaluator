@@ -208,8 +208,8 @@ export const api = {
       ...(email ? { email } : {}),
     }),
 
-  // No tasks = full grading (also refreshes the AI Overall summary); a
-  // string or a subset of slugs only (re)grades those exercises.
+  // No tasks = full grading; a string or a subset of slugs only (re)grades
+  // those exercises. Every run also refreshes the AI Overall summary.
   startGrading: (token: string, student: string, tasks?: string | string[]) =>
     request<{ id: string }>(token, "POST", "/v1/gradings", {
       student,

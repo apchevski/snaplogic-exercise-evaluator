@@ -343,10 +343,18 @@ def _run_grade_job(job: dict[str, Any], store: Any) -> dict[str, Any]:
         ]
     else:
         # One run per slug; each merges into report.{md,json} on disk, so
-        # the last result carries the accumulated counts and points.
+        # the last result carries the accumulated counts and points. Only
+        # the last run refreshes the AI Overall — one call per job, made
+        # over the fully merged report.
         results = [
-            run_grade(student, project_space=space, project=project, task_slug=slug)
-            for slug in scope
+            run_grade(
+                student,
+                project_space=space,
+                project=project,
+                task_slug=slug,
+                refresh_overall=(i == len(scope) - 1),
+            )
+            for i, slug in enumerate(scope)
         ]
     return _finalize_grade_rows(
         store, job, student, student_slug, space, project, meta, results, scope
