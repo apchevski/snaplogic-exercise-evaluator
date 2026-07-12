@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { Link } from "react-router-dom";
 
@@ -59,7 +59,7 @@ function Count({ n, kind }: { n: number; kind: string }) {
   return <span className={n > 0 ? `count-${kind}` : "count-zero"}>{n}</span>;
 }
 
-/** Leaderboard rank badge: gold/silver/bronze medals for the top three. */
+/** Row-position badge: gold/silver/bronze medals for the top three rows. */
 function RankBadge({ rank }: { rank: number }) {
   const medal = rank <= 3 ? ` medal-${rank}` : "";
   return (
@@ -87,7 +87,6 @@ export default function Dashboard() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "points", dir: "desc" });
   const [perPage, setPerPage] = useState(25);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [defaultSpace, setDefaultSpace] = useState("");
   // Grade-scope picker: which student a grading is being configured for.
@@ -204,30 +203,6 @@ export default function Dashboard() {
     [token, refresh],
   );
 
-  // Competition ranking by total points over the FULL roster (equal points
-  // share a rank, the next rank skips: 1, 2, 2, 4), so searching, sorting, or
-  // paging never renumbers anyone. Never-graded students carry no rank.
-  const rankBySlug = useMemo(() => {
-    const graded = students.filter((s) => s.graded_at);
-    const sorted = [...graded].sort(
-      (a, b) =>
-        (b.points_earned ?? 0) - (a.points_earned ?? 0) ||
-        a.display_name.localeCompare(b.display_name),
-    );
-    const ranks = new Map<string, number>();
-    let rank = 0;
-    let prevPts = Number.NaN;
-    sorted.forEach((s, i) => {
-      const pts = s.points_earned ?? 0;
-      if (pts !== prevPts) {
-        rank = i + 1;
-        prevPts = pts;
-      }
-      ranks.set(s.slug, rank);
-    });
-    return ranks;
-  }, [students]);
-
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = students.filter(
@@ -239,7 +214,11 @@ export default function Dashboard() {
     );
     const cmp = COMPARE[sort.key] ?? COMPARE.points;
     const sign = sort.dir === "asc" ? 1 : -1;
-    return [...filtered].sort((a, b) => cmp(a, b) * sign);
+    // Ties always break A→Z by name regardless of sort direction, so equal
+    // totals rank alphabetically.
+    return [...filtered].sort(
+      (a, b) => cmp(a, b) * sign || a.display_name.localeCompare(b.display_name),
+    );
   }, [students, search, sort]);
 
   const { page, setPage, pageItems, pageCount } = usePagination(visible, perPage);
@@ -254,23 +233,15 @@ export default function Dashboard() {
     );
   };
 
-  const toggleExpanded = (slug: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(slug)) next.delete(slug);
-      else next.add(slug);
-      return next;
-    });
-
   const onSort = (key: string) => setSort((s) => nextSort(s, key, DEFAULT_DIR[key] ?? "asc"));
   const sc = (key: string) => (sort.key === key ? "sorted" : "");
 
   const jobEntries = Object.entries(jobs);
   const nameFor = (key: string) =>
     students.find((s) => s.slug === key || s.display_name === key)?.display_name ?? key;
-  // Staff: select + expand + rank + 9 data columns. Students lose the select
-  // column plus Project Space / Project / Last Graded (leaderboard view).
-  const colCount = canGrade ? 12 : 8;
+  // Staff: select + rank + 9 data columns. Students lose the select column
+  // plus Project Space / Project / Last Graded (leaderboard view).
+  const colCount = canGrade ? 11 : 7;
 
   // Drop selections whose student no longer exists (removed elsewhere).
   useEffect(() => {
@@ -347,7 +318,7 @@ export default function Dashboard() {
         title="Student Grades of All Projects"
         hint={
           canGrade
-            ? "Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Remove works on many students at once; Grade is enabled only while exactly one student is selected."
+            ? "Every graded student project. Click a column header to sort, or a student's name for their detailed evaluation. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Remove works on many students at once; Grade is enabled only while exactly one student is selected."
             : "Every graded student project. Click a column header to sort. Click your own name to open your detailed evaluation — other students' detail pages stay private."
         }
         toolbar={
@@ -450,10 +421,7 @@ export default function Dashboard() {
                     />
                   </th>
                 )}
-                <th className="plain" aria-label="Expand" />
-                <th className="plain rank-col" title="Rank by total points">
-                  #
-                </th>
+                <th className="plain rank-col" aria-label="Rank" />
                 <SortableTh label="Student" sortKey="student" sort={sort} onSort={onSort} />
                 {canGrade && (
                   <SortableTh label="Project Space" sortKey="space" sort={sort} onSort={onSort} />
@@ -472,14 +440,13 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {pageItems.map((s) => {
+              {pageItems.map((s, i) => {
                 const c = s.counts ?? { pass: 0, fail: 0, missing: 0, needs_sync: 0 };
                 const needsSync = c.needs_sync ?? c.needs_prep ?? 0;
                 const earned = s.points_earned ?? 0;
                 const possible = s.points_possible ?? 0;
                 const tier = tierForRatio(earned, possible);
                 const pct = possible > 0 ? Math.round((earned / possible) * 100) : null;
-                const isOpen = expanded.has(s.slug);
                 // Registered exercises this student has no verdict for at
                 // all — never graded, or the exercise was added later.
                 const gradedCount = c.pass + c.fail + c.missing + needsSync;
@@ -487,106 +454,89 @@ export default function Dashboard() {
                   activeExercises.length > 0
                     ? Math.max(0, activeExercises.length - gradedCount)
                     : 0;
+                // Position under the current sort, continuous across pages:
+                // the top row is always #1 whatever column is sorted.
+                const rank = (page - 1) * perPage + i + 1;
                 return (
-                  <Fragment key={s.slug}>
-                    <tr className={selectedSlugs.has(s.slug) ? "row-selected" : undefined}>
-                      {canGrade && (
-                        <td className="select-cell">
-                          <RowCheckbox
-                            checked={selectedSlugs.has(s.slug)}
-                            onChange={() => toggleSelected(s.slug)}
-                            ariaLabel={`Select ${s.display_name}`}
-                          />
-                        </td>
+                  <tr
+                    key={s.slug}
+                    className={selectedSlugs.has(s.slug) ? "row-selected" : undefined}
+                  >
+                    {canGrade && (
+                      <td className="select-cell">
+                        <RowCheckbox
+                          checked={selectedSlugs.has(s.slug)}
+                          onChange={() => toggleSelected(s.slug)}
+                          ariaLabel={`Select ${s.display_name}`}
+                        />
+                      </td>
+                    )}
+                    <td className="rank-cell">
+                      <RankBadge rank={rank} />
+                    </td>
+                    <td className={sc("student")}>
+                      {canOpen(s) ? (
+                        <Link to={`/students/${encodeURIComponent(s.slug)}`}>
+                          {s.display_name}
+                        </Link>
+                      ) : (
+                        s.display_name
                       )}
-                      <td>
-                        {s.overall_summary && (
-                          <button
-                            className="expander"
-                            onClick={() => toggleExpanded(s.slug)}
-                            aria-expanded={isOpen}
-                            aria-label={isOpen ? "Hide summary" : "Show summary"}
-                          >
-                            {isOpen ? "−" : "+"}
-                          </button>
-                        )}
-                      </td>
-                      <td className="rank-cell">
-                        {rankBySlug.has(s.slug) ? (
-                          <RankBadge rank={rankBySlug.get(s.slug)!} />
-                        ) : (
-                          <span className="cell-muted">—</span>
-                        )}
-                      </td>
-                      <td className={sc("student")}>
-                        {canOpen(s) ? (
-                          <Link to={`/students/${encodeURIComponent(s.slug)}`}>
-                            {s.display_name}
-                          </Link>
-                        ) : (
-                          s.display_name
-                        )}
-                      </td>
-                      {canGrade && (
-                        <td className={`${sc("space")} cell-mono`}>{s.space ?? "—"}</td>
-                      )}
-                      {canGrade && (
-                        <td
-                          className={`${sc("project")} cell-mono`}
-                          title={
-                            s.project && s.project !== s.display_name
-                              ? "SnapLogic project grading looks in (differs from the student name)"
-                              : "Defaults to the student name"
-                          }
-                        >
-                          {s.project ?? s.display_name}
-                        </td>
-                      )}
-                      <td className={sc("points")}>
-                        <span className={`pts-chip tier-${tier}`}>
-                          {earned}/{possible} pts
-                          {pct !== null && <span className="pct">({pct}%)</span>}
-                        </span>
-                        {needsSync > 0 && (
-                          <span
-                            className="warn-chip"
-                            title={`${needsSync} exercise${needsSync === 1 ? " was" : "s were"} skipped because its grading artifacts are not synced. Sync them on the Exercises page, then regrade.`}
-                          >
-                            ⚠
-                          </span>
-                        )}
-                      </td>
-                      <td className={sc("pass")}>
-                        <Count n={c.pass} kind="pass" />
-                      </td>
-                      <td className={sc("fail")}>
-                        <Count n={c.fail} kind="fail" />
-                      </td>
-                      <td className={sc("missing")}>
-                        <Count n={c.missing} kind="missing" />
-                      </td>
+                    </td>
+                    {canGrade && (
+                      <td className={`${sc("space")} cell-mono`}>{s.space ?? "—"}</td>
+                    )}
+                    {canGrade && (
                       <td
-                        className={sc("notgraded")}
+                        className={`${sc("project")} cell-mono`}
                         title={
-                          notGraded > 0
-                            ? `${notGraded} registered exercise${notGraded === 1 ? " has" : "s have"} never been graded for this student. Open the student to grade ${notGraded === 1 ? "it" : "them"} individually.`
-                            : undefined
+                          s.project && s.project !== s.display_name
+                            ? "SnapLogic project grading looks in (differs from the student name)"
+                            : "Defaults to the student name"
                         }
                       >
-                        <Count n={notGraded} kind="notgraded" />
+                        {s.project ?? s.display_name}
                       </td>
-                      {canGrade && (
-                        <td className={`${sc("graded")} cell-muted`}>
-                          {s.graded_at ?? "—"}
-                        </td>
-                      )}
-                    </tr>
-                    {isOpen && s.overall_summary && (
-                      <tr className="expand-row">
-                        <td colSpan={colCount}>{s.overall_summary}</td>
-                      </tr>
                     )}
-                  </Fragment>
+                    <td className={sc("points")}>
+                      <span className={`pts-chip tier-${tier}`}>
+                        {earned}/{possible} pts
+                        {pct !== null && <span className="pct">({pct}%)</span>}
+                      </span>
+                      {needsSync > 0 && (
+                        <span
+                          className="warn-chip"
+                          title={`${needsSync} exercise${needsSync === 1 ? " was" : "s were"} skipped because its grading artifacts are not synced. Sync them on the Exercises page, then regrade.`}
+                        >
+                          ⚠
+                        </span>
+                      )}
+                    </td>
+                    <td className={sc("pass")}>
+                      <Count n={c.pass} kind="pass" />
+                    </td>
+                    <td className={sc("fail")}>
+                      <Count n={c.fail} kind="fail" />
+                    </td>
+                    <td className={sc("missing")}>
+                      <Count n={c.missing} kind="missing" />
+                    </td>
+                    <td
+                      className={sc("notgraded")}
+                      title={
+                        notGraded > 0
+                          ? `${notGraded} registered exercise${notGraded === 1 ? " has" : "s have"} never been graded for this student. Open the student to grade ${notGraded === 1 ? "it" : "them"} individually.`
+                          : undefined
+                      }
+                    >
+                      <Count n={notGraded} kind="notgraded" />
+                    </td>
+                    {canGrade && (
+                      <td className={`${sc("graded")} cell-muted`}>
+                        {s.graded_at ?? "—"}
+                      </td>
+                    )}
+                  </tr>
                 );
               })}
               {!loading && visible.length === 0 && (
