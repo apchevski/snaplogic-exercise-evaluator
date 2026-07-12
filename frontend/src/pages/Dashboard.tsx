@@ -7,7 +7,6 @@ import { AddStudentModal } from "../components/AddStudentModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
 import { IconGrade, IconPlus, IconTrash } from "../components/icons";
-import { InfoModal } from "../components/InfoModal";
 import { StatusPill } from "../components/StatusPill";
 import {
   PagerFooter,
@@ -80,9 +79,6 @@ export default function Dashboard() {
   // Row selection (graders): the toolbar's Grade/Remove buttons act on these
   // students. Stored as slugs so a refresh keeps the selection.
   const [selectedSlugs, setSelectedSlugs] = useState<Set<string>>(new Set());
-  // Grading is one student at a time — clicking Grade with several rows
-  // selected explains that instead of silently picking one.
-  const [gradeWarning, setGradeWarning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -305,7 +301,7 @@ export default function Dashboard() {
 
       <Panel
         title="Student Grades of All Projects"
-        hint="Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Remove works on many students at once, Grade on one at a time."
+        hint="Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Remove works on many students at once; Grade is enabled only while exactly one student is selected."
         toolbar={
           <>
             <SearchBox
@@ -322,15 +318,15 @@ export default function Dashboard() {
                     if (selectedStudents.length === 1) {
                       const s = selectedStudents[0];
                       setScopeFor({ name: s.display_name, slug: s.slug });
-                    } else if (selectedStudents.length > 1) {
-                      setGradeWarning(true);
                     }
                   }}
-                  disabled={selectedStudents.length === 0 || selectedBusy}
+                  disabled={selectedStudents.length !== 1 || selectedBusy}
                   title={
                     selectedStudents.length === 0
                       ? "Grade — select a student first"
-                      : "Grade the selected student"
+                      : selectedStudents.length > 1
+                        ? "Grade — grading runs one student at a time, keep a single row selected"
+                        : "Grade the selected student"
                   }
                   aria-label="Grade selected student"
                 >
@@ -355,7 +351,6 @@ export default function Dashboard() {
                     <IconTrash size={18} />
                   </button>
                 )}
-                <span className="toolbar-sep" aria-hidden="true" />
                 <button
                   className="tool-btn"
                   onClick={() => setAdding(true)}
@@ -578,7 +573,6 @@ export default function Dashboard() {
               ? `Remove ${removing[0].display_name}`
               : `Remove ${removing.length} students`
           }
-          confirmIcon={<IconTrash />}
           busyLabel="Removing…"
           onConfirm={() => removeStudents(removing)}
           onClose={() => setRemoving(null)}
@@ -605,21 +599,6 @@ export default function Dashboard() {
           )}
           <p className="hint">This cannot be undone.</p>
         </ConfirmModal>
-      )}
-
-      {gradeWarning && (
-        <InfoModal
-          title="One Student at a Time"
-          onClose={() => setGradeWarning(false)}
-        >
-          <p>
-            Grading runs for <strong>one student at a time</strong>, and{" "}
-            {selectedStudents.length} rows are currently selected.
-          </p>
-          <p className="hint">
-            Keep just one student selected, then click Grade again.
-          </p>
-        </InfoModal>
       )}
     </main>
   );

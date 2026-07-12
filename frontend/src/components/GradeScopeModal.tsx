@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import type { Exercise } from "../types";
-import { IconClose, IconGrade } from "./icons";
 
 interface Props {
   studentName: string;
@@ -86,7 +85,7 @@ export function GradeScopeModal({
                     checked={selected.has(e.slug)}
                     onChange={() => toggle(e.slug)}
                   />
-                  <span className="cell-mono">{e.slug}</span>
+                  <span>{e.title ?? e.slug}</span>
                   {e.sync_status !== "ready" && (
                     <span
                       className="warn-chip"
@@ -125,7 +124,6 @@ export function GradeScopeModal({
         </div>
         <footer>
           <button type="button" className="btn" onClick={onClose}>
-            <IconClose />
             Cancel
           </button>
           <button
@@ -134,7 +132,6 @@ export function GradeScopeModal({
             onClick={start}
             disabled={exercises.length > 0 && selected.size === 0}
           >
-            <IconGrade />
             {allSelected
               ? `Grade all${exercises.length > 0 ? ` ${exercises.length}` : ""} exercises`
               : `Grade ${selected.size} selected`}

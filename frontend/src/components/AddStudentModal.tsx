@@ -1,7 +1,5 @@
 import { useState } from "react";
 
-import { IconClose, IconPlus } from "./icons";
-
 interface Props {
   /** Default student project space (from GET /v1/config); prefills the field. */
   defaultSpace: string;
@@ -135,7 +133,6 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
         </div>
         <footer>
           <button type="button" className="btn" onClick={onClose}>
-            <IconClose />
             Cancel
           </button>
           <button
@@ -143,7 +140,6 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
             className="btn primary"
             disabled={!name.trim() || !space.trim() || busy}
           >
-            <IconPlus />
             {busy ? "Adding…" : "Add Student"}
           </button>
         </footer>
