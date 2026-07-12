@@ -27,7 +27,8 @@ final judgment has to come from a model rather than a hand-coded rubric.
    `evaluation.json` with the failing gate and detail. No AI step.
 
 2. **AI judgment** — a **headless Claude API call** (`evaluator/ai_judge.py`),
-   model `claude-sonnet-4-6` (locked decision). For each exercise whose
+   model `claude-sonnet-5` (locked decision since 2026-07-12; superseded
+   `claude-sonnet-4-6` — same price, better judgment). For each exercise whose
    hard gates passed (or output-mismatch-failed), the runner sends the
    `ai_context.json` bundle through the Messages API with structured
    outputs (`schemas/evaluation.schema.json`) and writes the

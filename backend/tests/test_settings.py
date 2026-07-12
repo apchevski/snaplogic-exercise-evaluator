@@ -59,8 +59,8 @@ def test_get_settings_defaults_when_nothing_stored(aws):
     assert s["snaplogic_password_set"] is False
     assert s["anthropic_api_key_set"] is False
     assert s["judge_model"] is None
-    assert s["default_model"] == "claude-sonnet-4-6"
-    assert {m["id"] for m in s["allowed_models"]} >= {"claude-sonnet-4-6"}
+    assert s["default_model"] == "claude-sonnet-5"
+    assert {m["id"] for m in s["allowed_models"]} >= {"claude-sonnet-5", "claude-sonnet-4-6"}
 
 
 def test_mentor_stores_key_and_model_masked(aws):
@@ -170,6 +170,22 @@ def _store_settings(email: str, **fields) -> None:
             **fields,
         }
     )
+
+
+def test_default_model_reflects_deployment_env(aws, monkeypatch):
+    """default_model is the deployment's JUDGE_MODEL env (Terraform), not the
+    code constant — and not a per-user override a warm container still carries
+    from a previous request."""
+    monkeypatch.setenv("JUDGE_MODEL", "claude-haiku-4-5")
+    common.reset_base_env_snapshot()
+
+    # A previous request in this warm container ran under another user's model.
+    _store_settings("admin@x.io", judge_model="claude-opus-4-8")
+    apply_user_overrides("admin@x.io")
+    assert os.environ["JUDGE_MODEL"] == "claude-opus-4-8"
+
+    resp = _call(api_event("GET", "/v1/settings", groups=("mentor",)))
+    assert _settings(resp)["default_model"] == "claude-haiku-4-5"
 
 
 def test_apply_user_overrides_and_restore(aws, monkeypatch):

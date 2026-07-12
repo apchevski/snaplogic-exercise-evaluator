@@ -19,8 +19,9 @@ Design rules (carried over from the skill + .claude/conventions/grade-*):
   every deduction cite its `rule_source`.
 - **The rules block is prompt-cached** (`cache_control` on the last system
   block) so a full grading run pays for the rule text once, not per exercise.
-- The judge model is `JUDGE_MODEL` (default `claude-sonnet-4-6` — the
-  project's locked decision; do not silently upgrade it).
+- The judge model is `JUDGE_MODEL` (default `claude-sonnet-5` — the
+  project's locked decision since 2026-07-12, superseding `claude-sonnet-4-6`;
+  do not silently upgrade it).
 """
 from __future__ import annotations
 
@@ -33,14 +34,14 @@ from .config import REPO_ROOT
 
 SCHEMAS_DIR = REPO_ROOT / "schemas"
 
-DEFAULT_JUDGE_MODEL = "claude-sonnet-4-6"
+DEFAULT_JUDGE_MODEL = "claude-sonnet-5"
 DEFAULT_MAX_TOKENS = 4096
 OVERALL_MAX_TOKENS = 300
 
 # USD per 1M tokens: (input, output). Cache writes bill at 1.25x input,
 # cache reads at 0.10x input. Matched by model-id prefix (first match wins,
 # so more-specific ids come first); unknown models fall back to the Sonnet
-# 4.6 rates so the estimate is never silently zero. Keep in lockstep with
+# rates so the estimate is never silently zero. Keep in lockstep with
 # ALLOWED_JUDGE_MODELS in backend/src/api.py (the Settings model picker).
 _PRICING_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-sonnet-4-6": (3.00, 15.00),

@@ -485,14 +485,16 @@ function GradingSettingsForm({
   const [username, setUsername] = useState(settings.snaplogic_username ?? "");
   const [password, setPassword] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState(settings.judge_model ?? "");
+  // No "project default" option — a null judge_model shows as the default
+  // model itself, and picking it stores the id explicitly.
+  const [model, setModel] = useState(settings.judge_model ?? settings.default_model);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
   const usernameDirty = isAdmin && username.trim() !== (settings.snaplogic_username ?? "");
   const passwordDirty = isAdmin && password !== "";
   const keyDirty = apiKey.trim() !== "";
-  const modelDirty = model !== (settings.judge_model ?? "");
+  const modelDirty = model !== (settings.judge_model ?? settings.default_model);
   const dirty = usernameDirty || passwordDirty || keyDirty || modelDirty;
 
   const push = async (
@@ -520,7 +522,7 @@ function GradingSettingsForm({
     if (usernameDirty) payload.snaplogic_username = username.trim() || null;
     if (passwordDirty) payload.snaplogic_password = password;
     if (keyDirty) payload.anthropic_api_key = apiKey.trim();
-    if (modelDirty) payload.judge_model = model || null;
+    if (modelDirty) payload.judge_model = model;
     if (await push(payload, "Grading settings saved.")) {
       setPassword("");
       setApiKey("");
@@ -555,9 +557,6 @@ function GradingSettingsForm({
   const savedKeyHint = settings.anthropic_api_key_set
     ? `Saved key ${settings.anthropic_api_key_hint ?? ""}`.trim()
     : "";
-  const defaultLabel =
-    settings.allowed_models.find((m) => m.id === settings.default_model)?.label ??
-    settings.default_model;
 
   return (
     <>
@@ -639,10 +638,9 @@ function GradingSettingsForm({
         </p>
         <div className="settings-row">
           <select value={model} onChange={(e) => setModel(e.target.value)}>
-            <option value="">Project default ({defaultLabel})</option>
             {settings.allowed_models.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.label}
+                {m.label} · {m.description}
               </option>
             ))}
           </select>

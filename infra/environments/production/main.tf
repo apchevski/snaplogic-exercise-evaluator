@@ -67,6 +67,7 @@ module "api" {
   queue_url          = module.worker.queue_url
   queue_arn          = module.worker.queue_arn
   secret_arn         = module.secrets.secret_arn
+  judge_model        = var.judge_model
   user_pool_id       = module.cognito.user_pool_id
   user_pool_arn      = module.cognito.user_pool_arn
   jwt_issuer         = module.cognito.issuer

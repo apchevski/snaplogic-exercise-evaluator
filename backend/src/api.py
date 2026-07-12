@@ -72,6 +72,7 @@ from .common import (
     lock_key,
     public_item,
     s3_client,
+    shared_judge_model,
     slugify,
     sqs_client,
     to_dynamo,
@@ -454,12 +455,30 @@ def get_config() -> dict[str, Any]:
 # ---------- per-user settings (own credentials + judge model) ----------
 
 #: Judge models a user may pick in Settings. Kept in lockstep with the
-#: pricing table in evaluator.ai_judge so cost estimates stay accurate.
+#: pricing table in evaluator.ai_judge so cost estimates stay accurate —
+#: the description cost ratios come from _PRICING_PER_MTOK (Sonnet $3/$15,
+#: Opus $5/$25, Haiku $1/$5 per MTok).
 ALLOWED_JUDGE_MODELS: tuple[dict[str, str], ...] = (
-    {"id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6"},
-    {"id": "claude-sonnet-5", "label": "Claude Sonnet 5"},
-    {"id": "claude-opus-4-8", "label": "Claude Opus 4.8"},
-    {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5"},
+    {
+        "id": "claude-sonnet-5",
+        "label": "Claude Sonnet 5 (Recommended)",
+        "description": "Best balance of grading quality and cost",
+    },
+    {
+        "id": "claude-sonnet-4-6",
+        "label": "Claude Sonnet 4.6",
+        "description": "Previous Sonnet · same price, the default before Sonnet 5",
+    },
+    {
+        "id": "claude-opus-4-8",
+        "label": "Claude Opus 4.8",
+        "description": "Most thorough evaluations · ~1.7× the cost of Sonnet",
+    },
+    {
+        "id": "claude-haiku-4-5",
+        "label": "Claude Haiku 4.5",
+        "description": "Fastest, ~⅓ the cost of Sonnet · lighter judgment",
+    },
 )
 
 #: SETTINGS-row keys only an admin may write (mentors run grading against the
@@ -471,8 +490,6 @@ def _masked_settings(email: str, row: dict[str, Any]) -> dict[str, Any]:
     """The caller-visible view of their SETTINGS row — secrets never leave
     the server; the UI only learns *that* a value is stored (plus a short
     tail of the API key so the owner can tell which key it is)."""
-    from evaluator.ai_judge import DEFAULT_JUDGE_MODEL
-
     api_key = str(row.get("anthropic_api_key") or "")
     return {
         "email": email,
@@ -481,7 +498,7 @@ def _masked_settings(email: str, row: dict[str, Any]) -> dict[str, Any]:
         "anthropic_api_key_set": bool(api_key.strip()),
         "anthropic_api_key_hint": ("…" + api_key[-4:]) if len(api_key) >= 12 else None,
         "judge_model": str(row.get("judge_model") or "") or None,
-        "default_model": DEFAULT_JUDGE_MODEL,
+        "default_model": shared_judge_model(),
         "allowed_models": [dict(m) for m in ALLOWED_JUDGE_MODELS],
         "updated_at": row.get("updated_at"),
     }

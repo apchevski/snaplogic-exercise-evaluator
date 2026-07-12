@@ -28,7 +28,7 @@ variable "image_tag" {
 
 variable "judge_model" {
   type    = string
-  default = "claude-sonnet-4-6"
+  default = "claude-sonnet-5"
 }
 
 variable "allowed_cidrs" {
