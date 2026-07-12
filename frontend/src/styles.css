@@ -397,6 +397,7 @@ td.rank-cell { width: 38px; text-align: center; }
   display: inline-flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 12px; color: var(--sl-muted);
   font-variant-numeric: tabular-nums;
+  background: #fff; border: 1px solid var(--sl-border);
 }
 .rank-badge.medal-1 { background: #f9edd2; border: 1px solid #e3c98a; color: #8a6116; }
 .rank-badge.medal-2 { background: #e6eaee; border: 1px solid #b3bfca; color: #4e5a64; }
