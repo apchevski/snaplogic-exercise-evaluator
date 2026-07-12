@@ -253,7 +253,7 @@ export default function StudentDetail() {
       <main className="page">
         <div className="error-banner">{error}</div>
         <Link className="back-link" to="/">
-          ← Back to dashboard
+          ← Back
         </Link>
       </main>
     );
@@ -359,7 +359,7 @@ export default function StudentDetail() {
         </div>
       )}
       <Link className="back-link" to="/">
-        ← Back to dashboard
+        ← Back
       </Link>
       <Panel
         title={`Grade Summary — ${name}`}

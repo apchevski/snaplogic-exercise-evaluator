@@ -22,7 +22,6 @@ import {
 import { IconLogin, IconLogout, IconSettings } from "./components/icons";
 import Dashboard from "./pages/Dashboard";
 import Exercises from "./pages/Exercises";
-import Ranking from "./pages/Ranking";
 import Settings from "./pages/Settings";
 import StudentDetail from "./pages/StudentDetail";
 
@@ -148,8 +147,8 @@ function TopBar({ nav }: { nav: ReactNode }) {
   );
 }
 
-/** Full app for admins and mentors: Students / Ranking / Exercises tabs,
- * every page, and the Settings page (Account + Grading) behind the user menu. */
+/** Full app for admins and mentors: Students / Exercises tabs, every page,
+ * and the Settings page (Account + Grading) behind the user menu. */
 function StaffShell() {
   const { pathname } = useLocation();
   const studentsActive = pathname === "/" || pathname.startsWith("/students");
@@ -160,12 +159,6 @@ function StaffShell() {
           <>
             <NavLink to="/" className={studentsActive ? "active" : ""}>
               Students
-            </NavLink>
-            <NavLink
-              to="/ranking"
-              className={({ isActive }) => (isActive ? "active" : "")}
-            >
-              Ranking
             </NavLink>
             <NavLink
               to="/exercises"
@@ -179,7 +172,6 @@ function StaffShell() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/students/:slug" element={<StudentDetail />} />
-        <Route path="/ranking" element={<Ranking />} />
         <Route path="/exercises" element={<Exercises />} />
         <Route path="/settings" element={<Settings />} />
         {/* The Settings page lived at /manager before the Manager tab was
@@ -206,9 +198,9 @@ function OwnStudentGuard({ ownSlug }: { ownSlug: string }) {
 }
 
 /** Read-only shell for the `student` role: the full Students table (every
- * row, no actions), the Ranking leaderboard, a My Grades page for their OWN
- * detailed evaluation, a read-only Exercises catalog, and the Settings page
- * for their own account.
+ * row, no actions) where clicking their OWN name opens their detailed
+ * evaluation, a read-only Exercises catalog, and the Settings page for their
+ * own account.
  * The student's slug isn't in the token, so we resolve it from
  * GET /v1/students: the roster is visible to everyone, but only the caller's
  * own card still carries an email (the backend strips it from other rows) —
@@ -241,7 +233,8 @@ function StudentShell() {
   }, [token, myEmail]);
 
   // A login with no linked card can still browse the roster and exercises;
-  // it just has no My Grades tab until a mentor registers their card.
+  // their grades just aren't reachable until a mentor registers their card
+  // (their own name in the roster is what links to the detail page).
   const topbar = (
     <TopBar
       nav={
@@ -249,20 +242,6 @@ function StudentShell() {
           <NavLink to="/" className={({ isActive }) => (isActive ? "active" : "")} end>
             Students
           </NavLink>
-          <NavLink
-            to="/ranking"
-            className={({ isActive }) => (isActive ? "active" : "")}
-          >
-            Ranking
-          </NavLink>
-          {slug && (
-            <NavLink
-              to={`/students/${encodeURIComponent(slug)}`}
-              className={({ isActive }) => (isActive ? "active" : "")}
-            >
-              My Grades
-            </NavLink>
-          )}
           <NavLink
             to="/exercises"
             className={({ isActive }) => (isActive ? "active" : "")}
@@ -297,7 +276,6 @@ function StudentShell() {
       {topbar}
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/ranking" element={<Ranking />} />
         <Route path="/exercises" element={<Exercises />} />
         <Route path="/settings" element={<Settings />} />
         {/* The Settings page lived at /manager before the Manager tab was

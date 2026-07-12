@@ -147,11 +147,14 @@ plan → judge → report loop the skill used to drive interactively.
   scoped. The email is the link between the Cognito login and the card — set
   when the login is created (see below), stored lowercased on the card,
   compared case-folded here. The SPA gives student-only users a
-  Students / My Grades / Exercises top-bar nav: the roster renders with no
-  action toolbar and only their own name linked, `/students/<any-other-slug>`
-  redirects to their own page, and the own slug is resolved by matching the
-  login email against the one roster row that still carries an email; the
-  backend is the real boundary, the UI is cosmetic.
+  Students / Exercises top-bar nav (a My Grades tab existed briefly in July
+  2026, removed — their own linked name in the roster is the way in): the
+  roster renders leaderboard-style with no action toolbar, the Project
+  Space / Project / Last Graded columns hidden, and only their own name
+  linked; `/students/<any-other-slug>` redirects to their own page, and the
+  own slug is resolved by matching the login email against the one roster
+  row that still carries an email; the backend is the real boundary, the UI
+  is cosmetic.
   **Student logins (July 2026)** are app-created, never console-created: an
   optional email on POST /v1/students makes the API `AdminCreateUser` the
   student into the `student` group — Cognito emails the temporary password

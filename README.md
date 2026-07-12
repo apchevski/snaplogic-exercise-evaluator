@@ -19,7 +19,7 @@ rather than a rubric.
 Mentors and admins log into a VPN-restricted web dashboard (styled after the
 classic SnapLogic Dashboard: navy panel headers, sortable/paginated data
 tables, and — like the old console's Designer / Manager / Dashboard header —
-**Students / Ranking / Exercises** tabs centered in the top bar; account and
+**Students / Exercises** tabs centered in the top bar; account and
 grading settings live on the **Settings** page behind the top-right user menu):
 
 - **Row selection**: both tables use SnapLogic-style square checkboxes in the
@@ -51,14 +51,11 @@ grading settings live on the **Settings** page behind the top-right user menu):
     status and the report appears when the batch finishes (you can leave the
     page). A **subset** selection and the per-card **Regrade** stay on the
     instant **synchronous** path (normal cost).
-- **Ranking** (everyone): a read-only leaderboard of all students ordered by
-  total points — rank number (gold/silver/bronze badges for the top three;
-  equal points share a rank), a bar showing each student's share of the
-  possible points, and the same tier-colored points chip as the Students
-  table. Students who have never been graded are listed at the bottom without
-  a rank. Signed-in students see their own row highlighted with a **You**
-  chip. Purely presentational: no selection, actions, or pagination — for
-  managing students use the Students tab.
+- **Rank column** (everyone): the Students table's leftmost data column is a
+  **#** rank badge — gold/silver/bronze for the top three, equal points share
+  a rank (competition-style: 1, 2, 2, 4) — computed over the full roster by
+  total points, so searching, sorting, or paging never renumbers anyone.
+  Students who have never been graded show a muted dash instead of a rank.
 - **Add a student** (mentor or admin): click the **+** (Add student) icon in
   the toolbar.
   The dialog takes the student's name plus the SnapLogic **project space**
@@ -74,15 +71,15 @@ grading settings live on the **Settings** page behind the top-right user menu):
   them a temporary password, they change it on first sign-in, and from then
   on they can watch their grades (see the `student` role below).
 - **Student sign-in** (read-only): a user in the `student` Cognito group
-  lands on the **Students** table — the same roster staff see, with every
-  student's points and Pass/Fail/Missing counts, but with no selection
-  checkboxes or toolbar actions — plus a **Ranking** tab (the leaderboard,
-  with their own row highlighted), a **My Grades** tab that opens their
-  **own** detail page (`/students/<their-slug>`), and an **Exercises** tab.
+  lands on the **Students** table — the same roster staff see, but styled as
+  a leaderboard: rank badge, name, points, and verdict counts only (the
+  Project Space, Project, and Last Graded columns are hidden), with no
+  selection checkboxes or toolbar actions — plus an **Exercises** tab.
   Only their own name in the table is a link: other students' detailed
-  evaluations stay private (plain text in the table, 403 server-side). My
-  Grades shows their verdicts, points, overall summary, and per-exercise
-  feedback; Exercises is a read-only catalog of the active (non-archived)
+  evaluations stay private (plain text in the table, 403 server-side).
+  Clicking their own name opens their detail page (`/students/<their-slug>`)
+  with their verdicts, points, overall summary, and per-exercise feedback;
+  Exercises is a read-only catalog of the active (non-archived)
   exercises with descriptions and downloadable input files, without the
   staff sync-status columns or toolbar. Every action is gone (and 403s
   server-side): no grading, no registering, no report edits, no instructor
