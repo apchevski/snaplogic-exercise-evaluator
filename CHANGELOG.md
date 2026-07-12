@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **UI polish: full-width Manager split, icon-only sync progress, and a plain "Save" button.** Frontend-only — no API change.
+  - **Manager: the Account | Grading grid now spans the full page width** (the 1280px cap is gone), so each staff panel takes exactly half the screen on laptop and monitor alike, instead of leaving dead space on the right. Narrow screens still collapse to a single column, and the student-only Account view keeps its 920px width.
+  - **Exercises: sync progress is icon-only.** Starting a sync shows just the animated spinner in the row's Sync Status column (replacing the stored status while the job is queued/running) instead of the "Queued" / "Syncing…" / "Completed" text pill. The cell updates the moment the job ends: on success the row refreshes and shows the usual green circled check; on failure it shows a red circled ✕ whose hover tooltip carries the error message. The toolbar's sync-all indicator gets the same treatment; grading pills elsewhere are unchanged (`StatusPill` branches on its `kind`; new `IconXCircle`).
+  - **The Add New Exercise / Edit Exercise dialogs' confirm button now reads just "Save"** (was "Save Exercise" / "Save Changes").
+
 - **UI refinement pass: friendlier names, clearer sync state, and a consolidated Manager page.** Frontend-only — no API change.
   - **Grading dialogs show the human-readable exercise name.** The grade scope picker (and the single-exercise Grade/Regrade confirmation on the student detail page) now lists exercises as e.g. *Task 01 – Generate CSV Report* instead of the `task_01_generate_csv_report` slug.
   - **Exercises: the Status column is now "Sync Status".** A synced exercise (`ready`) shows a green circled check instead of the "synced" pill; a never-synced one keeps the muted dash; the in-between/failure states keep their diagnostic pills.

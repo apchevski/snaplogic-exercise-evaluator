@@ -361,12 +361,17 @@ tr.expand-row:hover td { background: #f8f9fb; }
 .status-pill.batch_processing { color: var(--sl-blue); }
 .status-pill.succeeded { color: #2e7d32; }
 .status-pill.failed { color: #c62828; }
-.status-pill .spinner {
-  width: 11px; height: 11px; border-radius: 50%;
+.spinner {
+  display: inline-block; width: 11px; height: 11px; border-radius: 50%;
   border: 2px solid currentColor; border-top-color: transparent;
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* icon-only sync progress in the Sync Status column: a spinner while the job
+ * is queued/running, a red circled ✕ (hover for the error) if it failed */
+.sync-busy { display: inline-flex; align-items: center; color: var(--sl-blue); vertical-align: middle; }
+.sync-busy .spinner { width: 12px; height: 12px; }
+.sync-fail { display: inline-flex; align-items: center; color: #c62828; vertical-align: middle; cursor: help; }
 .job-error { color: #c62828; font-size: 12px; margin-top: 3px; white-space: pre-wrap; font-weight: 400; }
 .job-cost { color: var(--sl-muted); font-size: 12px; }
 
@@ -690,8 +695,9 @@ tr.row-archived td.select-cell { opacity: 1; }
 
 /* ---------- Manager page (account + grading settings) ---------- */
 .settings-page { max-width: 920px; }
-/* staff see Account | Grading side by side (single column on narrow screens) */
-.settings-page.wide { max-width: 1280px; }
+/* staff see Account | Grading splitting the full screen width half/half on
+ * any display (single column on narrow screens) */
+.settings-page.wide { max-width: none; }
 .settings-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start;
 }
