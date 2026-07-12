@@ -56,7 +56,8 @@ grading settings live on the **Settings** page behind the top-right user menu):
   **1**, whatever column is sorted, so sorting by Total Points ranks by
   points, sorting by Fail ranks by failures, and so on. Ties in the sorted
   column break alphabetically by student name. The top three rows wear
-  gold/silver/bronze medal circles; every other row is a plain number.
+  gold/silver/bronze medal circles; every other row wears a plain white
+  circle.
 - **Add a student** (mentor or admin): click the **+** (Add student) icon in
   the toolbar.
   The dialog takes the student's name plus the SnapLogic **project space**

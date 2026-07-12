@@ -51,6 +51,9 @@ def test_source_ip_outside_allowlist_403(aws, monkeypatch):
     monkeypatch.setenv("ALLOWED_CIDRS", "192.168.0.0/24, 10.9.0.0/16")
     resp = _call(api_event("GET", "/v1/students", source_ip="8.8.8.8"))
     assert resp["statusCode"] == 403
+    assert _body(resp) == {
+        "error": "Access denied. Your IP address is not whitelisted."
+    }
     resp = _call(api_event("GET", "/v1/students", source_ip="10.9.1.5"))
     assert resp["statusCode"] == 200
 

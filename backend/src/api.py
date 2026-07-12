@@ -2050,6 +2050,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         return {
             "statusCode": 403,
             "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"message": "Source IP not in the allowlist."}),
+            "body": json.dumps(
+                {"error": "Access denied. Your IP address is not whitelisted."}
+            ),
         }
     return app.resolve(event, context)
