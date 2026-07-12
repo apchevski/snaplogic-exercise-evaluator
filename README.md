@@ -19,8 +19,8 @@ rather than a rubric.
 Mentors and admins log into a VPN-restricted web dashboard (styled after the
 classic SnapLogic Dashboard: navy panel headers, sortable/paginated data
 tables, and — like the old console's Designer / Manager / Dashboard header —
-**Students / Exercises** tabs centered in the top bar; account and grading
-settings live on the **Settings** page behind the top-right user menu):
+**Students / Ranking / Exercises** tabs centered in the top bar; account and
+grading settings live on the **Settings** page behind the top-right user menu):
 
 - **Row selection**: both tables use SnapLogic-style square checkboxes in the
   leftmost column. Tick any number of rows; the checkbox in the column header
@@ -51,6 +51,14 @@ settings live on the **Settings** page behind the top-right user menu):
     status and the report appears when the batch finishes (you can leave the
     page). A **subset** selection and the per-card **Regrade** stay on the
     instant **synchronous** path (normal cost).
+- **Ranking** (everyone): a read-only leaderboard of all students ordered by
+  total points — rank number (gold/silver/bronze badges for the top three;
+  equal points share a rank), a bar showing each student's share of the
+  possible points, and the same tier-colored points chip as the Students
+  table. Students who have never been graded are listed at the bottom without
+  a rank. Signed-in students see their own row highlighted with a **You**
+  chip. Purely presentational: no selection, actions, or pagination — for
+  managing students use the Students tab.
 - **Add a student** (mentor or admin): click the **+** (Add student) icon in
   the toolbar.
   The dialog takes the student's name plus the SnapLogic **project space**
@@ -68,8 +76,9 @@ settings live on the **Settings** page behind the top-right user menu):
 - **Student sign-in** (read-only): a user in the `student` Cognito group
   lands on the **Students** table — the same roster staff see, with every
   student's points and Pass/Fail/Missing counts, but with no selection
-  checkboxes or toolbar actions — plus a **My Grades** tab that opens their
-  **own** detail page (`/students/<their-slug>`) and an **Exercises** tab.
+  checkboxes or toolbar actions — plus a **Ranking** tab (the leaderboard,
+  with their own row highlighted), a **My Grades** tab that opens their
+  **own** detail page (`/students/<their-slug>`), and an **Exercises** tab.
   Only their own name in the table is a link: other students' detailed
   evaluations stay private (plain text in the table, 403 server-side). My
   Grades shows their verdicts, points, overall summary, and per-exercise
