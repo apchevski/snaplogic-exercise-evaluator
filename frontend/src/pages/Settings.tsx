@@ -20,6 +20,7 @@ import {
   updateDisplayName,
   verifySoftwareToken,
 } from "../cognito";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { Panel } from "../components/table";
 import type { UpdateUserSettingsPayload, UserSettings } from "../types";
 
@@ -27,13 +28,13 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Manager page (styled after the classic SnapLogic Manager tab): account
- * self-service — display name, password, and TOTP two-factor auth (all three
- * talk to the Cognito self-service API with the access token) — plus, for
- * admins and mentors, their own grading credentials (REST API). Each panel
- * has a single Save in its bottom-right corner that applies every changed
- * field at once; the panels sit side by side for staff. */
-export default function Manager() {
+/** Settings page (opened from the Settings item in the top-right user menu):
+ * account self-service — display name, password, and TOTP two-factor auth
+ * (all three talk to the Cognito self-service API with the access token) —
+ * plus, for admins and mentors, their own grading credentials (REST API).
+ * Each panel has a single Save in its bottom-right corner that applies every
+ * changed field at once; the panels sit side by side for staff. */
+export default function Settings() {
   const auth = useAuth();
   const accessToken = useAccessToken();
   const hasScope = useHasSelfServiceScope();
@@ -299,6 +300,7 @@ function MfaSection({
   const [qr, setQr] = useState<string>("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmingDisable, setConfirmingDisable] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
   const beginEnroll = async () => {
@@ -334,18 +336,14 @@ function MfaSection({
     }
   };
 
+  // Runs inside the confirmation dialog: a throw keeps the dialog open with
+  // the error; on success it closes and the section flips back to "off".
   const disable = async () => {
-    setBusy(true);
     setNote(null);
-    try {
-      await setTotpPreference(accessToken, false);
-      onChange(false);
-      setNote({ ok: true, text: "Two-factor authentication is off." });
-    } catch (e) {
-      setNote({ ok: false, text: errText(e) });
-    } finally {
-      setBusy(false);
-    }
+    await setTotpPreference(accessToken, false);
+    onChange(false);
+    setConfirmingDisable(false);
+    setNote({ ok: true, text: "Two-factor authentication is off." });
   };
 
   return (
@@ -360,8 +358,8 @@ function MfaSection({
           </button>
         )}
         {enabled && (
-          <button type="button" className="btn" onClick={() => void disable()} disabled={busy}>
-            {busy ? "Working…" : "Turn off"}
+          <button type="button" className="btn" onClick={() => setConfirmingDisable(true)} disabled={busy}>
+            Turn off
           </button>
         )}
         <span className={`mfa-status ${enabled ? "on" : "off"}`}>
@@ -409,6 +407,26 @@ function MfaSection({
       )}
 
       {note && <p className={`settings-note mfa-result ${note.ok ? "ok" : "err"}`}>{note.text}</p>}
+
+      {confirmingDisable && (
+        <ConfirmModal
+          title="Turn Off Two-Factor Authentication"
+          confirmLabel="Turn off two-factor auth"
+          busyLabel="Turning off…"
+          onConfirm={disable}
+          onClose={() => setConfirmingDisable(false)}
+        >
+          <p>
+            Turn off two-factor authentication for <strong>{account}</strong>?
+            Your enrolled authenticator app is removed immediately, and signing
+            in will only require your password.
+          </p>
+          <p className="hint">
+            To turn it back on later you must set it up from the beginning:
+            scan a new QR code and verify a fresh 6-digit code.
+          </p>
+        </ConfirmModal>
+      )}
     </section>
   );
 }
