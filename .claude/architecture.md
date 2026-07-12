@@ -242,6 +242,22 @@ stays on the synchronous `run_grade` path (instant). The API routes on scope
 Infra delta: the worker Lambda gains `sqs:SendMessage` on its own queue, a
 scoped `s3:DeleteObject` on `jobs/*`, and a `QUEUE_URL` env var.
 
+## Overall summary refreshes on every run (July 2026)
+
+Every grading run — full, subset, or single-task Regrade — ends with the
+small `overall_summary` judge call over the merged report, so the `## Overall`
+paragraph and the dashboard summary never lag the latest verdicts (decision
+2026-07-12; previously scoped runs deliberately left the Overall untouched).
+Mechanics: `run_grade(refresh_overall=True)` is the default; the worker's
+multi-slug scoped loop passes `False` for all but the last slug so a job pays
+for exactly one Overall call. `_replace_overall_in_md` now **inserts** the
+`## Overall` section when a report lacks one (minimal reports born from a
+scoped run on a never-graded student) — which also unbroke the human inline
+Overall edit on such reports, previously a silent no-op. A fresh AI rewrite
+drops `overall_summary_edited_by/at` from report.json: the paragraph is
+AI-written again, matching the task-card rule that a regrade replaces human
+edits (conventions/report-edit-provenance).
+
 ## Canonical pipeline form
 
 We do **not** maintain an internal `PipelineIR` Pydantic model. The

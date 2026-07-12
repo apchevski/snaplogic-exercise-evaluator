@@ -41,8 +41,9 @@ grading settings live on the **Settings** page behind the top-right user menu):
   full run, or check just the exercises you want. A job queues, a worker
   Lambda runs the deterministic hard gates against SnapLogic, sends each
   surviving exercise to Claude (Sonnet 5), renders the report, and the row
-  refreshes with points and per-task detail. A full run also refreshes the AI
-  Overall summary; a subset run only replaces the selected exercises' results.
+  refreshes with points and per-task detail. A subset run only replaces the
+  selected exercises' results; every run — full or subset — also refreshes
+  the AI Overall summary from the merged report.
   - **Full runs use the Batch API (~50% cheaper).** Grading *all* exercises
     submits the AI judging as one Anthropic Message **batch** billed at half
     the standard token rate. The batch is **asynchronous**, so results are not
@@ -93,8 +94,9 @@ grading settings live on the **Settings** page behind the top-right user menu):
 - **Regrade one exercise** (mentor or admin): on a student's detail page,
   every task card has a **Regrade** button that re-runs just that exercise
   (one Claude call instead of one per exercise — faster and cheaper than a
-  full run). The result is merged into the student's existing report; all
-  other task results, and the Overall summary, are left untouched.
+  full run). The result is merged into the student's existing report and the
+  AI Overall summary is rewritten to match; all other task results are left
+  untouched.
 - **Not-graded visibility**: exercises a student has never been graded on
   (registered-only students, or exercises added after their last run) show
   as **not graded** cards on the detail page — each with its own **Grade**
@@ -118,7 +120,8 @@ grading settings live on the **Settings** page behind the top-right user menu):
   AI** or was **Edited by** someone (with the date); every change is appended to
   an immutable **Edit history** (who changed what, when) in its own panel on the
   student's page. Regrading a task later replaces its edited evaluation — and
-  clears any override — with fresh AI text.
+  clears any override — with fresh AI text; an edited Overall summary is
+  likewise replaced on any grading run, since every run rewrites it.
 - **Sync** (admin only): tick one or more exercise rows and click the **Sync**
   icon in the toolbar to refresh their solution caches + expected outputs from
   SnapLogic into S3 ($0 — no AI involved). Each ticked exercise syncs as its

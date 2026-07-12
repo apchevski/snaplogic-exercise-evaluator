@@ -202,6 +202,8 @@ def test_single_task_grade_pulls_previous_report(aws, monkeypatch):
 
     assert _get_job("job-grade-single")["status"] == "succeeded"
     assert seen_kwargs["task_slug"] == "task_02_currency"
+    # A scoped run still refreshes the AI Overall (its only — and last — slug).
+    assert seen_kwargs["refresh_overall"] is True
     assert store.materialized_reports == [
         (
             "Jane Doe",
@@ -240,10 +242,10 @@ def test_multi_task_grade_runs_each_slug_and_merges_usage(aws, monkeypatch):
     monkeypatch.setattr(worker, "_make_store", lambda: store)
     import evaluator.runner as runner_mod
 
-    seen_slugs = []
+    seen_runs = []
 
     def fake_run(student, **kw):
-        seen_slugs.append(kw["task_slug"])
+        seen_runs.append((kw["task_slug"], kw["refresh_overall"]))
         return _fake_run_result(student)
 
     monkeypatch.setattr(runner_mod, "run_grade", fake_run)
@@ -257,7 +259,9 @@ def test_multi_task_grade_runs_each_slug_and_merges_usage(aws, monkeypatch):
 
     item = _get_job("job-grade-multi")
     assert item["status"] == "succeeded"
-    assert seen_slugs == ["task_01_orders", "task_02_currency"]
+    # Only the last slug's run refreshes the AI Overall — one call per job,
+    # made over the fully merged report.
+    assert seen_runs == [("task_01_orders", False), ("task_02_currency", True)]
     # One previous-report pull for the whole job, not one per task.
     assert len(store.materialized_reports) == 1
     # Usage and judged_count are summed across the per-task runs.
