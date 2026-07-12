@@ -19,7 +19,8 @@ rather than a rubric.
 Mentors and admins log into a VPN-restricted web dashboard (styled after the
 classic SnapLogic Dashboard: navy panel headers, sortable/paginated data
 tables, and — like the old console's Designer / Manager / Dashboard header —
-**Students / Exercises / Manager** tabs centered in the top bar):
+**Students / Exercises** tabs centered in the top bar; account and grading
+settings live on the **Settings** page behind the top-right user menu):
 
 - **Row selection**: both tables use SnapLogic-style square checkboxes in the
   leftmost column. Tick any number of rows; the checkbox in the column header
@@ -65,16 +66,20 @@ tables, and — like the old console's Designer / Manager / Dashboard header —
   them a temporary password, they change it on first sign-in, and from then
   on they can watch their grades (see the `student` role below).
 - **Student sign-in** (read-only): a user in the `student` Cognito group
-  lands directly on their **own** grades page (`/students/<their-slug>`) with
-  a three-tab nav — **My Grades**, **Exercises**, and **Manager** (their own
-  account settings) — and sees nothing else: no
-  roster of other students. My Grades shows their verdicts, points, overall
-  summary, and per-exercise feedback; Exercises is a read-only catalog of the
-  active (non-archived) exercises with descriptions and downloadable input
-  files, without the staff sync-status columns or toolbar. Every action is
-  gone (and 403s server-side): no grading, no registering, no report edits,
-  no instructor notes, no exercise editing. The backend enforces the scope
-  too — `GET /v1/students` returns only the student's own card, and any other
+  lands on the **Students** table — the same roster staff see, with every
+  student's points and Pass/Fail/Missing counts, but with no selection
+  checkboxes or toolbar actions — plus a **My Grades** tab that opens their
+  **own** detail page (`/students/<their-slug>`) and an **Exercises** tab.
+  Only their own name in the table is a link: other students' detailed
+  evaluations stay private (plain text in the table, 403 server-side). My
+  Grades shows their verdicts, points, overall summary, and per-exercise
+  feedback; Exercises is a read-only catalog of the active (non-archived)
+  exercises with descriptions and downloadable input files, without the
+  staff sync-status columns or toolbar. Every action is gone (and 403s
+  server-side): no grading, no registering, no report edits, no instructor
+  notes, no exercise editing. The backend enforces the scope too —
+  `GET /v1/students` slims every row that isn't the caller's own down to the
+  table's columns (no email, no summary, no report fields), and any other
   student's detail/reports 403s. The link between the login and the card is
   the email stored at registration.
 - **Regrade one exercise** (mentor or admin): on a student's detail page,
@@ -199,11 +204,12 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
 | CI/CD (GitHub OIDC, no stored keys) | `.github/workflows/` |
 
 **Roles** (Cognito groups; the API enforces, the UI only hides buttons):
-admins sync + grade + view; mentors grade + view; students view **their own
-grades** and a **read-only exercise catalog** (no roster, no other students,
-no grading, no edits, no instructor notes) — a signed-in student lands
-straight on their own detail page and the backend 403s any other student's
-card. Admin/mentor users are invite-only
+admins sync + grade + view; mentors grade + view; students view the
+**roster table**, **their own detailed grades**, and a **read-only exercise
+catalog** (no actions, no edits, no instructor notes) — a signed-in student
+lands on the Students table, can open only their own detail page, and the
+backend 403s any other student's card (and strips email/summary/report
+fields from other rows in the list). Admin/mentor users are invite-only
 (admin-created in the Cognito console — no self-signup); student logins are
 created by the app itself when a registration includes an email — never add
 someone to the `student` group by hand alongside an admin/mentor invite.
@@ -211,9 +217,11 @@ someone to the `student` group by hand alongside an admin/mentor invite.
 "OPTIONAL"` with software-token MFA on. With OPTIONAL MFA the hosted UI does
 **not** prompt anyone to enroll, and you can't pre-register someone's
 authenticator from the console — so users enroll themselves from the in-app
-**Manager tab → Two-factor authentication** (scan the QR, enter a
-code, done; next sign-in then asks for a code). That Manager page (also
-reachable via the account menu's **Settings** item) also lets
+**Settings page (top-right user menu → Settings) → Two-factor
+authentication** (scan the QR, enter a code, done; next sign-in then asks
+for a code). **Turn off** asks for confirmation first — disabling removes
+the enrolled authenticator immediately, and re-enabling means starting over
+with a new QR code. The Settings page also lets
 users change their password and set a display name — the **Account** and
 **Grading** panels sit side by side for staff, and each panel has a single
 **Save** button in its bottom-right corner that applies every changed field
@@ -223,7 +231,7 @@ page relies on the
 deploying that scope, existing sessions must sign out and back in once before
 the account sections work.
 
-**Per-user grading credentials** (Manager tab, admin/mentor): every
+**Per-user grading credentials** (Settings page, admin/mentor): every
 admin and mentor can store their own credentials — jobs *they* start run
 under them, and anything left unset falls back to the shared deployment
 secret. Three independent settings, stored on a `USER#<email>/SETTINGS`

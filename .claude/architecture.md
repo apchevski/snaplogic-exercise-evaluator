@@ -136,17 +136,22 @@ plan → judge → report loop the skill used to drive interactively.
   config/job-polling/`GET /v1/exercises/{slug}`, the last because it carries
   notes.md, i.e. instructor hints). IP allowlist also runs at the edge via a
   CloudFront Function.
-  **Student self-scoping (July 2026)**: a `student` sees only their OWN grades,
-  not the roster. `GET /v1/students` returns only the card whose stored email
-  matches the caller's email claim (`_own_student_slug` / `_is_student_only` in
-  `api.py`); `GET /v1/students/{slug}` and `.../reports` 403 on any slug that
-  isn't the caller's own card. Admins/mentors are never scoped. The email is
-  the link between the Cognito login and the card — set when the login is
-  created (see below), stored lowercased on the card, compared case-folded
-  here. The SPA confines student-only users to `/students/<own-slug>` (a
-  My Grades / Exercises / Manager top-bar nav only; every other route
-  redirects there), resolving the slug from the scoped
-  `GET /v1/students`; the backend is the real boundary, the UI is cosmetic.
+  **Student self-scoping (July 2026)**: a `student` sees the whole roster but
+  only their OWN detailed grades. `GET /v1/students` returns every row, with
+  rows that aren't the caller's own slimmed to the dashboard table's columns
+  (`STUDENT_ROSTER_KEYS` in `api.py` — no email, summary, report keys, or
+  provenance; originally the list returned only the own card, opened up to
+  the full slimmed roster July 2026); `GET /v1/students/{slug}` and
+  `.../reports` 403 on any slug that isn't the caller's own card
+  (`_own_student_slug` / `_is_student_only`). Admins/mentors are never
+  scoped. The email is the link between the Cognito login and the card — set
+  when the login is created (see below), stored lowercased on the card,
+  compared case-folded here. The SPA gives student-only users a
+  Students / My Grades / Exercises top-bar nav: the roster renders with no
+  action toolbar and only their own name linked, `/students/<any-other-slug>`
+  redirects to their own page, and the own slug is resolved by matching the
+  login email against the one roster row that still carries an email; the
+  backend is the real boundary, the UI is cosmetic.
   **Student logins (July 2026)** are app-created, never console-created: an
   optional email on POST /v1/students makes the API `AdminCreateUser` the
   student into the `student` group — Cognito emails the temporary password
@@ -161,9 +166,10 @@ plan → judge → report loop the skill used to drive interactively.
   prompts anyone to enroll a TOTP authenticator (that auto-prompt only fires when
   MFA is `"ON"`), and no admin API can register a TOTP device for another user
   (associate/verify needs the shared secret + a live code) — so the SPA drives
-  enrollment itself from the in-app **Manager** page (`pages/Manager`,
-  `src/cognito.ts`; originally a Settings modal, made a top-bar tab July 2026
-  to mirror the classic console's Designer/Manager/Dashboard header):
+  enrollment itself from the in-app **Settings** page (`pages/Settings`,
+  `src/cognito.ts`; originally a Settings modal, then a top-bar **Manager**
+  tab, and since July 2026 a `/settings` page reached only via the user
+  menu's Settings item — `/manager` redirects there for old bookmarks):
   associate → QR/secret → verify → set-preference, all via the
   Cognito user-pools JSON API authorized by the signed-in user's **access token**
   (plain fetch, no AWS SDK/SigV4). The same page changes the password and sets a

@@ -9,7 +9,7 @@ Defense layers (outer → inner):
        | Action                            | admin | mentor | student |
        |-----------------------------------|-------|--------|---------|
        | GET  /v1/exercises / resources    |  ✅   |  ✅    |  ✅ |
-       | GET  /v1/students (list)          |  ✅   |  ✅    |  ✅ own card only |
+       | GET  /v1/students (list)          |  ✅   |  ✅    |  ✅ all rows; others slimmed |
        | GET  /v1/students/{slug} (+ /reports) | ✅ | ✅    |  ✅ own card only (else 403) |
        | GET  /v1/config, /v1/exercises/{slug} (authored content incl. notes.md), job polling | ✅ | ✅ | ❌ 403 |
        | GET/PUT /v1/settings (own credentials + judge model) | ✅ | ✅ (no SnapLogic creds) | ❌ 403 |
@@ -25,14 +25,16 @@ Defense layers (outer → inner):
 
    `student` is the read-only role: members are created by POST /v1/students
    when a registration carries an email (Cognito emails the temporary
-   password; the hosted UI forces a change on first sign-in). A student is
-   scoped to their OWN grades: the list endpoint returns only the card their
-   login owns, and the per-student reads 403 on anyone else's slug — they
-   never see the roster or another student's grades. They can also browse the
-   exercise list (descriptions + input files) but start or change nothing,
-   and never see instructor notes. The link between a Cognito login and its
-   card is the email: it is stored (lowercased) on the STUDENT card created
-   alongside the login, and matched against the caller's email claim here.
+   password; the hosted UI forces a change on first sign-in). A student sees
+   the whole roster — every row of the dashboard table — but rows that are
+   not their own are slimmed to the table's columns (STUDENT_ROSTER_KEYS: no
+   email, no summary, no report or provenance fields), and the per-student
+   detail reads 403 on anyone else's slug — another student's detailed
+   evaluation stays private. They can also browse the exercise list
+   (descriptions + input files) but start or change nothing, and never see
+   instructor notes. The link between a Cognito login and its card is the
+   email: it is stored (lowercased) on the STUDENT card created alongside
+   the login, and matched against the caller's email claim here.
 
 POSTs never do the work inline — they write a JOB item + an SQS message and
 return 202; the worker Lambda owns execution. A conditional-put LOCK item
@@ -565,6 +567,22 @@ def put_settings() -> dict[str, Any]:
     return {"settings": _masked_settings(email, row)}
 
 
+# The roster columns the dashboard table shows — the only fields another
+# student's row carries when a student-only caller lists the roster.
+# Everything else (email, overall summary, report keys, registration and
+# edit provenance) stays between that student and the staff.
+STUDENT_ROSTER_KEYS = {
+    "slug",
+    "display_name",
+    "space",
+    "project",
+    "points_earned",
+    "points_possible",
+    "counts",
+    "graded_at",
+}
+
+
 @app.get("/v1/students")
 def list_students() -> dict[str, Any]:
     claims = _require_role(ROLE_ADMIN, ROLE_MENTOR, ROLE_STUDENT)
@@ -576,11 +594,17 @@ def list_students() -> dict[str, Any]:
         key=lambda s: str(s.get("display_name", "")).lower(),
     )
     if _is_student_only(claims):
-        # A student never sees the roster — only the card their login owns
-        # (matched by email). This drives the SPA's redirect to /students/<own>.
+        # A student sees the whole roster (scores are cohort-visible), but
+        # every row that isn't their own is slimmed to the table's columns.
+        # Their own card (matched by email) stays complete — its email is how
+        # the SPA finds "my" row, and the per-slug detail endpoints still 403
+        # on anyone else's slug.
         email = _email(claims).strip().lower()
         students = [
-            s for s in students if str(s.get("email") or "").strip().lower() == email
+            s
+            if str(s.get("email") or "").strip().lower() == email
+            else {k: v for k, v in s.items() if k in STUDENT_ROSTER_KEYS}
+            for s in students
         ]
     return {"students": students}
 

@@ -22,7 +22,7 @@ import {
 import { IconLogin, IconLogout, IconSettings } from "./components/icons";
 import Dashboard from "./pages/Dashboard";
 import Exercises from "./pages/Exercises";
-import Manager from "./pages/Manager";
+import Settings from "./pages/Settings";
 import StudentDetail from "./pages/StudentDetail";
 
 function BrandMark() {
@@ -98,7 +98,7 @@ function UserMenu() {
               role="menuitem"
               onClick={() => {
                 setOpen(false);
-                navigate("/manager");
+                navigate("/settings");
               }}
             >
               <IconSettings />
@@ -136,8 +136,7 @@ function Login({ onLogin, error }: { onLogin: () => void; error?: string }) {
 }
 
 /** White top bar with the brand on the left, the main tabs centered (like
- * the classic SnapLogic console's Designer / Manager / Dashboard), and the
- * user menu on the right. */
+ * the classic SnapLogic console's header), and the user menu on the right. */
 function TopBar({ nav }: { nav: ReactNode }) {
   return (
     <header className="topbar">
@@ -148,8 +147,8 @@ function TopBar({ nav }: { nav: ReactNode }) {
   );
 }
 
-/** Full app for admins and mentors: Students / Exercises / Manager tabs and
- * every page. */
+/** Full app for admins and mentors: Students / Exercises tabs, every page,
+ * and the Settings page (Account + Grading) behind the user menu. */
 function StaffShell() {
   const { pathname } = useLocation();
   const studentsActive = pathname === "/" || pathname.startsWith("/students");
@@ -167,12 +166,6 @@ function StaffShell() {
             >
               Exercises
             </NavLink>
-            <NavLink
-              to="/manager"
-              className={({ isActive }) => (isActive ? "active" : "")}
-            >
-              Manager
-            </NavLink>
           </>
         }
       />
@@ -180,7 +173,10 @@ function StaffShell() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/students/:slug" element={<StudentDetail />} />
         <Route path="/exercises" element={<Exercises />} />
-        <Route path="/manager" element={<Manager />} />
+        <Route path="/settings" element={<Settings />} />
+        {/* The Settings page lived at /manager before the Manager tab was
+            retired; keep old bookmarks working. */}
+        <Route path="/manager" element={<Navigate to="/settings" replace />} />
         {/* /login only exists while signed out; a signed-in user who lands on
             it (bookmark, back button) goes home. */}
         <Route path="/login" element={<Navigate to="/" replace />} />
@@ -201,13 +197,17 @@ function OwnStudentGuard({ ownSlug }: { ownSlug: string }) {
   return <StudentDetail />;
 }
 
-/** Read-only shell for the `student` role: a My Grades page (their own card
- * only — no roster), a read-only Exercises catalog, and the Manager page for
- * their own account settings. The student's slug isn't in the token, so we
- * resolve it from GET /v1/students, which for a student returns only the
- * card their login owns. */
+/** Read-only shell for the `student` role: the full Students table (every
+ * row, no actions), a My Grades page for their OWN detailed evaluation, a
+ * read-only Exercises catalog, and the Settings page for their own account.
+ * The student's slug isn't in the token, so we resolve it from
+ * GET /v1/students: the roster is visible to everyone, but only the caller's
+ * own card still carries an email (the backend strips it from other rows) —
+ * that match links this login to its card. */
 function StudentShell() {
+  const auth = useAuth();
   const token = useToken();
+  const myEmail = (auth.user?.profile?.email ?? "").trim().toLowerCase();
   // undefined = still loading; null = no card is linked to this login.
   const [slug, setSlug] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -217,7 +217,11 @@ function StudentShell() {
     api
       .listStudents(token)
       .then(({ students }) => {
-        if (!cancelled) setSlug(students[0]?.slug ?? null);
+        if (cancelled) return;
+        const own = students.find(
+          (s) => (s.email ?? "").trim().toLowerCase() === myEmail,
+        );
+        setSlug(own?.slug ?? null);
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -225,29 +229,30 @@ function StudentShell() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, myEmail]);
 
-  // A login with no linked card can still browse the exercises; My Grades
-  // shows the "nothing linked yet" notice at / instead of a detail page.
-  const gradesPath = slug ? `/students/${encodeURIComponent(slug)}` : "/";
+  // A login with no linked card can still browse the roster and exercises;
+  // it just has no My Grades tab until a mentor registers their card.
   const topbar = (
     <TopBar
       nav={
         <>
-          <NavLink to={gradesPath} className={({ isActive }) => (isActive ? "active" : "")} end>
-            My Grades
+          <NavLink to="/" className={({ isActive }) => (isActive ? "active" : "")} end>
+            Students
           </NavLink>
+          {slug && (
+            <NavLink
+              to={`/students/${encodeURIComponent(slug)}`}
+              className={({ isActive }) => (isActive ? "active" : "")}
+            >
+              My Grades
+            </NavLink>
+          )}
           <NavLink
             to="/exercises"
             className={({ isActive }) => (isActive ? "active" : "")}
           >
             Exercises
-          </NavLink>
-          <NavLink
-            to="/manager"
-            className={({ isActive }) => (isActive ? "active" : "")}
-          >
-            Manager
           </NavLink>
         </>
       }
@@ -272,35 +277,23 @@ function StudentShell() {
       </>
     );
   }
-  const noCard = (
-    <main className="page">
-      <div className="empty-cell">
-        <h3>No grades linked to your account yet</h3>
-        Your grades will appear here once your mentor has graded your work.
-        If you think this is a mistake, please contact your mentor.
-      </div>
-    </main>
-  );
   return (
     <>
       {topbar}
       <Routes>
+        <Route path="/" element={<Dashboard />} />
         <Route path="/exercises" element={<Exercises />} />
-        <Route path="/manager" element={<Manager />} />
-        {slug ? (
-          <>
-            <Route
-              path="/students/:slug"
-              element={<OwnStudentGuard ownSlug={slug} />}
-            />
-            <Route path="*" element={<Navigate to={gradesPath} replace />} />
-          </>
-        ) : (
-          <>
-            <Route path="/" element={noCard} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </>
+        <Route path="/settings" element={<Settings />} />
+        {/* The Settings page lived at /manager before the Manager tab was
+            retired; keep old bookmarks working. */}
+        <Route path="/manager" element={<Navigate to="/settings" replace />} />
+        {slug && (
+          <Route
+            path="/students/:slug"
+            element={<OwnStudentGuard ownSlug={slug} />}
+          />
         )}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );

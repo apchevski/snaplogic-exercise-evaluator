@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "react-oidc-context";
 import { Link } from "react-router-dom";
 
 import { api, pollJob } from "../api";
@@ -59,10 +60,17 @@ function Count({ n, kind }: { n: number; kind: string }) {
 }
 
 export default function Dashboard() {
+  const auth = useAuth();
   const token = useToken();
   const isAdmin = useIsAdmin();
   // Students see the same table, minus every action (backend-enforced too).
   const canGrade = useCanGrade();
+  // Students may only open their OWN detailed evaluation; every other name
+  // renders as plain text. Their own row is the one whose email matches the
+  // login (the backend strips the email from everyone else's rows).
+  const myEmail = (auth.user?.profile?.email ?? "").trim().toLowerCase();
+  const canOpen = (s: StudentMeta) =>
+    canGrade || (s.email ?? "").trim().toLowerCase() === myEmail;
   const [students, setStudents] = useState<StudentMeta[]>([]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
@@ -301,7 +309,11 @@ export default function Dashboard() {
 
       <Panel
         title="Student Grades of All Projects"
-        hint="Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Remove works on many students at once; Grade is enabled only while exactly one student is selected."
+        hint={
+          canGrade
+            ? "Every graded student project. Click a column header to sort, or a row's + to see the overall summary. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Remove works on many students at once; Grade is enabled only while exactly one student is selected."
+            : "Every graded student project. Click a column header to sort. Click your own name to open your detailed evaluation — other students' detail pages stay private."
+        }
         toolbar={
           <>
             <SearchBox
@@ -455,9 +467,13 @@ export default function Dashboard() {
                         )}
                       </td>
                       <td className={sc("student")}>
-                        <Link to={`/students/${encodeURIComponent(s.slug)}`}>
-                          {s.display_name}
-                        </Link>
+                        {canOpen(s) ? (
+                          <Link to={`/students/${encodeURIComponent(s.slug)}`}>
+                            {s.display_name}
+                          </Link>
+                        ) : (
+                          s.display_name
+                        )}
                       </td>
                       <td className={`${sc("space")} cell-mono`}>{s.space ?? "—"}</td>
                       <td

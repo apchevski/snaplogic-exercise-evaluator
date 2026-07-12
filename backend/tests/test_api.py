@@ -364,33 +364,58 @@ def _seed_student_card(slug, name, *, email=None, **extra):
     dynamo_table().put_item(Item=item)
 
 
-def test_student_list_returns_only_own_card(aws):
+def test_student_list_returns_full_roster_with_others_slimmed(aws):
+    # Students see every row of the table, but rows that aren't their own
+    # carry only the table's columns — no email, summary, or report fields.
     _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
-    _seed_student_card("foggy-nelson", "Foggy Nelson", email="foggy@example.com")
+    _seed_student_card(
+        "foggy-nelson",
+        "Foggy Nelson",
+        email="foggy@example.com",
+        overall_summary="Solid work overall.",
+        report_json_key="students/foggy-nelson/report.json",
+        points_earned=7,
+        counts={"pass": 3, "fail": 1, "missing": 0},
+    )
     resp = _call(
         api_event("GET", "/v1/students", groups=("student",), email="matt@example.com")
     )
     assert resp["statusCode"] == 200
-    assert [s["slug"] for s in _body(resp)["students"]] == ["matt-murdock"]
+    students = {s["slug"]: s for s in _body(resp)["students"]}
+    assert set(students) == {"matt-murdock", "foggy-nelson"}
+    # Own card stays complete — the SPA matches its email to find "my" row.
+    assert students["matt-murdock"]["email"] == "matt@example.com"
+    # The other row keeps the table columns and nothing sensitive.
+    foggy = students["foggy-nelson"]
+    assert foggy["display_name"] == "Foggy Nelson"
+    assert foggy["points_earned"] == 7
+    assert foggy["counts"]["pass"] == 3
+    for hidden in ("email", "overall_summary", "report_json_key"):
+        assert hidden not in foggy
 
 
 def test_student_email_match_is_case_insensitive(aws):
     # The card stores the email lowercased; a token whose email claim differs
-    # only in case must still resolve to the same card.
+    # only in case must still resolve to the same card (kept un-slimmed).
     _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
+    _seed_student_card("foggy-nelson", "Foggy Nelson", email="foggy@example.com")
     resp = _call(
         api_event("GET", "/v1/students", groups=("student",), email="Matt@Example.com")
     )
-    assert [s["slug"] for s in _body(resp)["students"]] == ["matt-murdock"]
+    students = {s["slug"]: s for s in _body(resp)["students"]}
+    assert students["matt-murdock"].get("email") == "matt@example.com"
+    assert "email" not in students["foggy-nelson"]
 
 
-def test_student_without_matching_card_sees_empty_list(aws):
+def test_student_without_matching_card_sees_all_rows_slimmed(aws):
     _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
     resp = _call(
         api_event("GET", "/v1/students", groups=("student",), email="nobody@example.com")
     )
     assert resp["statusCode"] == 200
-    assert _body(resp)["students"] == []
+    students = _body(resp)["students"]
+    assert [s["slug"] for s in students] == ["matt-murdock"]
+    assert "email" not in students[0]
 
 
 def test_student_can_view_own_detail_but_not_others(aws):
