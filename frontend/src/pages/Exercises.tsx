@@ -14,6 +14,7 @@ import {
   IconSync,
   IconTrash,
   IconUnarchive,
+  IconXCircle,
 } from "../components/icons";
 import { StatusPill } from "../components/StatusPill";
 import {
@@ -40,6 +41,18 @@ const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   status: "asc",
   synced: "desc",
 };
+
+// sync_status values that mean the last sync failed outright — shown as a red
+// circled ✕ (hover for the reason). The amber "needs attention" states keep
+// their text pills.
+const SYNC_FAILED = new Set([
+  "pipeline_not_found",
+  "config_error",
+  "ambiguous_writer",
+  "missing_description",
+  "pipeline_renamed",
+  "writer_changed",
+]);
 
 /** "4017654" → "3.8 MB" — chip labels stay short. */
 function formatSize(bytes: number): string {
@@ -627,6 +640,20 @@ export default function Exercises() {
                               </span>
                             ) : ex.sync_status === "never_synced" ? (
                               <span className="cell-muted">—</span>
+                            ) : SYNC_FAILED.has(ex.sync_status) ? (
+                              // Failed = a red circled ✕, the mirror of the
+                              // green check; the tooltip carries the error.
+                              <span
+                                className="sync-fail"
+                                title={
+                                  ex.reason
+                                    ? `${ex.sync_status.replace(/_/g, " ")} — ${ex.reason}`
+                                    : ex.sync_status.replace(/_/g, " ")
+                                }
+                                aria-label={`Sync failed: ${ex.reason ?? ex.sync_status.replace(/_/g, " ")}`}
+                              >
+                                <IconXCircle size={16} />
+                              </span>
                             ) : (
                               <span className={`sync-status ${ex.sync_status}`}>
                                 {ex.sync_status.replace(/_/g, " ")}
