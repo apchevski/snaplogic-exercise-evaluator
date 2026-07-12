@@ -177,6 +177,7 @@ resource "aws_lambda_function" "api" {
       SECRET_ARN    = var.secret_arn
       ALLOWED_CIDRS = join(",", var.allowed_cidrs)
       USER_POOL_ID  = var.user_pool_id
+      JUDGE_MODEL   = var.judge_model
     }
   }
 

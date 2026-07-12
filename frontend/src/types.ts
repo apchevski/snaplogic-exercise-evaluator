@@ -145,6 +145,8 @@ export interface AppConfig {
 export interface JudgeModelOption {
   id: string;
   label: string;
+  // Short cost/capability blurb shown next to the label in the picker.
+  description: string;
 }
 
 /** The caller's own credentials + judge model from GET/PUT /v1/settings.

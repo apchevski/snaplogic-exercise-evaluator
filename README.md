@@ -1,4 +1,4 @@
-# SnapLogic Exercise Evaluator
+﻿# SnapLogic Exercise Evaluator
 
 Automated grading for SnapLogic training exercises. AI-driven judgment — designed
 for exercises that admit many correct solutions, so judgment comes from a model
@@ -6,7 +6,7 @@ rather than a rubric.
 
 > **⚠️ Architecture transition (June 2026):** the project has moved to a fully
 > cloud-hosted grading flow — mentors click a **Grade** button on a web dashboard;
-> grading (deterministic hard gates + Claude API judgment, Sonnet 4.6) runs in
+> grading (deterministic hard gates + Claude API judgment, Sonnet 5) runs in
 > AWS, with nothing installed locally. The platform code (backend Lambdas,
 > Terraform, React SPA, CI/CD) is **implemented**; see
 > [Cloud grading platform](#cloud-grading-platform) for the deployment steps
@@ -40,7 +40,7 @@ grading settings live on the **Settings** page behind the top-right user menu):
   (e.g. *Task 01 – Generate CSV Report*), all preselected — keep them all for a
   full run, or check just the exercises you want. A job queues, a worker
   Lambda runs the deterministic hard gates against SnapLogic, sends each
-  surviving exercise to Claude (Sonnet 4.6), renders the report, and the row
+  surviving exercise to Claude (Sonnet 5), renders the report, and the row
   refreshes with points and per-task detail. A full run also refreshes the AI
   Overall summary; a subset run only replaces the selected exercises' results.
   - **Full runs use the Batch API (~50% cheaper).** Grading *all* exercises
@@ -193,7 +193,7 @@ SQS ──► Worker Lambda (container image, 15-min cap, concurrency 1, DLQ no-
           ├─ SnapLogic REST (GET-only; the requester's own stored credentials
           │         when set, else the shared Secrets Manager creds)
           ├─ grade: hard gates → Claude (requester's model choice, default
-          │         Sonnet 4.6; requester's own API key when stored, else the
+          │         Sonnet 5; requester's own API key when stored, else the
           │         shared key; structured outputs, prompt-cached rules)
           │         → report.md/.json → S3 + DynamoDB
           │         (full run: Message Batches API @ 50% off, async
@@ -252,9 +252,11 @@ DynamoDB row and applied per job via the `requested_by` email:
 - **Anthropic API key** (admin or mentor): gradings the user starts are
   billed to their own key instead of the shared `ANTHROPIC_API_KEY`.
 - **AI judge model** (admin or mentor): the Claude model used for gradings
-  the user starts, picked from a server-side allowlist (Sonnet 4.6 — the
-  default — Sonnet 5, Opus 4.8, Haiku 4.5). Priced per model in the job's
-  cost estimate.
+  the user starts, picked from a server-side allowlist — Sonnet 5
+  (labelled **Recommended**; the default and preselected), Sonnet 4.6,
+  Opus 4.8, Haiku 4.5. Each option shows a short cost/capability blurb
+  (e.g. "Most thorough evaluations · ~1.7× the cost of Sonnet"). Priced
+  per model in the job's cost estimate.
 
 Secrets are write-only: `GET /v1/settings` only reports that one is stored
 (plus the API key's last four characters), never the value. Set the pool to `"ON"` to require a second factor for everyone
@@ -474,7 +476,7 @@ silently route to the wrong task.
 │   ├── evaluate.py             # per-task evaluator (no LLM call)
 │   ├── sync.py                 # /prep skill orchestrator + CLI (also runs inside cloud sync jobs)
 │   ├── grade.py                # plan/report orchestrator + CLI
-│   ├── ai_judge.py             # headless Claude judge (Sonnet 4.6, structured outputs)
+│   ├── ai_judge.py             # headless Claude judge (Sonnet 5, structured outputs)
 │   ├── runner.py               # in-process grade run: gates → judge → report → Overall
 │   └── store.py                # LocalStore / S3Store artifact + report I/O
 ├── backend/

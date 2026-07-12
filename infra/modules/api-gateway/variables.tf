@@ -35,6 +35,12 @@ variable "secret_arn" {
   type        = string
 }
 
+variable "judge_model" {
+  description = "Default AI judge model — must match the sqs-worker module's value; GET /v1/settings reports it as default_model so the UI preselects what the worker actually falls back to."
+  type        = string
+  default     = "claude-sonnet-5"
+}
+
 variable "user_pool_id" {
   description = "Cognito user pool the API creates student logins in (POST /v1/students with an email)."
   type        = string

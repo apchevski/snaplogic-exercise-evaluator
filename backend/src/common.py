@@ -135,6 +135,20 @@ def apply_user_overrides(email: str | None) -> None:
         os.environ["JUDGE_MODEL"] = model
 
 
+def shared_judge_model() -> str:
+    """The deployment's default judge model — the JUDGE_MODEL env value the
+    Lambda was configured with (Terraform), ignoring any per-user override a
+    warm container may still carry. The code constant is only the last-resort
+    fallback; no model is otherwise hardcoded."""
+    from evaluator.ai_judge import DEFAULT_JUDGE_MODEL
+
+    if _base_env is not None:
+        base = _base_env.get("JUDGE_MODEL", "")
+    else:
+        base = os.environ.get("JUDGE_MODEL", "")
+    return base.strip() or DEFAULT_JUDGE_MODEL
+
+
 def table_name() -> str:
     return os.environ["TABLE_NAME"]
 

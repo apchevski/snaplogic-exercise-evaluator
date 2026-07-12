@@ -29,7 +29,7 @@ variable "secret_arn" {
 
 variable "judge_model" {
   type    = string
-  default = "claude-sonnet-4-6" # locked decision — do not silently upgrade
+  default = "claude-sonnet-5" # locked decision (2026-07-12, was sonnet-4-6) — do not silently upgrade
 }
 
 variable "log_retention_days" {

@@ -116,7 +116,7 @@ def test_request_shape_schema_model_and_cache_control():
     judge = AIJudge(client=stub)
     judge.judge_exercise(_bundle())
     call = stub.calls[0]
-    assert call["model"] == DEFAULT_JUDGE_MODEL == "claude-sonnet-4-6"
+    assert call["model"] == DEFAULT_JUDGE_MODEL == "claude-sonnet-5"
     expected_schema = _load_schema("evaluation.schema.json")
     assert call["output_config"]["format"] == {
         "type": "json_schema",
