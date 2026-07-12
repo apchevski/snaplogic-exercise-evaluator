@@ -472,7 +472,7 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
             Cancel
           </button>
           <button type="submit" className="btn primary" disabled={!!busy || !canSubmit}>
-            {isEdit ? "Save Changes" : "Save Exercise"}
+            Save
           </button>
         </footer>
       </form>

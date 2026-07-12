@@ -142,7 +142,17 @@ export default function Exercises() {
           () => api.getSync(token, id),
           (j) => setJobs((prev) => ({ ...prev, [key]: j })),
         );
-        if (job.status === "succeeded") void refresh();
+        if (job.status === "succeeded") {
+          // Refresh first so the row's own green check is in place, then drop
+          // the finished job — its pill would just duplicate that check.
+          // Failed jobs stay: their red ✕ (hover for the error) is the result.
+          await refresh();
+          setJobs((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -601,7 +611,14 @@ export default function Exercises() {
                       {!isStudent && (
                         <>
                           <td className={sc("status")}>
-                            {ex.sync_status === "ready" ? (
+                            {jobs[ex.slug] ? (
+                              // A sync in flight (or failed) replaces the stored
+                              // status: a spinner while it runs, a red circled ✕
+                              // with the error on hover if it failed. Successful
+                              // jobs are dropped once the row refreshes, so the
+                              // green check below takes over seamlessly.
+                              <StatusPill job={jobs[ex.slug]} kind="sync" />
+                            ) : ex.sync_status === "ready" ? (
                               // Synced = a green circled check; anything not yet
                               // synced stays a muted dash, and the in-between /
                               // failure states keep their diagnostic pills.
@@ -618,8 +635,7 @@ export default function Exercises() {
                             {ex.archived && <span className="sync-status archived">archived</span>}{" "}
                             {ex.missing_from_image && (
                               <span className="sync-status config_error">missing from image</span>
-                            )}{" "}
-                            {jobs[ex.slug] && <StatusPill job={jobs[ex.slug]} kind="sync" />}
+                            )}
                           </td>
                           <td className={`${sc("synced")} cell-muted`}>
                             {ex.last_synced_at ?? "—"}

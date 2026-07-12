@@ -118,6 +118,14 @@ export const IconCheckCircle = (p: IconProps) => (
   </Svg>
 );
 
+export const IconXCircle = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="15" y1="9" x2="9" y2="15" />
+    <line x1="9" y1="9" x2="15" y2="15" />
+  </Svg>
+);
+
 export const IconCopy = (p: IconProps) => (
   <Svg {...p}>
     <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
