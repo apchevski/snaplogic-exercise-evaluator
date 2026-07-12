@@ -26,15 +26,17 @@ tables, and — like the old console's Designer / Manager / Dashboard header —
   selects/clears **every row on the current page** (so with *Entries per page*
   at 100 it selects all 100), and shows a dash when only some are ticked.
 - **Icon-only toolbars**: like the classic SnapLogic Designer toolbar, the
-  Students and Exercises toolbars show flat icons instead of labeled buttons.
+  Students and Exercises toolbars show icons instead of labeled buttons, each
+  on a tinted square so it stands out against the white toolbar.
   Hover an icon for its name and, for bulk-capable actions, the selection
   count (e.g. *Remove 3 selected students permanently*); the confirmation
   dialog then lists every target by name.
 - **Grade** (mentor or admin): tick a student's row (the checkbox in
   the leftmost column) and click the **Grade** icon in the toolbar. Grading runs for
-  **one student at a time** — clicking Grade with several rows ticked shows a
-  dialog saying so instead of starting anything. A scope
-  picker opens with every active exercise preselected — keep them all for a
+  **one student at a time** — the Grade icon is enabled only while exactly
+  one row is ticked. A scope
+  picker opens listing every active exercise by its human-readable name
+  (e.g. *Task 01 – Generate CSV Report*), all preselected — keep them all for a
   full run, or check just the exercises you want. A job queues, a worker
   Lambda runs the deterministic hard gates against SnapLogic, sends each
   surviving exercise to Claude (Sonnet 4.6), renders the report, and the row
@@ -124,11 +126,16 @@ tables, and — like the old console's Designer / Manager / Dashboard header —
   alternative. Exercises that still ship in the container image keep a
   minimal tombstone row so the image copy can't resurrect them; re-creating
   the same folder name later replaces the tombstone.
-- **Exercises** (mentor or admin): the exercise list shows sync status per
-  task; click a task name to expand its full description (rendered from the
-  exercise's `description.md`). Exercises that ship input data (zips, CSVs
-  under `exercises/<slug>/resources/`) show a **Files** column — click a
-  file to download it (served via a short-lived presigned S3 URL).
+- **Exercises** (mentor or admin): the exercise list's **Sync Status** column
+  shows a green circled check when an exercise is synced and ready, a muted
+  dash when it has never been synced, and a diagnostic pill for the
+  in-between/failure states; click a task name to expand its full description
+  (rendered from the exercise's `description.md`). A **copy** icon at the
+  right edge of each Exercise cell copies the task name to the clipboard —
+  handy for naming the pipeline in SnapLogic exactly. Exercises that ship
+  input data (zips, CSVs under `exercises/<slug>/resources/`) show a
+  **Files** column — click a file to download it (served via a short-lived
+  presigned S3 URL).
 
 Exercise *authoring* stays in git (description.md, notes.md, rules); the
 `/prep` Claude Code skill still works locally as a dev fallback:
@@ -207,7 +214,11 @@ authenticator from the console — so users enroll themselves from the in-app
 **Manager tab → Two-factor authentication** (scan the QR, enter a
 code, done; next sign-in then asks for a code). That Manager page (also
 reachable via the account menu's **Settings** item) also lets
-users change their password and set a display name, and it relies on the
+users change their password and set a display name — the **Account** and
+**Grading** panels sit side by side for staff, and each panel has a single
+**Save** button in its bottom-right corner that applies every changed field
+at once (MFA enrollment applies immediately and keeps its own buttons). The
+page relies on the
 `aws.cognito.signin.user.admin` scope granted to the SPA app client — after
 deploying that scope, existing sessions must sign out and back in once before
 the account sections work.

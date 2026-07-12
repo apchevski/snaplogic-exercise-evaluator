@@ -6,6 +6,9 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { ExerciseModal } from "../components/ExerciseModal";
 import {
   IconArchive,
+  IconCheck,
+  IconCheckCircle,
+  IconCopy,
   IconEdit,
   IconPlus,
   IconSync,
@@ -37,10 +40,6 @@ const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   status: "asc",
   synced: "desc",
 };
-
-// The "ready" sync state reads as "synced" (green) in the Status column;
-// every other state keeps its diagnostic label (underscores → spaces).
-const SYNC_STATUS_LABEL: Record<string, string> = { ready: "synced" };
 
 /** "4017654" → "3.8 MB" — chip labels stay short. */
 function formatSize(bytes: number): string {
@@ -223,6 +222,22 @@ export default function Exercises() {
   );
 
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
+
+  // Which row's copy button just fired — its icon flips to a check briefly.
+  const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+
+  const copyTaskName = useCallback(async (ex: Exercise) => {
+    try {
+      await navigator.clipboard.writeText(ex.title ?? ex.slug);
+      setCopiedSlug(ex.slug);
+      window.setTimeout(
+        () => setCopiedSlug((cur) => (cur === ex.slug ? null : cur)),
+        1500,
+      );
+    } catch {
+      setError("Couldn't copy to the clipboard.");
+    }
+  }, []);
 
   const downloadResource = useCallback(
     async (slug: string, filename: string) => {
@@ -441,7 +456,6 @@ export default function Exercises() {
                 >
                   <IconTrash size={18} />
                 </button>
-                <span className="toolbar-sep" aria-hidden="true" />
                 <button
                   className="tool-btn"
                   onClick={() => setShowAdd(true)}
@@ -499,7 +513,7 @@ export default function Exercises() {
                 <th className="plain">Files</th>
                 {!isStudent && (
                   <>
-                    <SortableTh label="Status" sortKey="status" sort={sort} onSort={onSort} />
+                    <SortableTh label="Sync Status" sortKey="status" sort={sort} onSort={onSort} />
                     <SortableTh label="Last Synced" sortKey="synced" sort={sort} onSort={onSort} />
                   </>
                 )}
@@ -530,23 +544,38 @@ export default function Exercises() {
                         </td>
                       )}
                       <td className={sc("exercise")}>
-                        {ex.description ? (
+                        <span className="exercise-cell">
+                          {ex.description ? (
+                            <button
+                              className="title-toggle"
+                              onClick={() => toggleExpanded(ex.slug)}
+                              aria-expanded={isOpen}
+                              aria-label={
+                                isOpen ? "Hide task description" : "Show task description"
+                              }
+                            >
+                              <span className="caret" aria-hidden="true">
+                                {isOpen ? "▾" : "▸"}
+                              </span>
+                              {ex.title ?? ex.slug}
+                            </button>
+                          ) : (
+                            (ex.title ?? ex.slug)
+                          )}
                           <button
-                            className="title-toggle"
-                            onClick={() => toggleExpanded(ex.slug)}
-                            aria-expanded={isOpen}
-                            aria-label={
-                              isOpen ? "Hide task description" : "Show task description"
-                            }
+                            type="button"
+                            className={`copy-btn${copiedSlug === ex.slug ? " copied" : ""}`}
+                            onClick={() => void copyTaskName(ex)}
+                            title={copiedSlug === ex.slug ? "Copied!" : "Copy task name"}
+                            aria-label={`Copy task name "${ex.title ?? ex.slug}"`}
                           >
-                            <span className="caret" aria-hidden="true">
-                              {isOpen ? "▾" : "▸"}
-                            </span>
-                            {ex.title ?? ex.slug}
+                            {copiedSlug === ex.slug ? (
+                              <IconCheck size={13} />
+                            ) : (
+                              <IconCopy size={13} />
+                            )}
                           </button>
-                        ) : (
-                          (ex.title ?? ex.slug)
-                        )}
+                        </span>
                       </td>
                       <td className={`${sc("type")} cell-muted`}>{ex.task_type ?? "—"}</td>
                       <td>
@@ -572,11 +601,18 @@ export default function Exercises() {
                       {!isStudent && (
                         <>
                           <td className={sc("status")}>
-                            {ex.sync_status === "never_synced" ? (
+                            {ex.sync_status === "ready" ? (
+                              // Synced = a green circled check; anything not yet
+                              // synced stays a muted dash, and the in-between /
+                              // failure states keep their diagnostic pills.
+                              <span className="sync-ok" title="Synced" aria-label="Synced">
+                                <IconCheckCircle size={16} />
+                              </span>
+                            ) : ex.sync_status === "never_synced" ? (
                               <span className="cell-muted">—</span>
                             ) : (
                               <span className={`sync-status ${ex.sync_status}`}>
-                                {SYNC_STATUS_LABEL[ex.sync_status] ?? ex.sync_status.replace(/_/g, " ")}
+                                {ex.sync_status.replace(/_/g, " ")}
                               </span>
                             )}{" "}
                             {ex.archived && <span className="sync-status archived">archived</span>}{" "}
@@ -653,7 +689,6 @@ export default function Exercises() {
                 ? "Sync"
                 : `Sync ${syncConfirm.length} exercises`
           }
-          confirmIcon={<IconSync />}
           confirmClassName="btn primary"
           busyLabel="Starting…"
           onConfirm={async () => {
@@ -702,7 +737,6 @@ export default function Exercises() {
               ? "Archive"
               : `Archive ${archiveTarget.length} exercises`
           }
-          confirmIcon={<IconArchive />}
           confirmClassName="btn primary"
           busyLabel="Archiving…"
           onConfirm={() =>
@@ -744,7 +778,6 @@ export default function Exercises() {
               ? `Delete ${deleting[0].title ?? deleting[0].slug}`
               : `Delete ${deleting.length} exercises`
           }
-          confirmIcon={<IconTrash />}
           onConfirm={() => deleteExercises(deleting)}
           onClose={() => setDeleting(null)}
         >

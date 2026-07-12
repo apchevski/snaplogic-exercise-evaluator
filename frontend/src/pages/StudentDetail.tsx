@@ -284,6 +284,12 @@ export default function StudentDetail() {
     (e) => !e.archived && !e.missing_from_image && !reportSlugs.has(e.slug),
   );
 
+  // Friendly exercise name ("Task 01 – Generate CSV Report") for a task slug;
+  // falls back to the slug when the exercise list hasn't loaded (or the
+  // exercise was deleted).
+  const titleFor = (taskSlug: string) =>
+    exercises.find((e) => e.slug === taskSlug)?.title ?? taskSlug;
+
   const overallText = report?.overall_summary ?? student?.overall_summary ?? "";
 
   // The report is authoritative once graded; before the first grade we fall
@@ -567,7 +573,6 @@ export default function StudentDetail() {
                 ? "Regrade"
                 : "Grade"
           }
-          confirmIcon={<IconGrade />}
           confirmClassName="btn primary"
           busyLabel="Starting…"
           onConfirm={async () => {
@@ -588,8 +593,8 @@ export default function StudentDetail() {
           ) : (
             <p>
               {gradeConfirm.regrade ? "Regrade" : "Grade"}{" "}
-              <strong>{gradeConfirm.slug}</strong> for {name}? This runs the AI
-              grader{" "}
+              <strong>{titleFor(gradeConfirm.slug)}</strong> for {name}? This
+              runs the AI grader{" "}
               {gradeConfirm.regrade
                 ? "and replaces this exercise’s current result"
                 : "and records a result for this exercise"}

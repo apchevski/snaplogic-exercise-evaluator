@@ -2,7 +2,6 @@ import { useState, type FormEvent } from "react";
 
 import { api, uploadToPresignedUrl } from "../api";
 import type { ExerciseDetail, ExerciseResource, TaskConfig } from "../types";
-import { IconCheck, IconClose, IconPlus } from "./icons";
 
 /** "Task 07 – Router Basics" → "task_07_router_basics" — the stable exercise id
  * we derive from the name, so nobody has to type a folder slug by hand. */
@@ -399,7 +398,6 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
                   className="btn small"
                   onClick={() => setScenarios((prev) => [...prev, { name: "", params: "" }])}
                 >
-                  <IconPlus />
                   Add scenario
                 </button>
                 <div className="hint">
@@ -471,11 +469,9 @@ export function ExerciseModal({ token, initial, onClose, onSaved }: Props) {
         <footer>
           {busy && <span className="modal-busy">{busy}</span>}
           <button type="button" className="btn" onClick={onClose} disabled={!!busy}>
-            <IconClose />
             Cancel
           </button>
           <button type="submit" className="btn primary" disabled={!!busy || !canSubmit}>
-            <IconCheck />
             {isEdit ? "Save Changes" : "Save Exercise"}
           </button>
         </footer>
