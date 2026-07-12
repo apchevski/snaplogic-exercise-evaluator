@@ -59,6 +59,16 @@ function Count({ n, kind }: { n: number; kind: string }) {
   return <span className={n > 0 ? `count-${kind}` : "count-zero"}>{n}</span>;
 }
 
+/** Leaderboard rank badge: gold/silver/bronze medals for the top three. */
+function RankBadge({ rank }: { rank: number }) {
+  const medal = rank <= 3 ? ` medal-${rank}` : "";
+  return (
+    <span className={`rank-badge${medal}`} aria-label={`Rank ${rank}`}>
+      {rank}
+    </span>
+  );
+}
+
 export default function Dashboard() {
   const auth = useAuth();
   const token = useToken();
@@ -194,6 +204,30 @@ export default function Dashboard() {
     [token, refresh],
   );
 
+  // Competition ranking by total points over the FULL roster (equal points
+  // share a rank, the next rank skips: 1, 2, 2, 4), so searching, sorting, or
+  // paging never renumbers anyone. Never-graded students carry no rank.
+  const rankBySlug = useMemo(() => {
+    const graded = students.filter((s) => s.graded_at);
+    const sorted = [...graded].sort(
+      (a, b) =>
+        (b.points_earned ?? 0) - (a.points_earned ?? 0) ||
+        a.display_name.localeCompare(b.display_name),
+    );
+    const ranks = new Map<string, number>();
+    let rank = 0;
+    let prevPts = Number.NaN;
+    sorted.forEach((s, i) => {
+      const pts = s.points_earned ?? 0;
+      if (pts !== prevPts) {
+        rank = i + 1;
+        prevPts = pts;
+      }
+      ranks.set(s.slug, rank);
+    });
+    return ranks;
+  }, [students]);
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = students.filter(
@@ -234,7 +268,9 @@ export default function Dashboard() {
   const jobEntries = Object.entries(jobs);
   const nameFor = (key: string) =>
     students.find((s) => s.slug === key || s.display_name === key)?.display_name ?? key;
-  const colCount = canGrade ? 11 : 10; // Select column hidden for students
+  // Staff: select + expand + rank + 9 data columns. Students lose the select
+  // column plus Project Space / Project / Last Graded (leaderboard view).
+  const colCount = canGrade ? 12 : 8;
 
   // Drop selections whose student no longer exists (removed elsewhere).
   useEffect(() => {
@@ -415,15 +451,24 @@ export default function Dashboard() {
                   </th>
                 )}
                 <th className="plain" aria-label="Expand" />
+                <th className="plain rank-col" title="Rank by total points">
+                  #
+                </th>
                 <SortableTh label="Student" sortKey="student" sort={sort} onSort={onSort} />
-                <SortableTh label="Project Space" sortKey="space" sort={sort} onSort={onSort} />
-                <SortableTh label="Project" sortKey="project" sort={sort} onSort={onSort} />
+                {canGrade && (
+                  <SortableTh label="Project Space" sortKey="space" sort={sort} onSort={onSort} />
+                )}
+                {canGrade && (
+                  <SortableTh label="Project" sortKey="project" sort={sort} onSort={onSort} />
+                )}
                 <SortableTh label="Total Points" sortKey="points" sort={sort} onSort={onSort} />
                 <SortableTh label="Pass" sortKey="pass" sort={sort} onSort={onSort} />
                 <SortableTh label="Fail" sortKey="fail" sort={sort} onSort={onSort} />
                 <SortableTh label="Missing" sortKey="missing" sort={sort} onSort={onSort} />
                 <SortableTh label="Not Graded" sortKey="notgraded" sort={sort} onSort={onSort} />
-                <SortableTh label="Last Graded" sortKey="graded" sort={sort} onSort={onSort} />
+                {canGrade && (
+                  <SortableTh label="Last Graded" sortKey="graded" sort={sort} onSort={onSort} />
+                )}
               </tr>
             </thead>
             <tbody>
@@ -466,6 +511,13 @@ export default function Dashboard() {
                           </button>
                         )}
                       </td>
+                      <td className="rank-cell">
+                        {rankBySlug.has(s.slug) ? (
+                          <RankBadge rank={rankBySlug.get(s.slug)!} />
+                        ) : (
+                          <span className="cell-muted">—</span>
+                        )}
+                      </td>
                       <td className={sc("student")}>
                         {canOpen(s) ? (
                           <Link to={`/students/${encodeURIComponent(s.slug)}`}>
@@ -475,17 +527,21 @@ export default function Dashboard() {
                           s.display_name
                         )}
                       </td>
-                      <td className={`${sc("space")} cell-mono`}>{s.space ?? "—"}</td>
-                      <td
-                        className={`${sc("project")} cell-mono`}
-                        title={
-                          s.project && s.project !== s.display_name
-                            ? "SnapLogic project grading looks in (differs from the student name)"
-                            : "Defaults to the student name"
-                        }
-                      >
-                        {s.project ?? s.display_name}
-                      </td>
+                      {canGrade && (
+                        <td className={`${sc("space")} cell-mono`}>{s.space ?? "—"}</td>
+                      )}
+                      {canGrade && (
+                        <td
+                          className={`${sc("project")} cell-mono`}
+                          title={
+                            s.project && s.project !== s.display_name
+                              ? "SnapLogic project grading looks in (differs from the student name)"
+                              : "Defaults to the student name"
+                          }
+                        >
+                          {s.project ?? s.display_name}
+                        </td>
+                      )}
                       <td className={sc("points")}>
                         <span className={`pts-chip tier-${tier}`}>
                           {earned}/{possible} pts
@@ -519,9 +575,11 @@ export default function Dashboard() {
                       >
                         <Count n={notGraded} kind="notgraded" />
                       </td>
-                      <td className={`${sc("graded")} cell-muted`}>
-                        {s.graded_at ?? "—"}
-                      </td>
+                      {canGrade && (
+                        <td className={`${sc("graded")} cell-muted`}>
+                          {s.graded_at ?? "—"}
+                        </td>
+                      )}
                     </tr>
                     {isOpen && s.overall_summary && (
                       <tr className="expand-row">

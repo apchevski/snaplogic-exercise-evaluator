@@ -396,61 +396,18 @@ tr.expand-row:hover td { background: #f8f9fb; }
 .total-badge.tier-mid  { background: #fdf3dc; color: #8a6116; border-color: #ecd9a6; }
 .total-badge.tier-low  { background: #fbe7e7; color: #a33230; border-color: #eec1c0; }
 
-/* ---------- leaderboard (Ranking tab) ---------- */
-/* One grid row per student: rank badge | name | points bar | points chip.
-   The bar is a single-hue mark (the app blue) on a lighter step of the same
-   ramp; rounded at the data end, square at the baseline. Value and status
-   live in the pts-chip, not on the bar. */
-.board { list-style: none; margin: 0; padding: 4px 0; min-width: 560px; }
-.board-row {
-  display: grid;
-  grid-template-columns: 44px minmax(160px, 260px) 1fr auto;
-  align-items: center; gap: 14px;
-  padding: 7px 14px; border-bottom: 1px solid var(--sl-row-border);
-}
-.board-row:last-child { border-bottom: none; }
-.board-row:hover { background: #f3f7fb; }
-.board-row.me { background: #f2f8fd; }
-.board-row.me:hover { background: #e9f3fc; }
-.board-rank {
-  width: 26px; height: 26px; border-radius: 50%; justify-self: center;
+/* ---------- rank badge (Students table's # column) ---------- */
+th.rank-col { width: 38px; text-align: center; }
+td.rank-cell { width: 38px; text-align: center; }
+.rank-badge {
+  width: 26px; height: 26px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 12px; color: var(--sl-muted);
   font-variant-numeric: tabular-nums;
 }
-.board-rank.medal-1 { background: #f9edd2; border: 1px solid #e3c98a; color: #8a6116; }
-.board-rank.medal-2 { background: #eef1f4; border: 1px solid #c8d0d8; color: #5b6771; }
-.board-rank.medal-3 { background: #f6e7dc; border: 1px solid #ddb896; color: #935b2d; }
-.board-name {
-  display: inline-flex; align-items: center; gap: 8px; min-width: 0;
-  font-weight: 600;
-}
-.board-name a, .board-name > span:first-child {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.board-name a { color: var(--sl-blue); text-decoration: none; }
-.board-name a:hover { text-decoration: underline; }
-.you-chip {
-  flex: none; background: #e8eff6; color: var(--sl-navy); border: 1px solid #c3d5e6;
-  border-radius: 3px; padding: 0 6px; font-size: 10.5px;
-  font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-}
-.board-bar {
-  display: block; height: 12px; border-radius: 0 4px 4px 0;
-  background: #dce9f4; overflow: hidden;
-}
-.board-bar-fill {
-  display: block; height: 100%; border-radius: 0 4px 4px 0;
-  background: var(--sl-blue);
-}
-.board-points { justify-self: end; white-space: nowrap; }
-.board-divider {
-  padding: 10px 14px 4px; font-size: 11.5px; font-weight: 700;
-  color: var(--sl-muted); text-transform: uppercase; letter-spacing: 0.05em;
-}
-.board-row.unranked .board-name { font-weight: 500; color: var(--sl-muted); }
-.board-row.unranked .board-bar { background: #eef1f4; }
-li.empty-cell { display: block; list-style: none; }
+.rank-badge.medal-1 { background: #f9edd2; border: 1px solid #e3c98a; color: #8a6116; }
+.rank-badge.medal-2 { background: #eef1f4; border: 1px solid #c8d0d8; color: #5b6771; }
+.rank-badge.medal-3 { background: #f6e7dc; border: 1px solid #ddb896; color: #935b2d; }
 
 .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 .badge { padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: 600; border: 1px solid; }
