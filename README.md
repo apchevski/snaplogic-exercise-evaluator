@@ -51,11 +51,12 @@ grading settings live on the **Settings** page behind the top-right user menu):
     status and the report appears when the batch finishes (you can leave the
     page). A **subset** selection and the per-card **Regrade** stay on the
     instant **synchronous** path (normal cost).
-- **Rank column** (everyone): the Students table's leftmost data column is a
-  **#** rank badge — gold/silver/bronze for the top three, equal points share
-  a rank (competition-style: 1, 2, 2, 4) — computed over the full roster by
-  total points, so searching, sorting, or paging never renumbers anyone.
-  Students who have never been graded show a muted dash instead of a rank.
+- **Rank column** (everyone): the Students table's leftmost data column (no
+  header) numbers the rows in their current order — the top row is always
+  **1**, whatever column is sorted, so sorting by Total Points ranks by
+  points, sorting by Fail ranks by failures, and so on. Ties in the sorted
+  column break alphabetically by student name. The top three rows wear
+  gold/silver/bronze medal circles; every other row is a plain number.
 - **Add a student** (mentor or admin): click the **+** (Add student) icon in
   the toolbar.
   The dialog takes the student's name plus the SnapLogic **project space**

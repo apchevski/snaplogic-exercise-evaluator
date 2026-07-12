@@ -280,13 +280,6 @@ td.select-cell { width: 30px; text-align: center; }
 .resource-chip:disabled { opacity: 0.55; cursor: wait; }
 .resource-size { color: #8a97a3; font-size: 11px; }
 
-.expander {
-  width: 16px; height: 16px; padding: 0;
-  border: 1px solid #9fb0bf; border-radius: 2px; background: white;
-  color: #4a5560; font-size: 11px; line-height: 1; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.expander:hover { border-color: var(--sl-blue); color: var(--sl-blue); }
 tr.expand-row td {
   background: #f8f9fb; color: #4a5560; font-size: 12.5px;
   padding: 10px 14px 12px 36px;
@@ -406,8 +399,8 @@ td.rank-cell { width: 38px; text-align: center; }
   font-variant-numeric: tabular-nums;
 }
 .rank-badge.medal-1 { background: #f9edd2; border: 1px solid #e3c98a; color: #8a6116; }
-.rank-badge.medal-2 { background: #eef1f4; border: 1px solid #c8d0d8; color: #5b6771; }
-.rank-badge.medal-3 { background: #f6e7dc; border: 1px solid #ddb896; color: #935b2d; }
+.rank-badge.medal-2 { background: #e6eaee; border: 1px solid #b3bfca; color: #4e5a64; }
+.rank-badge.medal-3 { background: #f4e0d0; border: 1px solid #d2a678; color: #8a5527; }
 
 .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 .badge { padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: 600; border: 1px solid; }

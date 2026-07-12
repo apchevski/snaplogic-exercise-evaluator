@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Students table: positional row numbers, alphabetical tie-break, and no per-row summary expander.** Frontend-only.
+  - **The rank column now numbers rows by their position under the current sort** — the top row is always **1**, so sorting by Total Points ranks by points, sorting by Fail ranks by failures, etc. Every row gets a number (never-graded students no longer show a dash), numbering continues across pages, and the top three rows keep the gold/silver/bronze medal circles (silver and bronze deepened slightly so they stand out from the plain numbers) while the rest are plain. Replaces the fixed competition-style ranking by total points.
+  - **Equal values in the sorted column now order alphabetically by student name** (previously ties kept arbitrary order), so two students with the same total points rank A→Z.
+  - **The # header is gone** — the rank column header is now empty.
+  - **The per-row + expander that revealed the AI Overall summary is removed** (along with its expandable summary row); the summary is still on the student's detail page, reached by clicking their name.
+
 - **The Ranking tab is gone — the leaderboard moved into the Students table.** The standalone `/ranking` page (below) lasted one commit: its rank badge now lives in the Students table itself and the tab was removed for everyone (`frontend/src/pages/Ranking.tsx` deleted; `/ranking` no longer routes). Frontend-only.
   - **Rank column in the Students table (everyone).** A new **#** column sits left of the student name with the leaderboard's rank badge (gold/silver/bronze for the top three; equal points share a rank, competition-style), ranked by total points over the **full** roster — searching, sorting, or paging never renumbers anyone. Never-graded students show a muted dash.
   - **The student view of the Students table is now a leaderboard.** For `student`-role users the **Project Space**, **Project**, and **Last Graded** columns are hidden — they see rank, name, points, and the verdict counts.
