@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "../api";
 import { useToken } from "../auth";
+import { IconSync } from "../components/icons";
 import {
   PagerFooter,
   Panel,
@@ -111,17 +112,11 @@ export default function Activity() {
   const onSort = (key: string) => setSort((s) => nextSort(s, key, DEFAULT_DIR[key] ?? "asc"));
   const sc = (key: string) => (sort.key === key ? "sorted" : "");
 
-  const totalCost = useMemo(
-    () =>
-      jobs.reduce((sum, j) => sum + (j.result?.usage?.est_cost_usd ?? 0), 0),
-    [jobs],
-  );
-
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
       <Panel
-        title="Activity — Grading & Sync Jobs"
+        title="Activity Logs"
         hint="Every grade and sync job the platform has run recently (newest first), including failures that happened in the background. Shows who started each job and its estimated Claude cost. Jobs are pruned automatically after 90 days."
         toolbar={
           <>
@@ -131,11 +126,13 @@ export default function Activity() {
               placeholder="Search by student, exercise, user, or status"
             />
             <span className="toolbar-spacer" />
-            <span className="field" title="Sum of the estimated Claude cost across the jobs listed here.">
-              Total ≈ ${totalCost.toFixed(2)}
-            </span>
-            <button className="btn" onClick={() => void refresh()}>
-              Refresh
+            <button
+              className="tool-btn"
+              onClick={() => void refresh()}
+              title="Refresh"
+              aria-label="Refresh"
+            >
+              <IconSync size={18} />
             </button>
             <label className="field">
               Entries per Page:

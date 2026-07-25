@@ -10,6 +10,11 @@
 - **Roster CSV export (staff).** A download icon in the Students toolbar exports the roster — as currently searched/sorted — to a CSV (rank, name, project, points, verdict counts, last graded). Client-side; no new endpoint.
 - **Bulk grading (staff).** The Grade toolbar icon now accepts a multi-row selection: one student still opens the exercise picker, several queue a full "grade all exercises" run each (the worker runs them serially). A confirmation dialog lists the students and warns that cost multiplies per student.
 
+### UI polish
+
+- **Exercises page:** the **Exercise Analytics** panel now sits *below* the "Exercise Sync Status of All Projects" table instead of above it, so the sync table is what you land on.
+- **Activity page:** the section is now titled **Activity Logs** (was "Activity — Grading & Sync Jobs"). Its **Refresh** button is now a refresh icon, and the running "Total ≈ $…" estimated-spend readout next to it was removed (per-job cost still shows in the Detail column).
+
 ### Grading correctness & cost
 
 - **The AI judge now disables model thinking explicitly on every call.** Claude Sonnet 5 (the default judge) runs *adaptive thinking* when the `thinking` parameter is omitted, whereas Sonnet 4.6 did not — so after the Sonnet 5 switch every judge call silently began spending thinking tokens (billed as output and counted against `max_tokens`). Worst case, the 300-token `## Overall` call could exhaust its budget thinking and return no text block, failing an otherwise-finished paid grading run. Both the per-exercise and Overall calls now pass `thinking={"type": "disabled"}`, restoring the pre-Sonnet-5 cost and behavior. Also documented that Sonnet 5's introductory token pricing (through 2026-08-31) means the cost estimate deliberately runs conservative. Backend/evaluator-only.
