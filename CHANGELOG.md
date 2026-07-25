@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+### New features
+
+- **Activity page (staff).** A new top-bar **Activity** tab lists every recent grade/sync job across the deployment — newest first, with who started it, its status (including background failures that never showed up anywhere before), a compact result/cost summary, and the running total estimated Claude spend. Reads the persisted JOB rows via a new `GET /v1/jobs` (admin/mentor). Searchable, sortable, paginated.
+- **Grading history + version viewer (student detail).** Each student page gains a **Grading history** panel listing every grading run (date, points, scope, who ran it). Click **View** on any run to open a read-only overlay of that report exactly as it was then — Overall summary plus per-task verdicts and points. The live report and all edit/regrade actions are untouched. New `GET /v1/students/{slug}/reports/{version}`; students may view their own history only.
+- **Exercise Analytics (staff).** A collapsible **Exercise Analytics** panel on the Exercises page shows, per exercise across the whole cohort, the pass/fail/missing split, the average score, and the deduction rules that cost points most often (by `rule_source`). Lazy-loaded via a new `GET /v1/analytics/exercises` (admin/mentor). Tells instructors which exercises or rules are tripping students up.
+- **Roster CSV export (staff).** A download icon in the Students toolbar exports the roster — as currently searched/sorted — to a CSV (rank, name, project, points, verdict counts, last graded). Client-side; no new endpoint.
+- **Bulk grading (staff).** The Grade toolbar icon now accepts a multi-row selection: one student still opens the exercise picker, several queue a full "grade all exercises" run each (the worker runs them serially). A confirmation dialog lists the students and warns that cost multiplies per student.
+
+### Grading correctness & cost
+
+- **The AI judge now disables model thinking explicitly on every call.** Claude Sonnet 5 (the default judge) runs *adaptive thinking* when the `thinking` parameter is omitted, whereas Sonnet 4.6 did not — so after the Sonnet 5 switch every judge call silently began spending thinking tokens (billed as output and counted against `max_tokens`). Worst case, the 300-token `## Overall` call could exhaust its budget thinking and return no text block, failing an otherwise-finished paid grading run. Both the per-exercise and Overall calls now pass `thinking={"type": "disabled"}`, restoring the pre-Sonnet-5 cost and behavior. Also documented that Sonnet 5's introductory token pricing (through 2026-08-31) means the cost estimate deliberately runs conservative. Backend/evaluator-only.
+
+### Backend hardening
+
+- **The judge-model list lives in exactly one place now.** `evaluator/ai_judge.py` owns `JUDGE_MODEL_CHOICES` (next to the pricing table it derives cost blurbs from); `backend/src/api.py` imports it as `ALLOWED_JUDGE_MODELS` instead of keeping a parallel copy, so the picker, prices, and blurbs can't drift apart.
+- **Pinned every Python dependency to an exact version** (`requirements.txt`). The Lambda image is rebuilt from this file on each merge, so a floating `>=` could pull a breaking SDK major straight into production; pins make deploys reproducible.
+- **DynamoDB list queries now paginate** via a new `common.query_all` helper (follows `LastEvaluatedKey`), so a result set larger than one 1 MB page can never be silently truncated. Applied to every list-style query in the API and worker.
+- **JOB rows expire after 90 days** (`JOB_TTL_SECONDS` on the table's TTL). REPORT/AUDIT rows remain permanent history.
+- **Structured JSON logging** in both Lambdas via `aws_lambda_powertools.Logger`; the worker tags each line with `job_id` / `job_type` / `target` / `phase` so one CloudWatch Logs Insights query reconstructs a whole job.
+- **A signed-in student's own card is resolved in one read** via a new sparse **gsi2** (hash key `email`), replacing a full-roster scan on every student page load. Falls back to the scan while the index rolls out. **Needs `terraform apply`** (adds gsi2 to the table).
+- **`backend/src/api.py` split into focused modules** — `resolver.py` (shared `app`/`logger`), `auth.py`, `jobs.py`, `content.py`, and `routes_settings/students/exercises/jobs.py`. `api.py` is now a thin composition root that imports the route modules and holds the handler. Behavior unchanged; all 150 backend tests pass.
+
+### Ops / infra
+
+- **DLQ and worker-error CloudWatch alarms** (`infra/modules/sqs-worker`) email the ops address (same as the billing budget) when a job message dead-letters or the worker Lambda raises an unhandled error. Free at this scale (CloudWatch 10-alarm free tier + free SNS email). Adds an SNS topic + subscription. The GitHub deploy role gained `cloudwatch:*` and `sns:*`. **Needs `terraform apply`** (confirm the SNS subscription email on first apply).
+
+### Cleanup
+
+- **Removed `evaluator/ui.py`** (the local-first static-HTML dashboard, superseded by the React SPA) and all of its rebuild plumbing (`EVALUATOR_DISABLE_UI_REBUILD` in the worker, docker-compose, Terraform, and tests; the `_rebuild_ui_silently` calls in `evaluator/grade.py`). Local grade runs just write `grades/<student>/report.{md,json}` now.
+- **Docs pass:** the README no longer presents the deleted `/grade` skill as the primary entry point (the web dashboard is; `/prep` and `python -m evaluator run` are the local fallbacks), the "Grade dashboard" section describes the React SPA instead of `evaluator.ui`, and `SOLUTION_OVERVIEW.md` reflects the Sonnet 5 default (was Sonnet 4.6) and ~$1/run cost. `.claude/cloud_grading_plan.md` is marked delivered/historical; `.claude/architecture.md` documents the per-user-credential concurrency invariant, the DynamoDB secret-storage tradeoff, and the new ops observability.
+
+## [1.0.0] - 2026-07-14 — cloud grading platform
+
+The first tagged release: the fully cloud-hosted grading platform (VPN-restricted React dashboard → API Gateway/Lambda → SQS worker → Claude API judge, all Terraform-managed). Everything below shipped under the June–July 2026 cloud pivot.
+
 - **Every grading run now refreshes the AI Overall summary — scoped runs included.** A single-exercise **Regrade** or a subset selection previously merged its results into the stored report but left the Overall paragraph (and the dashboard summary) stale; now every run ends with the small Overall judge call over the merged report. A multi-exercise scoped job makes that call once, after its last exercise (`run_grade(refresh_overall=...)`). Two side effects: a scoped run on a never-graded student now gets an `## Overall` section inserted into its minimal report (previously the refresh — and a human's inline Overall edit via `_replace_overall_in_md` — silently no-opped without the section), and a fresh AI rewrite clears the paragraph's `overall_summary_edited_by/at` provenance, so the UI correctly shows it as AI-written again.
 
 - **The judge-model default now comes from deployment config everywhere — no constant can shadow a user's choice.** Audit result of "the user's picked model must always win": the per-user flow already worked end-to-end (Settings → `judge_model` on the USER row → job's `requested_by` → `apply_user_overrides` sets `JUDGE_MODEL` → every `AIJudge` call path uses it, sync, batch, and Overall-summary alike). One gap fixed: `GET /v1/settings` reported `default_model` from the Python constant, while the worker's real fallback is the Terraform-set `JUDGE_MODEL` env — which the API Lambda didn't even receive. Now the api-gateway module passes `JUDGE_MODEL` too (single `judge_model` variable feeds both Lambdas; **needs `terraform apply`**), and a new `shared_judge_model()` helper reports the deployment value — reading the pre-override base env so a warm container still carrying another requester's model can't leak into the picker (regression test added). The code constant is only the last-resort fallback.

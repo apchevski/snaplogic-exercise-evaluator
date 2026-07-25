@@ -22,6 +22,13 @@ Design rules (carried over from the skill + .claude/conventions/grade-*):
 - The judge model is `JUDGE_MODEL` (default `claude-sonnet-5` — the
   project's locked decision since 2026-07-12, superseding `claude-sonnet-4-6`;
   do not silently upgrade it).
+- **Thinking is explicitly disabled** on every judge call. Sonnet 5 runs
+  adaptive thinking when the `thinking` param is omitted (Sonnet 4.6 did
+  not), which bills thinking tokens as output AND counts them against
+  `max_tokens` — the 300-token Overall call could burn its whole budget
+  thinking and return no text block. The judge is anchored to written rules
+  + structured outputs and was tuned without thinking; keep it off unless
+  the budgets are re-sized deliberately.
 """
 from __future__ import annotations
 
@@ -41,8 +48,10 @@ OVERALL_MAX_TOKENS = 300
 # USD per 1M tokens: (input, output). Cache writes bill at 1.25x input,
 # cache reads at 0.10x input. Matched by model-id prefix (first match wins,
 # so more-specific ids come first); unknown models fall back to the Sonnet
-# rates so the estimate is never silently zero. Keep in lockstep with
-# ALLOWED_JUDGE_MODELS in backend/src/api.py (the Settings model picker).
+# rates so the estimate is never silently zero.
+# NOTE: Sonnet 5 bills at introductory rates ($2/$10 per MTok) through
+# 2026-08-31; the sticker rates below deliberately overestimate until then
+# so cost estimates stay conservative.
 _PRICING_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-sonnet-4-6": (3.00, 15.00),
     "claude-sonnet-5": (3.00, 15.00),
@@ -51,6 +60,34 @@ _PRICING_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-opus-4": (5.00, 25.00),
 }
 _FALLBACK_PRICING = (3.00, 15.00)
+
+#: The judge models a user may pick on the Settings page. Single source of
+#: truth for the picker — backend/src/api.py imports this as
+#: ALLOWED_JUDGE_MODELS, and the cost blurbs derive from _PRICING_PER_MTOK
+#: above (Sonnet $3/$15, Opus $5/$25, Haiku $1/$5 per MTok), so the list,
+#: the prices, and the descriptions can never drift apart across files.
+JUDGE_MODEL_CHOICES: tuple[dict[str, str], ...] = (
+    {
+        "id": "claude-sonnet-5",
+        "label": "Claude Sonnet 5 (Recommended)",
+        "description": "Best balance of grading quality and cost",
+    },
+    {
+        "id": "claude-sonnet-4-6",
+        "label": "Claude Sonnet 4.6",
+        "description": "Previous Sonnet · same price, the default before Sonnet 5",
+    },
+    {
+        "id": "claude-opus-4-8",
+        "label": "Claude Opus 4.8",
+        "description": "Most thorough evaluations · ~1.7× the cost of Sonnet",
+    },
+    {
+        "id": "claude-haiku-4-5",
+        "label": "Claude Haiku 4.5",
+        "description": "Fastest, ~⅓ the cost of Sonnet · lighter judgment",
+    },
+)
 
 
 class JudgeError(RuntimeError):
@@ -258,6 +295,10 @@ class AIJudge:
         return {
             "model": self.model,
             "max_tokens": self.max_tokens,
+            # Explicitly off: Sonnet 5 defaults to adaptive thinking when the
+            # param is omitted, which would bill thinking tokens and count
+            # them against max_tokens (see the module docstring).
+            "thinking": {"type": "disabled"},
             "system": system,
             "messages": [{"role": "user", "content": self._render_bundle(bundle)}],
             "output_config": {
@@ -369,6 +410,10 @@ class AIJudge:
         response = self._create(
             model=self.model,
             max_tokens=OVERALL_MAX_TOKENS,
+            # 300 output tokens leaves no room for Sonnet 5's default adaptive
+            # thinking — without this the model can spend the whole budget
+            # thinking and return no text block, failing a finished paid run.
+            thinking={"type": "disabled"},
             system=OVERALL_SYSTEM_INSTRUCTIONS,
             messages=[{"role": "user", "content": user_text}],
             output_config={

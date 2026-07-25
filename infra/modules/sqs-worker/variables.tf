@@ -41,3 +41,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "alert_email" {
+  description = "Email for job-failure alarms (DLQ, worker errors). Empty = alarms exist but nobody is subscribed."
+  type        = string
+  default     = ""
+}

@@ -26,7 +26,6 @@ os.environ["ALLOWED_CIDRS"] = ""
 os.environ["EVALUATOR_EXERCISES_DIR"] = str(_SESSION_DIR / "exercises")
 os.environ["EVALUATOR_TMP_DIR"] = str(_SESSION_DIR / "scratch")
 os.environ["EVALUATOR_GRADES_DIR"] = str(_SESSION_DIR / "grades")
-os.environ["EVALUATOR_DISABLE_UI_REBUILD"] = "1"
 # POST /v1/students probes the SnapLogic API when credentials are present —
 # scrub any ambient creds (dev shell / .env) so no test can hit the real org.
 for _key in (
@@ -71,6 +70,7 @@ def aws(monkeypatch):
                 {"AttributeName": "sk", "AttributeType": "S"},
                 {"AttributeName": "entity", "AttributeType": "S"},
                 {"AttributeName": "slug", "AttributeType": "S"},
+                {"AttributeName": "email", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -80,7 +80,16 @@ def aws(monkeypatch):
                         {"AttributeName": "slug", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
-                }
+                },
+                # Sparse index on email: one-read lookup of the STUDENT card
+                # behind a student login (mirrors infra/modules/data-storage).
+                {
+                    "IndexName": "gsi2",
+                    "KeySchema": [
+                        {"AttributeName": "email", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
             ],
         )
 

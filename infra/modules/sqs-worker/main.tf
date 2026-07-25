@@ -130,11 +130,10 @@ resource "aws_lambda_function" "worker" {
       SECRET_ARN  = var.secret_arn
       JUDGE_MODEL = var.judge_model
       # Full-run grade jobs re-enqueue delayed batch-poll messages to this queue.
-      QUEUE_URL                    = aws_sqs_queue.jobs.url
-      EVALUATOR_EXERCISES_DIR      = "/tmp/evaluator/exercises"
-      EVALUATOR_TMP_DIR            = "/tmp/evaluator/scratch"
-      EVALUATOR_GRADES_DIR         = "/tmp/evaluator/grades"
-      EVALUATOR_DISABLE_UI_REBUILD = "1"
+      QUEUE_URL               = aws_sqs_queue.jobs.url
+      EVALUATOR_EXERCISES_DIR = "/tmp/evaluator/exercises"
+      EVALUATOR_TMP_DIR       = "/tmp/evaluator/scratch"
+      EVALUATOR_GRADES_DIR    = "/tmp/evaluator/grades"
     }
   }
 
@@ -154,4 +153,56 @@ resource "aws_lambda_event_source_mapping" "jobs" {
   event_source_arn = aws_sqs_queue.jobs.arn
   function_name    = aws_lambda_function.worker.arn
   batch_size       = 1
+}
+
+# --- Ops alarms ($0: CloudWatch's free tier includes 10 alarms; SNS email ---
+# --- notifications are free at this volume) ---------------------------------
+
+resource "aws_sns_topic" "alerts" {
+  name = "${var.name_prefix}-ops-alerts"
+  tags = var.tags
+}
+
+resource "aws_sns_topic_subscription" "alerts_email" {
+  count     = var.alert_email == "" ? 0 : 1
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+# A message in the DLQ means a job died so hard it never recorded its own
+# failure on the JOB row — the UI shows nothing, so without this alarm the
+# only way to notice is a mentor complaining. Paid jobs are never auto-
+# retried (maxReceiveCount 1), so a human must look before re-clicking Grade.
+resource "aws_cloudwatch_metric_alarm" "dlq_not_empty" {
+  alarm_name          = "${var.name_prefix}-dlq-not-empty"
+  alarm_description   = "A grade/sync job message landed in the dead-letter queue."
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  dimensions          = { QueueName = aws_sqs_queue.dlq.name }
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+  tags                = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "worker_errors" {
+  alarm_name          = "${var.name_prefix}-worker-errors"
+  alarm_description   = "The worker Lambda raised an unhandled error (outside the per-job try/except that records failures on the JOB row)."
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  dimensions          = { FunctionName = aws_lambda_function.worker.function_name }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  tags                = var.tags
 }

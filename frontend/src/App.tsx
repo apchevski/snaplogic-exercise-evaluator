@@ -20,6 +20,7 @@ import {
   useToken,
 } from "./auth";
 import { IconLogin, IconLogout, IconSettings } from "./components/icons";
+import Activity from "./pages/Activity";
 import Dashboard from "./pages/Dashboard";
 import Exercises from "./pages/Exercises";
 import Settings from "./pages/Settings";
@@ -166,6 +167,12 @@ function StaffShell() {
             >
               Exercises
             </NavLink>
+            <NavLink
+              to="/activity"
+              className={({ isActive }) => (isActive ? "active" : "")}
+            >
+              Activity
+            </NavLink>
           </>
         }
       />
@@ -173,6 +180,7 @@ function StaffShell() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/students/:slug" element={<StudentDetail />} />
         <Route path="/exercises" element={<Exercises />} />
+        <Route path="/activity" element={<Activity />} />
         <Route path="/settings" element={<Settings />} />
         {/* The Settings page lived at /manager before the Manager tab was
             retired; keep old bookmarks working. */}

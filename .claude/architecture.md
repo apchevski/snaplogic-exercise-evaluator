@@ -427,6 +427,48 @@ Consequences that the design leans on:
 This dovetails with the headless/CI expansion point below: an API-based AI path
 could run inside the same image and read the same `ai_context.json`.
 
+## Per-user credentials & the concurrency invariant (July 2026)
+
+Admins/mentors can store their own SnapLogic login, Anthropic key, and judge
+model on a `USER#<email>/SETTINGS` DynamoDB row (see
+`conventions/report-edit-provenance.md` neighbours and `backend/src/common.py`).
+Per job, `apply_user_overrides(requested_by)` overlays those onto **`os.environ`**
+(restoring the shared-secret baseline first, since warm containers reuse the
+process). This is correct **only because the worker runs at reserved
+concurrency 1** — one job mutates the process env at a time. **Do not raise
+worker concurrency** without first moving credentials out of `os.environ` and
+into explicit parameters (`AIJudge(client=…)`, `SnapLogicClient(settings)`);
+otherwise concurrent jobs would grade under each other's credentials with no
+error. This sits alongside the other load-bearing worker invariant (paid jobs
+never auto-retry: concurrency 1 + DLQ maxReceiveCount 1).
+
+### Secret storage tradeoff (deliberate)
+
+Per-user secrets live in the DynamoDB table (encrypted at rest with the
+AWS-owned key), not Secrets Manager or a customer KMS key. The API returns them
+write-only (`GET /v1/settings` reports only "is set" + the API key's last four
+chars), and nothing exports the table off AWS. The accepted risk is that any
+principal with table read access (the two Lambda roles; a human with console
+access) can read the raw values. For a small trusted staff this is fine; the
+mitigation is IAM least-privilege (only the API + worker roles hold
+`dynamodb:*` on the table). If the team grows, upgrade to KMS field-encryption
+on the secret attributes (one CMK, ~$1/mo) rather than per-user Secrets Manager
+entries ($0.40/secret/mo).
+
+### Ops observability (July 2026)
+
+Both Lambdas log via `aws_lambda_powertools.Logger` (structured JSON); the
+worker appends `job_id` / `job_type` / `target` / `phase` so one CloudWatch
+Logs Insights query reconstructs a whole job. Two CloudWatch alarms
+(`infra/modules/sqs-worker`) email the ops address (same as the billing budget)
+when a message lands in the DLQ or the worker Lambda raises an unhandled error —
+both are free at this scale (CloudWatch's 10-alarm free tier + free SNS email).
+JOB rows carry a 90-day TTL (`JOB_TTL_SECONDS`); REPORT/AUDIT rows are permanent.
+Every list-style DynamoDB query goes through `common.query_all` (follows
+`LastEvaluatedKey`) so a >1 MB result can never be silently truncated. A signed-in
+student's own card is resolved in one read via the sparse **gsi2** (hash: `email`),
+with a full-roster scan fallback while the index rolls out.
+
 ## Future expansion points
 
 - Pipeline execution + output capture for triggered exercises.

@@ -4,15 +4,14 @@ Automated grading for SnapLogic training exercises. AI-driven judgment — desig
 for exercises that admit many correct solutions, so judgment comes from a model
 rather than a rubric.
 
-> **⚠️ Architecture transition (June 2026):** the project has moved to a fully
-> cloud-hosted grading flow — mentors click a **Grade** button on a web dashboard;
-> grading (deterministic hard gates + Claude API judgment, Sonnet 5) runs in
-> AWS, with nothing installed locally. The platform code (backend Lambdas,
-> Terraform, React SPA, CI/CD) is **implemented**; see
-> [Cloud grading platform](#cloud-grading-platform) for the deployment steps
-> that remain. The local `/grade` Claude Code skill was removed; `/prep`
-> (exercise maintenance) remains available locally as the dev fallback until
-> cloud sync is verified.
+> **Architecture (cloud-hosted):** mentors click a **Grade** button on a
+> VPN-restricted web dashboard; grading (deterministic hard gates + Claude API
+> judgment, Sonnet 5 by default) runs in AWS, with nothing installed locally.
+> The platform (backend Lambdas, Terraform, React SPA, CI/CD) is deployed; see
+> [Cloud grading platform](#cloud-grading-platform) for the one-time deploy
+> steps. The local `/grade` Claude Code skill was removed; `/prep` (exercise
+> maintenance) and `python -m evaluator run` (a local twin of the cloud grade
+> job) remain as dev fallbacks.
 
 ## What it does
 
@@ -151,7 +150,23 @@ grading settings live on the **Settings** page behind the top-right user menu):
   handy for naming the pipeline in SnapLogic exactly. Exercises that ship
   input data (zips, CSVs under `exercises/<slug>/resources/`) show a
   **Files** column — click a file to download it (served via a short-lived
-  presigned S3 URL).
+  presigned S3 URL). A collapsible **Exercise Analytics** panel (staff) shows,
+  per exercise across the whole cohort, the pass/fail/missing split, the
+  average score, and the deduction rules that cost points most often.
+- **Bulk grade** (mentor or admin): the **Grade** icon accepts a multi-row
+  selection — one student opens the exercise picker as before; several queue a
+  full "grade all exercises" run for each (the worker runs them one at a time),
+  after a confirmation dialog that lists the students and notes the cost.
+- **Export roster** (mentor or admin): a download icon in the Students toolbar
+  exports the roster — as currently searched and sorted — to a CSV (rank, name,
+  project, points, verdict counts, last graded).
+- **Activity** (mentor or admin): an **Activity** tab lists every recent
+  grade/sync job across the deployment — who started it, its status (including
+  background failures), a result/cost summary, and the running total estimated
+  Claude spend.
+- **Grading history** (everyone, own grades only for students): each student's
+  detail page has a **Grading history** panel listing every grading run; click
+  **View** to open a read-only snapshot of that report exactly as it was then.
 
 Exercise *authoring* stays in git (description.md, notes.md, rules); the
 `/prep` Claude Code skill still works locally as a dev fallback:
@@ -170,7 +185,9 @@ Browser (VPN/office IPs only)
   └─► API Gateway HTTP API /v1 ── JWT authorizer (Cognito) on every route
         ├─ GET  exercises / files                       (any role, students too)
         ├─ GET  students / detail / reports  (students: own card only; else 403)
+        ├─ GET  /v1/students/{slug}/reports/{version} — history (students: own only)
         ├─ GET  /v1/config, job status, authored content       (mentor or admin)
+        ├─ GET  /v1/jobs — activity log, /v1/analytics/exercises (mentor or admin)
         ├─ GET  /v1/students/{slug}/report/edits — audit log   (mentor or admin)
         ├─ GET/PUT /v1/settings — own credentials + judge model (mentor or admin;
         │        SnapLogic credentials admin-only; secrets are write-only)
@@ -382,41 +399,40 @@ Run `/prep` whenever you add a new exercise folder or edit a solution pipeline.
 
 `/prep --task <slug>` surveys and reconciles just one folder.
 
-### `/grade` — grade a student
+### How a grade runs (cloud worker)
 
-The `grade` skill then:
+> The local `/grade` Claude Code skill was **removed** in the June 2026
+> pivot — grading now runs in the cloud from the **Grade** button (see
+> [What it does](#what-it-does)). The steps below describe what the worker
+> Lambda (`evaluator/runner.py` + `evaluator/ai_judge.py`) does per exercise;
+> `python -m evaluator run <student>` is the local twin of the same code path
+> (needs `ANTHROPIC_API_KEY`; costs real money).
 
-1. Resolves the student's project location from `.env` defaults (org +
-   `SNAPLOGIC_STUDENT_PROJECT_SPACE` + student name → project path).
-2. Discovers every registered exercise from `exercises/*/task.json`.
+1. Resolves the student's project location (body override → student card →
+   env default: org + `SNAPLOGIC_STUDENT_PROJECT_SPACE` + student name).
+2. Discovers every registered, non-archived exercise.
 3. For each exercise, runs the deterministic Python evaluator which:
    - Fetches both the solution pipeline and the student's pipeline (GET-only).
    - Applies hard gates: pipeline name match (dash-tolerant) and **either**
      output file match (file_writer) **or** Triggered Task name match plus
      per-scenario JSON response match (triggered_task).
-   - On hard-gate fail → writes a complete `evaluation.json` and stops.
-   - On hard-gate pass → writes an `ai_context.json` bundle (description,
+   - On hard-gate fail → writes a complete evaluation and stops.
+   - On hard-gate pass → assembles the `ai_context` bundle (description,
      instructor notes, topologically-sorted snap flows, both raw pipeline
-     JSONs, plus per-scenario request/response pairs for triggered_task) and
-     emits `READY_FOR_AI_REVIEW`.
-4. The skill picks up from there: reads the context bundle, judges
-   structural differences in-conversation, and writes the final
-   `evaluation.json`. **The AI step runs inside your Claude Code session
-   — no API calls.**
-5. Composes `grades/<student>/report.md` (human-readable) and
-   `grades/<student>/report.json` (structured mirror for downstream tooling /
-   future UI) aggregating every exercise. Scratch artifacts under
-   `.tmp/grades/<student>/` are deleted at the end of the run — only the two
-   `report.*` files persist.
+     JSONs, plus per-scenario request/response pairs for triggered_task).
+4. The **headless Claude judge** (`ai_judge.py`, Sonnet 5, structured outputs,
+   prompt-cached rules) turns each judgeable bundle into a scored evaluation;
+   points arithmetic and the final verdict are recomputed in Python.
+5. Composes `report.md` (human-readable) and `report.json` (structured mirror
+   the React SPA renders), uploads them as an immutable S3 version, and writes
+   the REPORT row + refreshed STUDENT card.
 
-`/grade <student> --task <slug>` re-grades a single exercise and rewrites only
-that task's section in the existing `report.md` in place (the date is left
-untouched). The matching task entry in `report.json` is updated in lockstep,
-and the JSON `counts` / `points_earned` / `points_possible` are recomputed from
-the merged task list. The skill then **refreshes the `## Overall` paragraph and
-reconciles the markdown header totals** so the report reflects the just-graded
-task — every grading run, full or single-task, leaves a current Overall rather
-than a stale one. (The other tasks' sections are not re-evaluated.)
+A **subset or single-exercise Regrade** re-grades only the selected tasks and
+merges them into the stored report; `counts` / `points_earned` /
+`points_possible` are recomputed from the merged task list, and every run —
+full or scoped — refreshes the `## Overall` paragraph so it's never stale.
+Full "grade all" runs judge through the **Message Batches API** (~50% cheaper,
+asynchronous); subset/single runs stay on the instant synchronous path.
 
 ### Pipeline-name matching: dash-tolerant for pipelines, strict for Triggered Tasks
 
@@ -483,7 +499,7 @@ silently route to the wrong task.
 │   ├── runner.py               # in-process grade run: gates → judge → report → Overall
 │   └── store.py                # LocalStore / S3Store artifact + report I/O
 ├── backend/
-│   ├── src/                    # api.py (Powertools router) + worker.py (SQS consumer) + common.py
+│   ├── src/                    # api.py (composition root) + resolver/auth/jobs/content + routes_*.py + worker.py (SQS consumer) + common.py
 │   └── tests/                  # pytest: moto AWS + stubbed Claude — $0, run on every PR (deploy-backend `test` job)
 ├── schemas/                    # structured-outputs JSON schemas for the judge
 ├── Dockerfile                 # cloud image (api + worker share it; CMD differs)
@@ -530,31 +546,39 @@ Required env vars (see `.env.example`):
 
 ## Running
 
-**Primary entry point — slash commands in Claude Code:**
+**Primary entry point: the web dashboard.** Mentors and admins grade, sync,
+register students, and author exercises from the browser — see
+[What it does](#what-it-does). Nothing below is needed for normal use; it's
+the local dev fallback for exercise maintenance and for reproducing a cloud
+grade run on your own machine.
+
+**Exercise maintenance — the `/prep` skill in Claude Code:**
 
 ```
 /prep                                          # reconcile all exercise folders
 /prep --task task_02_calculator                # reconcile one folder
-/grade Gabriela Shurbeska                      # grade one student
-/grade --space Test_Antonio "Some Student"     # override the student project space
-/grade "Gabriela Shurbeska" --task task_01_generate_csv_report   # re-grade one task
 ```
 
-**Lower-level — running the Python evaluator directly for one exercise:**
+**Reproduce a cloud grade run locally** (the twin of the worker's code path;
+needs `ANTHROPIC_API_KEY`, **costs real money**):
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
+python -m evaluator run "Gabriela Shurbeska"
+```
+
+**Lower-level — the deterministic evaluator for one exercise (no AI, $0):**
+
+```powershell
 python -m evaluator task_01_generate_csv_report `
   --student "Interworks-Partner/IWC_Support/Gabriela Shurbeska/Task 01 – Generate CSV Report"
 ```
 
-This runs only the deterministic part. The student name is auto-derived
-from the third segment of `--student` (e.g. "Gabriela Shurbeska"). On
-hard-gate fail it writes `.tmp/grades/<student>/<task>/evaluation.json`
-directly. On hard-gate pass it writes
-`.tmp/grades/<student>/<task>/ai_context.json` and exits 0 with
-`READY_FOR_AI_REVIEW` — you'd then need the `/grade` skill (or another
-caller) to finish the AI judgment.
+The student name is auto-derived from the third segment of `--student`. On
+hard-gate fail it writes `.tmp/grades/<student>/<task>/evaluation.json`; on
+hard-gate pass it writes `.tmp/grades/<student>/<task>/ai_context.json` and
+exits 0 with `READY_FOR_AI_REVIEW` — the AI judgment step (`evaluator.runner`
++ `evaluator.ai_judge`) picks up from there.
 
 The solution pipeline JSON is cached at `exercises/<task>/solution.json`
 (committed to the repo) with a sidecar `solution.cache.json` recording
@@ -568,13 +592,12 @@ Flags:
 - `--student-name <name>` — override the auto-derived student name
   (used in the output path).
 
-The `/prep` and `/grade` orchestrators are exposed as their own subcommands:
-`python -m evaluator.sync {survey,sync}` and
-`python -m evaluator.grade {plan,report,sync-overall}`. `sync-overall` is a
-small helper that copies the rendered `## Overall` paragraph from `report.md`
-into `overall_summary` inside `report.json`. (The `/grade` skill that drove
-these commands has been removed — grading is moving to the cloud; the CLI
-entry points remain and will be reused by the cloud grading worker.)
+The `/prep` orchestrator and the grade helpers are also exposed as
+subcommands: `python -m evaluator.sync {survey,sync}` and
+`python -m evaluator.grade {plan,report,sync-overall}` (`sync-overall` copies
+the rendered `## Overall` paragraph from `report.md` into `overall_summary`
+in `report.json`). These CLI entry points are what the cloud grading worker
+reuses.
 
 ## Running in Docker (no local Python)
 
@@ -603,7 +626,6 @@ Bind mounts keep all writes in your workspace:
 docker compose run --rm -T cli python -m evaluator.sync survey
 docker compose run --rm -T cli python -m evaluator.sync sync --slug task_02_calculator
 docker compose run --rm -T cli python -m evaluator run "Gabriela Shurbeska"  # costs real money
-docker compose run --rm -T cli python -m evaluator.ui --no-open
 ```
 
 > **Escape hatch (no Docker):** substitute `.venv/Scripts/python.exe` (or `python`)
@@ -629,38 +651,21 @@ docker compose run --rm worker
 
 ## Grade dashboard (browser UI)
 
-`/grade` rebuilds `frontend/dist/index.html` silently at the end of every run (both full
-and single-task mode), so the dashboard stays in sync with `grades/`
-automatically. Open the file once in your browser and refresh after each
-grade run — no extra command needed.
-
-To explicitly rebuild the page in Docker (headless — open `frontend/dist/index.html`
-yourself afterward):
+The grade dashboard is the **React SPA** under `frontend/` — the same app
+mentors use in the cloud (login, roster, student detail, exercises). It reads
+live data from the API; there is no locally-generated HTML file. Build and
+preview it with the usual Vite commands:
 
 ```powershell
-docker compose run --rm -T cli python -m evaluator.ui --no-open
+cd frontend
+npm install
+npm run dev      # local dev server against VITE_API_URL
+npm run build    # production bundle → frontend/dist/ (CI syncs this to S3)
 ```
 
-(Or, with the venv escape hatch, `.\.venv\Scripts\python.exe -m evaluator.ui`
-also opens it in your default browser.)
-
-This walks every `grades/<student>/report.json` and generates a single
-self-contained `frontend/dist/index.html` with the data embedded inline (no HTTP server,
-no `fetch` calls). Features:
-
-- Search by student name; filter by project space.
-- Sort by total points (default), pass count, name, or grading date.
-- Per-student card with a colored **Total: X/Y pts** badge (green/amber/red by
-  ratio) plus verdict counts (pass / fail / missing / needs sync).
-- Overall summary paragraph (from `## Overall` in `report.md`).
-- Collapsible per-task accordion showing each task's verdict, `points/10`
-  pill, summary, failing gate (if any), and the differences list split into
-  **Deductions** (with `−N pts` chip and the `rule_source`) and **Notes**
-  (mention-only). Bonus-question answers are surfaced inline.
-
-Pass `--no-open` to build the page without opening it (this is what
-`/grade`'s auto-rebuild uses internally). The `frontend/dist/` folder is gitignored —
-it's purely derived from `grades/`.
+> A self-contained `evaluator.ui` static-HTML dashboard existed in the
+> local-first era; it was removed once the SPA became the single UI. Local
+> grade runs now just write `grades/<student>/report.{md,json}`.
 
 Exit codes:
 - `0` — hard gates passed (AI step pending, or all gates passed)

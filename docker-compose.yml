@@ -42,7 +42,6 @@ services:
       EVALUATOR_EXERCISES_DIR: /tmp/evaluator/exercises
       EVALUATOR_TMP_DIR: /tmp/evaluator/scratch
       EVALUATOR_GRADES_DIR: /tmp/evaluator/grades
-      EVALUATOR_DISABLE_UI_REBUILD: "1"
 
   cli:
     image: snaplogic-exercise-evaluator:latest
@@ -56,10 +55,7 @@ services:
       EVALUATOR_EXERCISES_DIR: /var/task/exercises
       EVALUATOR_TMP_DIR: /var/task/.tmp
       EVALUATOR_GRADES_DIR: /var/task/grades
-      # Keep the UI rebuild enabled so `evaluator.ui` can render dashboards.
-      EVALUATOR_DISABLE_UI_REBUILD: ""
     volumes:
       - ./exercises:/var/task/exercises   # sync writes solution.json / expected/
       - ./grades:/var/task/grades         # persistent per-student reports
-      - ./frontend/dist:/var/task/frontend/dist  # generated dashboard
       - ./.tmp:/var/task/.tmp             # scratch / local-run handoff bundle

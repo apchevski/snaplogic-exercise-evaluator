@@ -220,3 +220,62 @@ describe("pollJob", () => {
     expect(result).toBe(processing);
   });
 });
+
+describe("api: activity, report versions, analytics", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("listJobs GETs /v1/jobs and returns the job list", async () => {
+    const payload = { jobs: [job("succeeded")] };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await api.listJobs("tok");
+
+    expect(out).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/jobs",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("listStudentReports GETs the report index for the slug", async () => {
+    const payload = { reports: [{ version: "v1", points_earned: 10, points_possible: 20 }] };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await api.listStudentReports("tok", "jane-doe");
+
+    expect(out).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/students/jane-doe/reports",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("getStudentReportVersion URL-encodes the version (colons in the timestamp)", async () => {
+    const payload = { version: "2026-07-01T10:00:00Z", meta: {}, report: null };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getStudentReportVersion("tok", "jane-doe", "2026-07-01T10:00:00Z");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/students/jane-doe/reports/2026-07-01T10%3A00%3A00Z",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("getExerciseAnalytics GETs /v1/analytics/exercises", async () => {
+    const payload = { students_reported: 2, exercises: [] };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await api.getExerciseAnalytics("tok");
+
+    expect(out).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/analytics/exercises",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+});

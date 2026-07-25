@@ -41,11 +41,24 @@ resource "aws_dynamodb_table" "main" {
     name = "slug"
     type = "S"
   }
+  attribute {
+    name = "email"
+    type = "S"
+  }
 
   global_secondary_index {
     name            = "gsi1"
     hash_key        = "entity"
     range_key       = "slug"
+    projection_type = "ALL"
+  }
+
+  # Sparse index on email: resolves a signed-in student's own STUDENT card in
+  # one read (the card stores the login email lowercased at registration).
+  # Only items that carry an email attribute appear here.
+  global_secondary_index {
+    name            = "gsi2"
+    hash_key        = "email"
     projection_type = "ALL"
   }
 

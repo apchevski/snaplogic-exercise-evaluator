@@ -10,10 +10,12 @@ import type {
   DeleteStudentSummary,
   Difference,
   Exercise,
+  ExerciseAnalytics,
   ExerciseDetail,
   Job,
   Report,
   ReportEdit,
+  ReportVersion,
   StudentMeta,
   UpdateExercisePayload,
   UpdateUserSettingsPayload,
@@ -133,6 +135,37 @@ export const api = {
       token,
       "GET",
       `/v1/students/${encodeURIComponent(slug)}/report/edits`,
+    ),
+
+  // The report-history index: one row per grading run, newest first. Powers
+  // the version picker on the student detail page.
+  listStudentReports: (token: string, slug: string) =>
+    request<{ reports: ReportVersion[] }>(
+      token,
+      "GET",
+      `/v1/students/${encodeURIComponent(slug)}/reports`,
+    ),
+
+  // One historical report version's full report.json (immutable S3 copy).
+  getStudentReportVersion: (token: string, slug: string, version: string) =>
+    request<{ version: string; meta: StudentMeta; report: Report | null }>(
+      token,
+      "GET",
+      `/v1/students/${encodeURIComponent(slug)}/reports/${encodeURIComponent(version)}`,
+    ),
+
+  // Recent grade/sync jobs across the whole deployment (admin/mentor),
+  // newest first. Powers the Activity page.
+  listJobs: (token: string) =>
+    request<{ jobs: Job[] }>(token, "GET", "/v1/jobs"),
+
+  // Per-exercise aggregates across every student's current report
+  // (admin/mentor). Powers the Analytics panel.
+  getExerciseAnalytics: (token: string) =>
+    request<{ students_reported: number; exercises: ExerciseAnalytics[] }>(
+      token,
+      "GET",
+      "/v1/analytics/exercises",
     ),
 
   listExercises: (token: string) =>
