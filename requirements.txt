@@ -1,13 +1,19 @@
+# Pinned dependencies — the Lambda container image is rebuilt from this file
+# on every merge to main, so exact pins keep deploys reproducible (a floating
+# `>=` could silently pull a breaking SDK major right before a demo).
+# Versions match the tested local venv; bump deliberately, then run the
+# backend test suite.
+
 # Runtime dependencies (Lambda + evaluator)
-httpx>=0.27.0
-python-dotenv>=1.0.1
-anthropic>=0.40.0
+httpx==0.28.1
+python-dotenv==1.2.2
+anthropic==0.109.1
 
 # AWS Lambda runtime dependencies
-aws-lambda-powertools>=3.0.0
-boto3>=1.34.0
+aws-lambda-powertools==3.29.0
+boto3==1.43.28
 
 # Development and testing dependencies
-pytest>=8.0
-moto[s3,dynamodb,sqs,secretsmanager,cognitoidp]>=5.0
-ruff>=0.6
+pytest==9.0.3
+moto[s3,dynamodb,sqs,secretsmanager,cognitoidp]==5.2.2
+ruff==0.15.17

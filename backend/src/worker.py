@@ -20,9 +20,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import traceback
 from typing import Any
 
+from aws_lambda_powertools import Logger
 from boto3.dynamodb.conditions import Key
 
 from .common import (
@@ -33,11 +33,18 @@ from .common import (
     epoch_in,
     from_dynamo,
     lock_key,
+    query_all,
     slugify,
     sqs_client,
     to_dynamo,
     utc_now_iso,
 )
+
+
+# Structured JSON logs; every entry carries the job context appended in
+# _process_job / _process_grade_collect, so one CloudWatch Logs Insights
+# query (filter job_id = ...) reconstructs a whole job.
+logger = Logger(service="worker")
 
 
 def _make_store():
@@ -81,10 +88,10 @@ _PRESERVED_EXERCISE_FIELDS = (
 
 
 def _exercise_rows() -> dict[str, dict[str, Any]]:
-    resp = dynamo_table().query(
+    items = query_all(
         IndexName="gsi1", KeyConditionExpression=Key("entity").eq("exercise")
     )
-    return {str(i.get("slug")): from_dynamo(i) for i in resp.get("Items", [])}
+    return {str(i.get("slug")): from_dynamo(i) for i in items}
 
 
 def _prune_excluded_exercises(rows: dict[str, dict[str, Any]]) -> list[str]:
@@ -440,7 +447,6 @@ def _process_grade_collect(job: dict[str, Any]) -> None:
     attempts = int(job.get("poll_attempts") or 0)
 
     try:
-        os.environ.setdefault("EVALUATOR_DISABLE_UI_REBUILD", "1")
         # The collect step must judge/price under the same credentials the
         # submit ran with — the requester's own, when they stored any.
         apply_user_overrides(job.get("requested_by"))
@@ -480,7 +486,7 @@ def _process_grade_collect(job: dict[str, Any]) -> None:
         _release_lock("grade", target)
         store.delete_scratch(job_id)
     except Exception as e:
-        print(f"Grade collect {job_id} failed:\n{traceback.format_exc()}")
+        logger.exception(f"Grade collect {job_id} failed")
         if attempts < _BATCH_MAX_POLLS:
             try:  # transient — re-poll rather than dead-letter a paid grade
                 _refresh_lock_ttl("grade", target)
@@ -573,6 +579,12 @@ def _process_job(job: dict[str, Any]) -> None:
     job_id = job["job_id"]
     job_type = job.get("job_type", "")
     target = job.get("target", "")
+    # Warm containers reuse the process, so set every context key on every
+    # job — a leftover key from the previous message must never linger.
+    logger.append_keys(
+        job_id=job_id, job_type=job_type, target=target,
+        phase=job.get("phase") or "run",
+    )
 
     # A grade batch "collect" is a follow-up poll, not a fresh job: it manages
     # its own status/lock lifecycle and needs no exercise materialize (it reads
@@ -584,9 +596,6 @@ def _process_job(job: dict[str, Any]) -> None:
     _update_job(job_id, status="running", started_at=utc_now_iso())
     release_lock = True
     try:
-        # Lambda's image filesystem is read-only and the React SPA replaces
-        # the static dashboard, so never attempt the frontend/dist/index.html rebuild.
-        os.environ.setdefault("EVALUATOR_DISABLE_UI_REBUILD", "1")
         # Shared secret first, then the requester's own credentials on top
         # (their SnapLogic login, Anthropic key, and judge model, when stored).
         apply_user_overrides(job.get("requested_by"))
@@ -618,7 +627,7 @@ def _process_job(job: dict[str, Any]) -> None:
             job_id, status="succeeded", finished_at=utc_now_iso(), result=result
         )
     except Exception as e:
-        print(f"Job {job_id} failed:\n{traceback.format_exc()}")
+        logger.exception(f"Job {job_id} failed")
         _update_job(
             job_id,
             status="failed",

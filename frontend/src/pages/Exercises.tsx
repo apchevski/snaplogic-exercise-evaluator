@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 import { api, pollJob } from "../api";
 import { useIsAdmin, useIsStudentOnly, useToken } from "../auth";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { ExerciseAnalyticsPanel } from "../components/ExerciseAnalyticsPanel";
 import { ExerciseModal } from "../components/ExerciseModal";
 import {
   IconArchive,
@@ -379,6 +380,7 @@ export default function Exercises() {
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
+      {!isStudent && <ExerciseAnalyticsPanel exercises={exercises} />}
       <Panel
         title={isStudent ? "Exercises" : "Exercise Sync Status of All Projects"}
         hint={

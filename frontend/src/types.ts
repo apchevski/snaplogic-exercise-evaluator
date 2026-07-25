@@ -198,6 +198,29 @@ export interface Job {
   };
 }
 
+/** One row of the report history index (GET /v1/students/{slug}/reports). */
+export interface ReportVersion {
+  version: string;
+  graded_at?: string;
+  counts?: Counts;
+  points_earned?: number;
+  points_possible?: number;
+  requested_by?: string;
+  tasks_scope?: string[];
+  single_task_only?: string | null;
+}
+
+/** One per-exercise aggregate row (GET /v1/analytics/exercises). */
+export interface ExerciseAnalytics {
+  slug: string;
+  graded: number;
+  pass: number;
+  fail: number;
+  missing: number;
+  avg_points: number | null;
+  top_deductions: { rule: string; count: number }[];
+}
+
 export interface ExerciseResource {
   filename: string;
   size_bytes: number;

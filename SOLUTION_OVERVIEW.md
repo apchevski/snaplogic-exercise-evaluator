@@ -5,7 +5,7 @@
 > this file is the map. Design rationale lives in
 > [.claude/architecture.md](.claude/architecture.md); binding rules in
 > [.claude/CLAUDE.md](.claude/CLAUDE.md) and [.claude/conventions/](.claude/conventions/).
-> Last synced: 2026-07-06. A visual one-page version of this document exists as a
+> Last synced: 2026-07-14. A visual one-page version of this document exists as a
 > Claude Artifact ("SnapLogic Exercise Evaluator — Solution Map").
 
 ## 1. What this is, in three sentences
@@ -13,10 +13,11 @@
 A fully cloud-hosted grading platform for SnapLogic training exercises. Mentors
 click **Grade** on a VPN-restricted web dashboard; an AWS worker Lambda runs
 **deterministic hard gates** against the student's live SnapLogic project, then
-sends the survivors to **Claude (Sonnet 4.6)** for judgment anchored to written
-rules with explicit point values. Nothing is installed locally, a full grading
-run costs about **$0.95** in Claude tokens, and the idle AWS bill is about
-**$0.50–0.70/month**.
+sends the survivors to **Claude (Sonnet 5** by default — picker also offers
+Sonnet 4.6, Opus 4.8, Haiku 4.5) for judgment anchored to written rules with
+explicit point values. Nothing is installed locally, a full grading run costs
+roughly **$1** in Claude tokens (varies by model and cohort), and the idle
+AWS bill is about **$0.50–0.70/month**.
 
 ## 2. The core idea: two-layer evaluation
 
@@ -83,7 +84,7 @@ flowchart LR
 
     subgraph external [External services]
         SL["SnapLogic REST API<br/>GET-only client"]
-        CL["Claude API — Sonnet 4.6<br/>structured outputs, ~$0.95/run"]
+        CL["Claude API — Sonnet 5 (default)<br/>structured outputs, ~$1/run"]
     end
 
     B -->|SPA| CF --> SPA
@@ -114,7 +115,7 @@ IAM/OIDC, CloudWatch, Budgets).
 | Piece | Where | What it does |
 |---|---|---|
 | React SPA | `frontend/` (Vite + TS) | Dashboard (student rows, sortable/paginated, SnapLogic-Dashboard styling), student detail (task cards, regrade/edit buttons), exercises page (authoring, sync, file downloads). Cognito Hosted UI + PKCE login. |
-| API Lambda | `backend/src/api.py` | Powertools router behind API Gateway `/v1`. Validates, enforces the role matrix and source IP, writes DynamoDB items and S3 authored content, queues jobs on SQS. Never does grading work itself. |
+| API Lambda | `backend/src/api.py` (composition root) + `resolver.py` (shared `app`/`logger`), `auth.py` (role matrix + source IP), `jobs.py` (JOB lifecycle), `content.py` (S3 exercise store), `routes_*.py` (settings / students / exercises / jobs) | Powertools router behind API Gateway `/v1`. Validates, enforces the role matrix and source IP, writes DynamoDB items and S3 authored content, queues jobs on SQS. Never does grading work itself. Importing a `routes_*` module registers its routes on the shared resolver. |
 | Worker Lambda | `backend/src/worker.py` | SQS consumer. Runs grade and sync jobs via the `evaluator/` package. Concurrency 1; the DLQ has `maxReceiveCount 1` so a paid grade job is never auto-retried. |
 | Evaluator core | `evaluator/` | Shared Python: GET-only SnapLogic client, pipeline fetch + topo sort, hard gates, AI judge (`ai_judge.py`), in-process run loop (`runner.py`), artifact/report I/O (`store.py` — LocalStore for dev, S3Store in Lambda), sync orchestrator (`sync.py`). Same code path locally and in the cloud. |
 | Structured-output schemas | `schemas/` | JSON schemas Claude's structured outputs are constrained to. |
@@ -329,6 +330,6 @@ budget alarm emails on overspend.
 | What changed recently? | [CHANGELOG.md](CHANGELOG.md) |
 | Binding rules & conventions | [.claude/CLAUDE.md](.claude/CLAUDE.md), [.claude/conventions/](.claude/conventions/) |
 | SnapLogic REST gotchas | [.claude/snaplogic_api_findings.md](.claude/snaplogic_api_findings.md) |
-| API routes & role matrix | `backend/src/api.py` (+ `infra/modules/api-gateway/locals.tf`) |
+| API routes & role matrix | `backend/src/routes_*.py` + `backend/src/auth.py` (+ `infra/modules/api-gateway/locals.tf`) |
 | Grading logic | `evaluator/runner.py`, `evaluator/hard_gates.py`, `evaluator/ai_judge.py` |
 | Rule text the judge applies | `exercises/general_evaluation_rules.md`, per-exercise `notes.md` |

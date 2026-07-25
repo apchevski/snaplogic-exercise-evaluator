@@ -7,7 +7,7 @@ import { useCanGrade, useIsAdmin, useToken } from "../auth";
 import { AddStudentModal } from "../components/AddStudentModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
-import { IconGrade, IconPlus, IconTrash } from "../components/icons";
+import { IconDownload, IconGrade, IconPlus, IconTrash } from "../components/icons";
 import { StatusPill } from "../components/StatusPill";
 import {
   PagerFooter,
@@ -59,6 +59,63 @@ function Count({ n, kind }: { n: number; kind: string }) {
   return <span className={n > 0 ? `count-${kind}` : "count-zero"}>{n}</span>;
 }
 
+/** Quote a CSV field only when it contains a comma, quote, or newline. */
+function csvField(value: string | number | null | undefined): string {
+  const s = value == null ? "" : String(value);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Build a roster CSV from the students currently shown (respects the active
+ * search + sort) and trigger a browser download. Rank mirrors the table's
+ * position column. */
+function downloadRosterCsv(rows: StudentMeta[], activeCount: number): void {
+  const header = [
+    "rank",
+    "student",
+    "project_space",
+    "project",
+    "total_points",
+    "points_possible",
+    "pass",
+    "fail",
+    "missing",
+    "not_graded",
+    "last_graded",
+  ];
+  const lines = [header.join(",")];
+  rows.forEach((s, i) => {
+    const c = s.counts;
+    const graded =
+      (c?.pass ?? 0) + (c?.fail ?? 0) + (c?.missing ?? 0) + (c?.needs_sync ?? c?.needs_prep ?? 0);
+    const notGraded = activeCount > 0 ? Math.max(0, activeCount - graded) : 0;
+    lines.push(
+      [
+        i + 1,
+        csvField(s.display_name),
+        csvField(s.space ?? ""),
+        csvField(s.project ?? s.display_name),
+        s.points_earned ?? 0,
+        s.points_possible ?? 0,
+        c?.pass ?? 0,
+        c?.fail ?? 0,
+        c?.missing ?? 0,
+        notGraded,
+        csvField(s.graded_at ?? ""),
+      ].join(","),
+    );
+  });
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.download = `roster-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /** Row-position badge: gold/silver/bronze medals for the top three rows. */
 function RankBadge({ rank }: { rank: number }) {
   const medal = rank <= 3 ? ` medal-${rank}` : "";
@@ -93,6 +150,9 @@ export default function Dashboard() {
   const [scopeFor, setScopeFor] = useState<{ name: string; slug: string } | null>(null);
   // Confirmation dialog targets for the admin-only permanent Remove.
   const [removing, setRemoving] = useState<StudentMeta[] | null>(null);
+  // Confirmation dialog for a bulk "grade all exercises" run across many
+  // students (each queues its own full-run job; the worker runs them serially).
+  const [bulkGrading, setBulkGrading] = useState<StudentMeta[] | null>(null);
   // Row selection (graders): the toolbar's Grade/Remove buttons act on these
   // students. Stored as slugs so a refresh keeps the selection.
   const [selectedSlugs, setSelectedSlugs] = useState<Set<string>>(new Set());
@@ -162,6 +222,27 @@ export default function Dashboard() {
       }
     },
     [token, refresh],
+  );
+
+  // Bulk grade: queue a full "grade all exercises" run for each selected
+  // student. Fired concurrently, but the worker's concurrency-1 lock runs
+  // them one at a time; each row's StatusPill tracks its own job. Clears the
+  // selection as each job is accepted so the toolbar reflects progress.
+  const bulkGrade = useCallback(
+    async (targets: StudentMeta[]) => {
+      setBulkGrading(null);
+      await Promise.all(
+        targets.map((s) => {
+          setSelectedSlugs((prev) => {
+            const next = new Set(prev);
+            next.delete(s.slug);
+            return next;
+          });
+          return startGrade(s.display_name, s.slug, null);
+        }),
+      );
+    },
+    [startGrade],
   );
 
   // Adding a student never grades anything — the backend first checks the
@@ -318,7 +399,7 @@ export default function Dashboard() {
         title="Student Grades of All Projects"
         hint={
           canGrade
-            ? "Every graded student project. Click a column header to sort, or a student's name for their detailed evaluation. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Remove works on many students at once; Grade is enabled only while exactly one student is selected."
+            ? "Every graded student project. Click a column header to sort, or a student's name for their detailed evaluation. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Grading one student opens the exercise picker; grading several runs all exercises for each. The download icon exports the roster (as shown) to CSV."
             : "Every graded student project. Click a column header to sort. Click your own name to open your detailed evaluation — other students' detail pages stay private."
         }
         toolbar={
@@ -335,19 +416,23 @@ export default function Dashboard() {
                   className="tool-btn"
                   onClick={() => {
                     if (selectedStudents.length === 1) {
+                      // One student → the scope picker (choose exercises).
                       const s = selectedStudents[0];
                       setScopeFor({ name: s.display_name, slug: s.slug });
+                    } else if (selectedStudents.length > 1) {
+                      // Several students → bulk "grade all exercises" each.
+                      setBulkGrading(selectedStudents);
                     }
                   }}
-                  disabled={selectedStudents.length !== 1 || selectedBusy}
+                  disabled={selectedStudents.length === 0 || selectedBusy}
                   title={
                     selectedStudents.length === 0
-                      ? "Grade — select a student first"
-                      : selectedStudents.length > 1
-                        ? "Grade — grading runs one student at a time, keep a single row selected"
-                        : "Grade the selected student"
+                      ? "Grade — select one or more students first"
+                      : selectedStudents.length === 1
+                        ? "Grade the selected student (pick which exercises)"
+                        : `Grade all exercises for the ${selectedStudents.length} selected students`
                   }
-                  aria-label="Grade selected student"
+                  aria-label="Grade selected students"
                 >
                   <IconGrade size={18} />
                 </button>
@@ -377,6 +462,15 @@ export default function Dashboard() {
                   aria-label="Add student"
                 >
                   <IconPlus size={18} />
+                </button>
+                <button
+                  className="tool-btn"
+                  onClick={() => downloadRosterCsv(visible, activeExercises.length)}
+                  disabled={visible.length === 0}
+                  title="Export the roster (as shown) to CSV"
+                  aria-label="Export roster to CSV"
+                >
+                  <IconDownload size={18} />
                 </button>
               </>
             )}
@@ -587,6 +681,33 @@ export default function Dashboard() {
           }}
           onClose={() => setScopeFor(null)}
         />
+      )}
+
+      {bulkGrading && bulkGrading.length > 0 && (
+        <ConfirmModal
+          title="Grade Multiple Students"
+          confirmLabel={`Grade all exercises for ${bulkGrading.length} students`}
+          confirmClassName="btn primary"
+          busyLabel="Queuing…"
+          onConfirm={() => bulkGrade(bulkGrading)}
+          onClose={() => setBulkGrading(null)}
+        >
+          <p>
+            Queue a full <strong>grade-all-exercises</strong> run for each of these{" "}
+            <strong>{bulkGrading.length} students</strong>? Each runs as its own job
+            (the worker grades them one at a time).
+          </p>
+          <ul className="bulk-list">
+            {bulkGrading.map((s) => (
+              <li key={s.slug}>{s.display_name}</li>
+            ))}
+          </ul>
+          <p className="hint">
+            Each student's grading spends Claude tokens — full runs use the
+            50%-cheaper Batch API, but this still multiplies the per-student cost
+            by {bulkGrading.length}.
+          </p>
+        </ConfirmModal>
       )}
 
       {removing && removing.length > 0 && isAdmin && (

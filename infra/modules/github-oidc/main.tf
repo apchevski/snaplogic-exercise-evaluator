@@ -92,6 +92,8 @@ data "aws_iam_policy_document" "deploy" {
       "apigateway:*",
       "budgets:*",
       "cloudfront:*",
+      # Ops alarms (DLQ / worker errors) + their SNS notification topic.
+      "cloudwatch:*",
       "cognito-idp:*",
       "dynamodb:*",
       "ecr:*",
@@ -114,6 +116,7 @@ data "aws_iam_policy_document" "deploy" {
       "secretsmanager:CreateSecret",
       "secretsmanager:DeleteSecret",
       "secretsmanager:TagResource",
+      "sns:*",
       "sqs:*",
     ]
     resources = ["*"]

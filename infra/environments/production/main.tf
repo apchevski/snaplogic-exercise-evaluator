@@ -44,6 +44,9 @@ module "worker" {
   bucket_arn  = module.data.bucket_arn
   secret_arn  = module.secrets.secret_arn
   judge_model = var.judge_model
+  # Job-failure alarms (DLQ / worker errors) email the same address as the
+  # billing budget. SNS sends a one-time confirmation email on first apply.
+  alert_email = var.budget_alert_email
   tags        = local.tags
 }
 

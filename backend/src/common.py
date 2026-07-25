@@ -27,6 +27,10 @@ from typing import Any
 
 LOCK_TTL_SECONDS = 30 * 60
 
+# JOB rows are operational noise after a while — REPORT/AUDIT rows are the
+# durable history, so jobs expire via the table's TTL after 90 days.
+JOB_TTL_SECONDS = 90 * 24 * 3600
+
 # Secret keys copied into the process env (SnapLogic creds + Anthropic key).
 SECRET_ENV_KEYS = (
     "SNAPLOGIC_BASE_URL",
@@ -191,6 +195,23 @@ def reset_cached_clients() -> None:
     s3_client.cache_clear()
     sqs_client.cache_clear()
     cognito_client.cache_clear()
+
+
+def query_all(**kwargs: Any) -> list[dict[str, Any]]:
+    """Run a DynamoDB Query and follow LastEvaluatedKey to exhaustion.
+
+    A single query() returns at most 1 MB of items. Today's data never gets
+    near that, but a first-page-only read is the kind of bug that silently
+    drops rows years later — every list-style query goes through here.
+    """
+    items: list[dict[str, Any]] = []
+    while True:
+        resp = dynamo_table().query(**kwargs)
+        items.extend(resp.get("Items", []))
+        last = resp.get("LastEvaluatedKey")
+        if not last:
+            return items
+        kwargs["ExclusiveStartKey"] = last
 
 
 def utc_now_iso() -> str:

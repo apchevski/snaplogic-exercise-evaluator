@@ -10,6 +10,7 @@ import {
   IconGrade,
   IconHistory,
 } from "../components/icons";
+import { ReportVersionModal } from "../components/ReportVersionModal";
 import { StatusPill } from "../components/StatusPill";
 import { Panel } from "../components/table";
 import { TaskCard, tierForRatio } from "../components/TaskCard";
@@ -23,6 +24,7 @@ import type {
   Report,
   ReportEdit,
   ReportEditChange,
+  ReportVersion,
   StudentMeta,
   TaskResult,
 } from "../types";
@@ -109,6 +111,14 @@ export default function StudentDetail() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [edits, setEdits] = useState<ReportEdit[] | null>(null);
   const [editsError, setEditsError] = useState<string | null>(null);
+  // Grading-run history (report versions); lazy-loaded when expanded. Viewing
+  // a past version loads its immutable report.json into a read-only overlay —
+  // the live report on the page (and every edit/regrade action) is untouched.
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versions, setVersions] = useState<ReportVersion[] | null>(null);
+  const [versionsError, setVersionsError] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<{ version: string; report: Report | null } | null>(null);
+  const [viewingError, setViewingError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -150,6 +160,36 @@ export default function StudentDetail() {
     setHistoryOpen(next);
     if (next && edits === null) void loadEdits();
   };
+
+  const loadVersions = useCallback(async () => {
+    setVersionsError(null);
+    try {
+      const { reports } = await api.listStudentReports(token, slug);
+      setVersions(reports);
+    } catch (e) {
+      setVersionsError(e instanceof Error ? e.message : String(e));
+      setVersions([]);
+    }
+  }, [token, slug]);
+
+  const toggleVersions = () => {
+    const next = !versionsOpen;
+    setVersionsOpen(next);
+    if (next && versions === null) void loadVersions();
+  };
+
+  const viewVersion = useCallback(
+    async (version: string) => {
+      setViewingError(null);
+      try {
+        const { report } = await api.getStudentReportVersion(token, slug, version);
+        setViewing({ version, report });
+      } catch (e) {
+        setViewingError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [token, slug],
+  );
 
   const name = student?.display_name ?? report?.student ?? slug;
 
@@ -550,6 +590,82 @@ export default function StudentDetail() {
             )}
           </div>
         </Panel>
+      )}
+      {report && (
+        <Panel
+          title="Grading history"
+          hint="Every grading run for this student, newest first. Each run is an immutable snapshot — view a past one to see the report exactly as it was then. The live report above always reflects the latest run plus any edits."
+        >
+          <div className="panel-body">
+            <button className="btn small" onClick={toggleVersions}>
+              <IconHistory />
+              {versionsOpen ? "Hide grading history" : "Show grading history"}
+            </button>
+            {versionsOpen && (
+              <div className="edit-history">
+                {versionsError && <div className="job-error">{versionsError}</div>}
+                {versions === null && !versionsError && (
+                  <p className="summary muted">Loading…</p>
+                )}
+                {versions !== null && versions.length === 0 && !versionsError && (
+                  <p className="summary muted">No grading runs recorded yet.</p>
+                )}
+                {versions !== null && versions.length > 0 && (
+                  <table className="data-table history-table">
+                    <thead>
+                      <tr>
+                        <th className="plain">Graded</th>
+                        <th className="plain">Points</th>
+                        <th className="plain">Scope</th>
+                        <th className="plain">By</th>
+                        <th className="plain" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {versions.map((v) => (
+                        <tr key={v.version}>
+                          <td className="cell-muted">
+                            {v.graded_at ?? v.version}
+                          </td>
+                          <td>
+                            {typeof v.points_earned === "number" &&
+                            typeof v.points_possible === "number"
+                              ? `${v.points_earned}/${v.points_possible}`
+                              : "—"}
+                          </td>
+                          <td className="cell-muted">
+                            {v.single_task_only
+                              ? `regrade: ${v.single_task_only}`
+                              : v.tasks_scope
+                                ? `${v.tasks_scope.length} exercises`
+                                : "full run"}
+                          </td>
+                          <td className="cell-muted">{v.requested_by ?? "—"}</td>
+                          <td>
+                            <button
+                              className="btn small"
+                              onClick={() => void viewVersion(v.version)}
+                            >
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {viewingError && <div className="job-error">{viewingError}</div>}
+              </div>
+            )}
+          </div>
+        </Panel>
+      )}
+      {viewing && (
+        <ReportVersionModal
+          version={viewing.version}
+          report={viewing.report}
+          onClose={() => setViewing(null)}
+        />
       )}
       {gradeConfirm && canGrade && (
         <ConfirmModal

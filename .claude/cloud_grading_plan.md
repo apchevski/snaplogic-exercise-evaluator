@@ -1,19 +1,13 @@
-# Cloud Grading Plan (v4) — APPROVED BLUEPRINT
+# Cloud Grading Plan (v4) — ✅ DELIVERED (historical blueprint)
 
-> Canonical implementation plan, finalized 2026-06-12. When the user says
-> "implement the cloud grading plan" (or similar), THIS is the document.
->
-> **Progress (2026-06-12, branch `feature/cloud-grading`): phases 1–6 are
-> code-complete** — evaluator refactor (ai_judge/runner/store), backend
-> Lambdas + 33 passing $0 tests, cloud prep, all Terraform (validates
-> clean), the React SPA (builds clean), and the four GitHub workflows.
-> **Still outstanding:** the deploy/verification steps that need live AWS
-> (bootstrap apply, first image push, secret value, Cognito users, the
-> curl-verified auth matrix, prep byte-equivalence check, browser E2E),
-> **Phase 7** (judge-quality tuning against baseline reports — real Claude
-> spend, needs user approval), and **Phase 8** (delete ui/ + evaluator/ui.py,
-> retire local /prep — deliberately deferred until the cloud paths are
-> verified). See CHANGELOG [Unreleased] for the full inventory.
+> **Status (2026-07-14): implemented and shipped.** This is the original
+> blueprint, kept for design rationale and history — it is **no longer an
+> active work plan**. The platform (evaluator refactor, backend Lambdas,
+> Terraform, React SPA, CI/CD) is deployed; the local `/grade` skill and
+> `evaluator/ui.py` were removed (Phase 8 done); `/prep` remains the local
+> exercise-maintenance fallback. For how the system works now, read
+> [SOLUTION_OVERVIEW.md](../SOLUTION_OVERVIEW.md) and
+> [architecture.md](architecture.md); this file is background only.
 
 # Cloud-Hosted Click-to-Prep / Click-to-Grade Platform (v4 — headless, Claude API, Cognito login)
 

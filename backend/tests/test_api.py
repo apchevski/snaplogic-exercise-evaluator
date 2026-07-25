@@ -837,8 +837,10 @@ def test_download_resource_tolerates_head_403(aws, evaluator_dirs, monkeypatch):
     mirror must fall through to the upload instead of surfacing a 500."""
     from botocore.exceptions import ClientError
 
+    from backend.src import routes_exercises
+
     _make_exercise_with_resource(evaluator_dirs, "api_res_403", content=b"data-403")
-    real = api.s3_client()
+    real = routes_exercises.s3_client()
 
     class HeadForbiddenS3:
         def head_object(self, **kwargs):
@@ -849,7 +851,9 @@ def test_download_resource_tolerates_head_403(aws, evaluator_dirs, monkeypatch):
         def __getattr__(self, name):
             return getattr(real, name)
 
-    monkeypatch.setattr(api, "s3_client", lambda: HeadForbiddenS3())
+    # The resource route resolves s3_client in its own module namespace now
+    # (api.py is just the composition root), so patch it there.
+    monkeypatch.setattr(routes_exercises, "s3_client", lambda: HeadForbiddenS3())
     resp = _call(api_event("GET", "/v1/exercises/api_res_403/resources/Input.zip"))
     assert resp["statusCode"] == 200
     obj = aws["s3"].get_object(
@@ -2010,3 +2014,143 @@ def test_delete_exercise_leaves_unrelated_reports_alone(aws, evaluator_dirs):
         Bucket=os.environ["DATA_BUCKET"], Key=json_key
     )["Body"].read()
     assert after == before
+
+
+# ---------- new: activity, report versions, analytics ----------
+
+
+def test_list_jobs_newest_first_admin_only(aws):
+    for jid, ts, jtype in [
+        ("j1", "2026-07-10T00:00:00Z", "grade"),
+        ("j2", "2026-07-12T00:00:00Z", "sync"),
+        ("j3", "2026-07-11T00:00:00Z", "grade"),
+    ]:
+        dynamo_table().put_item(
+            Item={
+                "pk": f"JOB#{jid}",
+                "sk": "META",
+                "entity": "job",
+                "slug": jid,
+                "job_id": jid,
+                "job_type": jtype,
+                "status": "succeeded",
+                "target": "someone",
+                "created_at": ts,
+            }
+        )
+    resp = _call(api_event("GET", "/v1/jobs", groups=("mentor",)))
+    assert resp["statusCode"] == 200
+    jobs = _body(resp)["jobs"]
+    assert [j["job_id"] for j in jobs] == ["j2", "j3", "j1"]  # newest first
+    # students get 403
+    assert _call(api_event("GET", "/v1/jobs", groups=("student",)))["statusCode"] == 403
+
+
+def test_get_report_version_reads_that_versions_s3_copy(aws):
+    aws["s3"].put_object(
+        Bucket=os.environ["DATA_BUCKET"],
+        Key="students/jane-doe/2026-07-01/report.json",
+        Body=json.dumps({"points_earned": 40}).encode(),
+    )
+    _seed_student_card("jane-doe", "Jane Doe")
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#jane-doe",
+            "sk": "REPORT#2026-07-01T10:00:00Z",
+            "version": "2026-07-01T10:00:00Z",
+            "report_json_key": "students/jane-doe/2026-07-01/report.json",
+        }
+    )
+    resp = _call(
+        api_event("GET", "/v1/students/jane-doe/reports/2026-07-01T10:00:00Z")
+    )
+    assert resp["statusCode"] == 200
+    assert _body(resp)["report"]["points_earned"] == 40
+    # unknown version → 404
+    missing = _call(api_event("GET", "/v1/students/jane-doe/reports/nope"))
+    assert missing["statusCode"] == 404
+
+
+def test_get_report_version_student_scoped_to_own_card(aws):
+    _seed_student_card("matt-murdock", "Matt Murdock", email="matt@example.com")
+    _seed_student_card("foggy-nelson", "Foggy Nelson", email="foggy@example.com")
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#foggy-nelson",
+            "sk": "REPORT#v1",
+            "version": "v1",
+        }
+    )
+    resp = _call(
+        api_event(
+            "GET",
+            "/v1/students/foggy-nelson/reports/v1",
+            groups=("student",),
+            email="matt@example.com",
+        )
+    )
+    assert resp["statusCode"] == 403
+
+
+def test_exercise_analytics_aggregates_across_reports(aws):
+    def seed(slug, name, tasks):
+        key = f"students/{slug}/report.json"
+        aws["s3"].put_object(
+            Bucket=os.environ["DATA_BUCKET"],
+            Key=key,
+            Body=json.dumps({"tasks": tasks}).encode(),
+        )
+        _seed_student_card(slug, name, report_json_key=key)
+
+    seed(
+        "a",
+        "A",
+        [
+            {"slug": "task_01", "verdict": "pass", "points": 10, "differences": []},
+            {
+                "slug": "task_02",
+                "verdict": "fail",
+                "points": 6,
+                "differences": [
+                    {"points_deducted": 2, "rule_source": "general: filter before sort"},
+                    {"points_deducted": 2, "rule_source": "notes: naming"},
+                ],
+            },
+        ],
+    )
+    seed(
+        "b",
+        "B",
+        [
+            {"slug": "task_01", "verdict": "pass", "points": 8, "differences": [
+                {"points_deducted": 2, "rule_source": "general: filter before sort"},
+            ]},
+            {"slug": "task_02", "status": "missing", "points": None, "differences": []},
+        ],
+    )
+    resp = _call(api_event("GET", "/v1/analytics/exercises", groups=("mentor",)))
+    assert resp["statusCode"] == 200
+    data = _body(resp)
+    assert data["students_reported"] == 2
+    by_slug = {e["slug"]: e for e in data["exercises"]}
+    assert by_slug["task_01"]["pass"] == 2
+    assert by_slug["task_01"]["avg_points"] == 9.0
+    # Only student b lost points on task_01, so its top deduction has count 1.
+    assert by_slug["task_01"]["top_deductions"][0] == {
+        "rule": "general: filter before sort",
+        "count": 1,
+    }
+    # task_02: student a lost points to two distinct rules, once each.
+    assert {d["rule"] for d in by_slug["task_02"]["top_deductions"]} == {
+        "general: filter before sort",
+        "notes: naming",
+    }
+    assert by_slug["task_02"]["fail"] == 1
+    assert by_slug["task_02"]["missing"] == 1
+    # students 403
+    assert (
+        _call(api_event("GET", "/v1/analytics/exercises", groups=("student",)))[
+            "statusCode"
+        ]
+        == 403
+    )

@@ -11,17 +11,14 @@ Two subcommands, both designed so the `/grade` skill prompt can stay small:
     python -m evaluator.grade report <student> [--space <project_space>]
         Reads the manifest plus each per-task evaluation.json and renders the
         aggregated `grades/<student>/report.md` plus a structured
-        `grades/<student>/report.json` (same data, machine-readable for a future
-        UI). After writing both, deletes the `.tmp/grades/<student>/` scratch
-        directory so only the persistent files survive. Then silently rebuilds
-        `frontend/dist/index.html` so the dashboard reflects the new student.
+        `grades/<student>/report.json` (same data, machine-readable — the
+        cloud worker uploads it to S3 and the React SPA renders it). After
+        writing both, deletes the `.tmp/grades/<student>/` scratch directory
+        so only the persistent files survive.
 
     python -m evaluator.grade sync-overall <student>
         Re-reads the rendered `## Overall` paragraph from report.md and writes
-        it into `overall_summary` in report.json. Called by the /grade skill
-        after Claude fills in the Overall paragraph in full grading mode.
-        Also rebuilds `frontend/dist/index.html` so the dashboard picks up the new
-        Overall summary.
+        it into `overall_summary` in report.json.
 
 This module never calls an LLM. Judgment still lives in the `/grade` skill.
 """
@@ -93,34 +90,6 @@ def _resolve_manifest_path(stored: str) -> Path:
 
 def _solution_pipeline_name(solution_pipeline_path: str) -> str:
     return solution_pipeline_path.rstrip("/").split("/")[-1]
-
-
-def _rebuild_ui_silently() -> None:
-    """Rebuild frontend/dist/index.html so the dashboard reflects the latest grades.
-
-    Imported lazily to keep the grade CLI startup light and to avoid a hard
-    coupling at module import time. UI build failures must never break a
-    successful grading run — the dashboard is a convenience artifact, not a
-    grading output.
-
-    Set EVALUATOR_DISABLE_UI_REBUILD=1 to skip entirely — the cloud worker
-    does this because the Lambda image filesystem is read-only and the React
-    SPA replaces the static dashboard there.
-    """
-    import os
-
-    if os.environ.get("EVALUATOR_DISABLE_UI_REBUILD", "").strip():
-        return
-    try:
-        from .ui import cmd_build
-
-        cmd_build(open_in_browser=False)
-    except Exception as e:  # pragma: no cover - best-effort side effect
-        print(
-            f"WARNING: UI rebuild failed ({e!r}); run "
-            f"`python -m evaluator.ui` manually to refresh frontend/dist/index.html.",
-            file=sys.stderr,
-        )
 
 
 def _find_student_pipeline(
@@ -826,7 +795,6 @@ def cmd_report(
         if tmp_dir.exists():
             shutil.rmtree(tmp_dir, ignore_errors=True)
             print(f"Cleaned up scratch dir: {tmp_dir}")
-        _rebuild_ui_silently()
         return 0
 
     counts = {
@@ -915,7 +883,6 @@ def cmd_report(
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir, ignore_errors=True)
         print(f"Cleaned up scratch dir: {tmp_dir}")
-    _rebuild_ui_silently()
     return 0
 
 
@@ -955,7 +922,6 @@ def cmd_sync_overall(student: str) -> int:
         )
     else:
         print(f"Synced ## Overall ({len(overall)} chars) into {json_path}")
-    _rebuild_ui_silently()
     return 0
 
 
