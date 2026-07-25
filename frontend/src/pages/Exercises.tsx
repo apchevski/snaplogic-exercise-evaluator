@@ -380,7 +380,6 @@ export default function Exercises() {
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
-      {!isStudent && <ExerciseAnalyticsPanel exercises={exercises} />}
       <Panel
         title={isStudent ? "Exercises" : "Exercise Sync Status of All Projects"}
         hint={
@@ -703,6 +702,7 @@ export default function Exercises() {
           </table>
         </div>
       </Panel>
+      {!isStudent && <ExerciseAnalyticsPanel exercises={exercises} />}
       {showAdd && isAdmin && (
         <ExerciseModal
           token={token}

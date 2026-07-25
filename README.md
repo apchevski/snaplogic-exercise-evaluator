@@ -150,9 +150,10 @@ grading settings live on the **Settings** page behind the top-right user menu):
   handy for naming the pipeline in SnapLogic exactly. Exercises that ship
   input data (zips, CSVs under `exercises/<slug>/resources/`) show a
   **Files** column — click a file to download it (served via a short-lived
-  presigned S3 URL). A collapsible **Exercise Analytics** panel (staff) shows,
-  per exercise across the whole cohort, the pass/fail/missing split, the
-  average score, and the deduction rules that cost points most often.
+  presigned S3 URL). A collapsible **Exercise Analytics** panel (staff), shown
+  below the sync-status table, gives — per exercise across the whole cohort —
+  the pass/fail/missing split, the average score, and the deduction rules that
+  cost points most often.
 - **Bulk grade** (mentor or admin): the **Grade** icon accepts a multi-row
   selection — one student opens the exercise picker as before; several queue a
   full "grade all exercises" run for each (the worker runs them one at a time),
@@ -160,10 +161,10 @@ grading settings live on the **Settings** page behind the top-right user menu):
 - **Export roster** (mentor or admin): a download icon in the Students toolbar
   exports the roster — as currently searched and sorted — to a CSV (rank, name,
   project, points, verdict counts, last graded).
-- **Activity** (mentor or admin): an **Activity** tab lists every recent
+- **Activity** (mentor or admin): an **Activity Logs** tab lists every recent
   grade/sync job across the deployment — who started it, its status (including
-  background failures), a result/cost summary, and the running total estimated
-  Claude spend.
+  background failures), and a per-job result/cost summary. A refresh icon in the
+  toolbar reloads the list.
 - **Grading history** (everyone, own grades only for students): each student's
   detail page has a **Grading history** panel listing every grading run; click
   **View** to open a read-only snapshot of that report exactly as it was then.
