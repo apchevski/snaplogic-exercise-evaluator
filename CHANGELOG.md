@@ -32,6 +32,7 @@
 ### Ops / infra
 
 - **DLQ and worker-error CloudWatch alarms** (`infra/modules/sqs-worker`) email the ops address (same as the billing budget) when a job message dead-letters or the worker Lambda raises an unhandled error. Free at this scale (CloudWatch 10-alarm free tier + free SNS email). Adds an SNS topic + subscription. The GitHub deploy role gained `cloudwatch:*` and `sns:*`. **Needs `terraform apply`** (confirm the SNS subscription email on first apply).
+- **Removed the nightly `backup-exercises.yml` workflow** (and its `exercises-backup/` git snapshot). It was largely redundant with the protections the data bucket already has — versioning (noncurrent 90 days) + `prevent_destroy` cover accidental UI edits/deletes — while committing binary student-input resources into git nightly. The narrow gaps it uniquely covered (hard-delete version purges, >90-day retention, whole-account loss) are better addressed by a managed/offsite backup if we want one; for now there's no git-side export.
 
 ### Cleanup
 

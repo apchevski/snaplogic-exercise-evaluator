@@ -86,8 +86,7 @@ plan → judge → report loop the skill used to drive interactively.
   prunes archived folders from its working tree after materialize (out of
   sync, grading, and the points denominator) while S3 keeps everything.
   Durability: bucket versioning (noncurrent 90 days) + table PITR +
-  `prevent_destroy` on both, plus the nightly one-way
-  `backup-exercises.yml` snapshot into `exercises-backup/` in the repo.
+  `prevent_destroy` on both.
 - **Hard deletes (July 2026): admin-only, purge every trace.** The user's
   requirement was "no tracks left in AWS", so `DELETE /v1/students/{slug}`
   and `DELETE /v1/exercises/{slug}` purge **all S3 object versions** under
@@ -105,7 +104,7 @@ plan → judge → report loop the skill used to drive interactively.
   slugs like archived ones). S3-authored-only exercises delete cleanly
   with no tombstone. `POST /v1/exercises` on a tombstoned slug re-creates
   it. Out of reach by design: CloudWatch log lines (retention handles
-  them) and prior `exercises-backup/` snapshots in git history.
+  them).
 - **Student input files** (`exercises/<slug>/resources/` — see
   `conventions/exercise-resources-folder.md`) are authored content, but
   they're too big to stream through a Lambda response (base64 + the 6 MB
