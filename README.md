@@ -681,11 +681,7 @@ edited and archived from the web UI; the `exercises/` folders in this repo
 are a *seed* — anything shipped there graduates into S3 on its next sync
 (additively; an S3 copy is never overwritten by the image), and from then on
 the UI owns it. Durability comes from the AWS side, not from git: bucket
-versioning + DynamoDB point-in-time recovery + `prevent_destroy` guards, plus
-a nightly one-way snapshot into `exercises-backup/` in this repo
-(`backup-exercises.yml`; restore = `aws s3 sync exercises-backup/
-s3://<data-bucket>/exercises/`). Never author into `exercises-backup/` — it's
-an export, not an input.
+versioning + DynamoDB point-in-time recovery + `prevent_destroy` guards.
 
 ### Creating and editing (web UI, admin only)
 

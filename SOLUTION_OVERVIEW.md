@@ -164,9 +164,7 @@ pivot). Layout:
   Uploads also go browser → S3 directly via presigned PUT.
 
 **Durability stack:** bucket versioning (90-day noncurrent) + DynamoDB PITR +
-Terraform `prevent_destroy` + a nightly one-way snapshot of `exercises/` into
-`exercises-backup/` in this repo. **Never author into `exercises-backup/`** —
-it's an export. Restore = `aws s3 sync exercises-backup/ s3://<bucket>/exercises/`.
+Terraform `prevent_destroy`.
 
 **Deletes:** *Archive* (admin) is the reversible soft delete — a flag on the
 row; the worker prunes archived slugs from its working tree, S3 keeps
@@ -271,7 +269,6 @@ Four GitHub Actions workflows; non-secret config comes from
 | `deploy-backend` | backend/evaluator changes | pytest (moto AWS + stubbed Claude, $0) → docker build → push ECR → update both Lambdas |
 | `deploy-frontend` | frontend changes | vitest → vite build → sync SPA bucket → CloudFront invalidation |
 | `deploy-infra` | infra changes | fmt + validate → `terraform plan` (saved artifact, printed to summary) → **pause for manual approval** (`production` GitHub Environment) → apply the exact reviewed plan |
-| `backup-exercises` | nightly cron | S3 `exercises/` → commit snapshot to `exercises-backup/` |
 
 First-time deployment order (state bucket → targeted apply for ECR → manual
 image push → full apply → secret value → Cognito users → deploy.vars → Sync
@@ -304,7 +301,7 @@ budget alarm emails on overspend.
    explicit values; uncovered observations are $0 Notes.
 4. **S3 wins over git for exercise content** — `exercises/` in the repo is a
    create-only seed; don't "fix" exercise content in git and expect it to
-   deploy. Never author into `exercises-backup/`.
+   deploy.
 5. **Paid jobs never auto-retry** — worker concurrency 1, DLQ maxReceiveCount 1.
    Don't add retries around the Claude call path without thinking about cost.
    The one deliberate exception is the batch **collect** step, which re-enqueues
