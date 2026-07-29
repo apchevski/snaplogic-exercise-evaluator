@@ -194,6 +194,10 @@ button.tool-btn:hover:not(:disabled) { background: #dbe9f7; border-color: #9fb8c
 button.tool-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 button.tool-btn.danger { color: var(--sl-red); background: #fdf0ef; border-color: #e8c7c4; }
 button.tool-btn.danger:hover:not(:disabled) { background: #fbdeda; border-color: #d9a29e; }
+/* Spin the icon while a refresh is in flight so the click has visible feedback.
+   Full opacity (not the 0.35 :disabled dim) keeps the spinner clearly readable. */
+button.tool-btn.spinning { opacity: 1; }
+button.tool-btn.spinning .btn-ico { animation: spin 0.8s linear infinite; transform-origin: center; }
 
 /* ---------- data tables ---------- */
 .table-wrap { overflow-x: auto; }
