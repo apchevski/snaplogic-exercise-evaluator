@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "../api";
 import { useToken } from "../auth";
-import { IconSync } from "../components/icons";
 import {
   PagerFooter,
   Panel,
@@ -72,12 +71,9 @@ export default function Activity() {
   const [perPage, setPerPage] = useState(25);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setRefreshing(true);
-    const started = Date.now();
     try {
       const { jobs } = await api.listJobs(token);
       setJobs(jobs);
@@ -87,12 +83,6 @@ export default function Activity() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
-      // Keep the icon spinning long enough to register even when the response
-      // comes back instantly — otherwise a fast refresh looks like nothing
-      // happened.
-      const elapsed = Date.now() - started;
-      if (elapsed < 500) await new Promise((r) => setTimeout(r, 500 - elapsed));
-      setRefreshing(false);
     }
   }, [token]);
 
@@ -135,15 +125,6 @@ export default function Activity() {
               placeholder="Search by student, exercise, user, or status"
             />
             <span className="toolbar-spacer" />
-            <button
-              className={`tool-btn${refreshing ? " spinning" : ""}`}
-              onClick={() => void refresh()}
-              disabled={refreshing}
-              title="Refresh"
-              aria-label="Refresh"
-            >
-              <IconSync size={18} />
-            </button>
             <label className="field">
               Entries per Page:
               <select

@@ -13,8 +13,7 @@
 ### UI polish
 
 - **Exercises page:** the **Exercise Analytics** panel now sits *below* the "Exercise Sync Status of All Projects" table instead of above it, so the sync table is what you land on.
-- **Activity page:** the section is now titled **Activity Logs** (was "Activity — Grading & Sync Jobs"). Its **Refresh** button is now a refresh icon, and the running "Total ≈ $…" estimated-spend readout next to it was removed (per-job cost still shows in the Detail column).
-- **Activity page:** the **Refresh** icon now spins while a reload is in flight (and the button is briefly disabled), so a click gives visible feedback even when the response returns instantly.
+- **Activity page:** the section is now titled **Activity Logs** (was "Activity — Grading & Sync Jobs"). The manual **Refresh** button was removed (it used the same icon as Sync and was confusing; the list already loads when you open the page), along with the running "Total ≈ $…" estimated-spend readout next to it (per-job cost still shows in the Detail column).
 
 ### Grading correctness & cost
 
