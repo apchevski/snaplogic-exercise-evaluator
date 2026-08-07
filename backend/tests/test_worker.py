@@ -237,6 +237,47 @@ def test_single_task_grade_without_previous_meta_still_runs(aws, monkeypatch):
     ]
 
 
+def test_regrade_flag_lands_on_the_report_row_only_when_asked(aws, monkeypatch):
+    """The REPORT row records whether the run came from a Regrade button.
+
+    The grading history's Scope column reads it to say "Regrade: …" versus
+    "Grade: …"; a plain single-task Grade must leave the attribute off, not
+    write False, so old rows and new Grades read alike.
+    """
+    store = StubStore()
+    monkeypatch.setattr(worker, "_make_store", lambda: store)
+    import evaluator.runner as runner_mod
+
+    monkeypatch.setattr(
+        runner_mod, "run_grade", lambda student, **kw: _fake_run_result(student)
+    )
+
+    regrade = _seed_job(
+        "job-regrade-flag", "grade", "jane-doe",
+        student="Jane Doe", student_slug="jane-doe", task="task_02_currency",
+        regrade=True,
+    )
+    worker.handler({"Records": [{"body": json.dumps(regrade)}]}, None)
+    version = _get_job("job-regrade-flag")["result"]["version"]
+    row = dynamo_table().get_item(
+        Key={"pk": "STUDENT#jane-doe", "sk": f"REPORT#{version}"}
+    )["Item"]
+    assert row["single_task_only"] == "task_02_currency"
+    assert row["regrade"] is True
+
+    plain = _seed_job(
+        "job-grade-flagless", "grade", "john-roe",
+        student="John Roe", student_slug="john-roe", task="task_02_currency",
+    )
+    worker.handler({"Records": [{"body": json.dumps(plain)}]}, None)
+    version = _get_job("job-grade-flagless")["result"]["version"]
+    row = dynamo_table().get_item(
+        Key={"pk": "STUDENT#john-roe", "sk": f"REPORT#{version}"}
+    )["Item"]
+    assert row["single_task_only"] == "task_02_currency"
+    assert "regrade" not in row
+
+
 def test_multi_task_grade_runs_each_slug_and_merges_usage(aws, monkeypatch):
     store = StubStore()
     monkeypatch.setattr(worker, "_make_store", lambda: store)

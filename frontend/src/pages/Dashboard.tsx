@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { Link } from "react-router-dom";
 
+import {
+  elapsedSince,
+  useActiveGradings,
+  useOnGradingFinished,
+} from "../activeJobs";
 import { api, pollJob } from "../api";
 import { useCanGrade, useIsAdmin, useToken } from "../auth";
 import { AddStudentModal } from "../components/AddStudentModal";
@@ -177,6 +182,17 @@ export default function Dashboard() {
     void refresh();
   }, [refresh]);
 
+  // Gradings in flight anywhere in the deployment — not just ones this tab
+  // started. Survives a browser refresh and covers other people's runs, which
+  // is what makes the "already grading" guard below trustworthy.
+  const {
+    jobs: activeGradeJobs,
+    forStudent: activeGradingFor,
+    refresh: refreshActiveGradings,
+  } = useActiveGradings(token, canGrade);
+  // Someone's run just ended (maybe in another session) → pull fresh grades.
+  useOnGradingFinished(activeGradeJobs, refresh);
+
   useEffect(() => {
     api
       .listExercises(token)
@@ -205,6 +221,9 @@ export default function Dashboard() {
       setError(null);
       try {
         const { id } = await api.startGrading(token, studentName, tasks ?? undefined);
+        // Show it in the "Gradings in Progress" panel immediately instead of
+        // waiting out the poll interval.
+        refreshActiveGradings();
         // A full "grade all" run (tasks == null) judges via the async Batch
         // API — it can take minutes to ~1h, so poll longer and, if it outlasts
         // the browser, stop quietly (the report lands on the next refresh).
@@ -216,12 +235,15 @@ export default function Dashboard() {
             ? { intervalMs: 8000, timeoutMs: 2 * 60 * 60 * 1000, onTimeout: "stop" }
             : undefined,
         );
+        // Terminal: drop it out of the in-flight list now rather than leaving
+        // a stale "Grading…" up for the rest of the poll interval.
+        refreshActiveGradings();
         if (job.status === "succeeded") void refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [token, refresh],
+    [token, refresh, refreshActiveGradings],
   );
 
   // Bulk grade: queue a full "grade all exercises" run for each selected
@@ -314,12 +336,45 @@ export default function Dashboard() {
     );
   };
 
+  // True while ANY grading for this student is in flight — one this tab
+  // started, or one an admin/mentor started elsewhere. The backend holds a
+  // single grade lock per student, so a second run would 409 anyway.
+  const studentBusy = (s: StudentMeta) =>
+    jobBusy(s.slug) || jobBusy(s.display_name) || activeGradingFor(s.slug) !== undefined;
+
   const onSort = (key: string) => setSort((s) => nextSort(s, key, DEFAULT_DIR[key] ?? "asc"));
   const sc = (key: string) => (sort.key === key ? "sorted" : "");
 
   const jobEntries = Object.entries(jobs);
   const nameFor = (key: string) =>
     students.find((s) => s.slug === key || s.display_name === key)?.display_name ?? key;
+
+  // The "Gradings in Progress" panel merges two sources: every run in flight
+  // deployment-wide (durable — it survives a refresh and shows other people's
+  // runs), plus this session's finished runs, so the completion + cost pill
+  // doesn't disappear the instant a run ends.
+  const activeSlugs = new Set(activeGradeJobs.map((j) => j.target));
+  const gradingRows: {
+    key: string;
+    name: string;
+    job: Job;
+    startedAt?: string;
+    live: boolean;
+  }[] = [
+    ...activeGradeJobs.map((j) => ({
+      key: j.job_id,
+      name: nameFor(j.target),
+      job: j,
+      startedAt: j.created_at,
+      live: true,
+    })),
+    ...jobEntries
+      .filter(
+        ([key, j]) =>
+          (j.status === "succeeded" || j.status === "failed") && !activeSlugs.has(key),
+      )
+      .map(([key, j]) => ({ key, name: nameFor(key), job: j, live: false })),
+  ];
   // Staff: select + rank + 9 data columns. Students lose the select column
   // plus Project Space / Project / Last Graded (leaderboard view).
   const colCount = canGrade ? 11 : 7;
@@ -346,9 +401,8 @@ export default function Dashboard() {
     () => students.filter((s) => selectedSlugs.has(s.slug)),
     [students, selectedSlugs],
   );
-  const selectedBusy = selectedStudents.some(
-    (s) => jobBusy(s.slug) || jobBusy(s.display_name),
-  );
+  const selectedBusy = selectedStudents.some(studentBusy);
+  const busySelected = selectedStudents.filter(studentBusy);
 
   // Header checkbox: selects/clears every row shown on the current page.
   const pageSlugs = pageItems.map((s) => s.slug);
@@ -367,10 +421,10 @@ export default function Dashboard() {
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
 
-      {jobEntries.length > 0 && (
+      {gradingRows.length > 0 && (
         <Panel
-          title="Grading Jobs of This Session"
-          hint="Jobs started from this browser session. Finished jobs refresh the grades below."
+          title="Gradings in Progress"
+          hint="Every grading running right now — whoever started it and from wherever — plus the ones this session just finished. This list is read from the server, so it survives a browser refresh, and a student already being graded can't be queued again until their run ends. Full “grade all” runs go through the batch API and typically take a few minutes (occasionally up to an hour); the grades below refresh automatically when a run finishes."
         >
           <div className="table-wrap">
             <table className="data-table">
@@ -378,15 +432,21 @@ export default function Dashboard() {
                 <tr>
                   <th className="plain">Student</th>
                   <th className="plain">Status</th>
+                  <th className="plain">Running for</th>
+                  <th className="plain">Started by</th>
                 </tr>
               </thead>
               <tbody>
-                {jobEntries.map(([key, job]) => (
+                {gradingRows.map(({ key, name, job, startedAt, live }) => (
                   <tr key={key}>
-                    <td>{nameFor(key)}</td>
+                    <td>{name}</td>
                     <td>
                       <StatusPill job={job} kind="grade" />
                     </td>
+                    <td className="cell-muted">
+                      {live ? (elapsedSince(startedAt) ?? "—") : "finished"}
+                    </td>
+                    <td className="cell-muted">{job.requested_by ?? "you"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -428,9 +488,13 @@ export default function Dashboard() {
                   title={
                     selectedStudents.length === 0
                       ? "Grade — select one or more students first"
-                      : selectedStudents.length === 1
-                        ? "Grade the selected student (pick which exercises)"
-                        : `Grade all exercises for the ${selectedStudents.length} selected students`
+                      : selectedBusy
+                        ? `Grade — a grading is already running for ${busySelected
+                            .map((s) => s.display_name)
+                            .join(", ")}. Wait for it to finish.`
+                        : selectedStudents.length === 1
+                          ? "Grade the selected student (pick which exercises)"
+                          : `Grade all exercises for the ${selectedStudents.length} selected students`
                   }
                   aria-label="Grade selected students"
                 >
@@ -575,6 +639,23 @@ export default function Dashboard() {
                         </Link>
                       ) : (
                         s.display_name
+                      )}
+                      {/* Marks the row as locked by a run in flight — the
+                          Grade button is disabled for it either way. */}
+                      {canGrade && activeGradingFor(s.slug) && (
+                        <span
+                          className="status-pill running row-grading"
+                          title={`Grading in progress — started by ${
+                            activeGradingFor(s.slug)?.requested_by ?? "someone"
+                          }${
+                            elapsedSince(activeGradingFor(s.slug)?.created_at)
+                              ? `, ${elapsedSince(activeGradingFor(s.slug)?.created_at)} ago`
+                              : ""
+                          }`}
+                        >
+                          <span className="spinner" />
+                          Grading…
+                        </span>
                       )}
                     </td>
                     {canGrade && (

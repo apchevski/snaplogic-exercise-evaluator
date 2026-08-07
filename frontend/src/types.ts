@@ -208,6 +208,13 @@ export interface ReportVersion {
   requested_by?: string;
   tasks_scope?: string[];
   single_task_only?: string | null;
+  // True only when the run came from a task card's Regrade button. A
+  // single-task run started from the Students tab's exercise picker is a
+  // Grade, and leaves this unset.
+  regrade?: boolean;
+  // Claude spend for this run (batch runs are already billed at 50%). Absent
+  // on runs recorded before cost was tracked, and on all-deterministic runs.
+  usage?: { est_cost_usd?: number; calls?: number };
 }
 
 /** One per-exercise aggregate row (GET /v1/analytics/exercises). */

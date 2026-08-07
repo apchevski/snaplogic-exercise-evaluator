@@ -12,7 +12,9 @@ Defense layers (outer → inner):
        | GET  /v1/students (list)          |  ✅   |  ✅    |  ✅ all rows; others slimmed |
        | GET  /v1/students/{slug} (+ /reports) | ✅ | ✅    |  ✅ own card only (else 403) |
        | GET  /v1/config, /v1/exercises/{slug} (authored content incl. notes.md), job polling | ✅ | ✅ | ❌ 403 |
-       | GET  /v1/jobs (activity log), /v1/analytics/exercises | ✅ | ✅ | ❌ 403 |
+       | GET  /v1/jobs (activity log) | ✅ all users' jobs | ✅ own jobs only | ❌ 403 |
+       | GET  /v1/jobs/active (in-flight guard) | ✅ | ✅ (every user's) | ❌ 403 |
+       | GET  /v1/analytics/exercises | ✅ | ✅ | ❌ 403 |
        | GET  /v1/students/{slug}/reports/{version} (report history) | ✅ | ✅ | ✅ own card only |
        | GET/PUT /v1/settings (own credentials + judge model) | ✅ | ✅ (no SnapLogic creds) | ❌ 403 |
        | GET  /v1/students/{slug}/report/edits (audit log) | ✅ | ✅ | ❌ 403 |

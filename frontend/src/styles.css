@@ -367,6 +367,10 @@ tr.expand-row:hover td { background: #f8f9fb; }
 .sync-fail { display: inline-flex; align-items: center; color: #c62828; vertical-align: middle; cursor: help; }
 .job-error { color: #c62828; font-size: 12px; margin-top: 3px; white-space: pre-wrap; font-weight: 400; }
 .job-cost { color: var(--sl-muted); font-size: 12px; }
+/* inline "Grading…" marker next to a student's name while a run holds their
+ * grade lock — smaller and quieter than the panel's own pill */
+.status-pill.row-grading { margin-left: 8px; font-size: 11.5px; cursor: help; }
+.status-pill.row-grading .spinner { width: 9px; height: 9px; }
 
 /* ---------- chips & badges ---------- */
 .pts-chip {
@@ -651,8 +655,8 @@ td.rank-cell { width: 38px; text-align: center; }
 .scenario-row input:nth-child(2) { flex: 1; font-family: var(--mono); font-size: 12px; }
 .resource-chip.chip-removed { text-decoration: line-through; color: #a33230; border-color: #eec1c0; background: #fdf4f4; }
 
-/* archived exercises: kept forever, just excluded from sync/grade */
-.sync-status.archived { background: #eceff1; color: #5b6771; border: 1px dashed #b3bcc5; }
+/* archived exercises: kept forever, just excluded from sync/grade. No badge —
+   the greyed row plus the bare dash in Sync Status is the whole signal. */
 tr.row-archived td { opacity: 0.62; }
 tr.row-archived td.select-cell { opacity: 1; }
 

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
+import {
+  elapsedSince,
+  useActiveGradings,
+  useOnGradingFinished,
+} from "../activeJobs";
 import { api, pollJob } from "../api";
 import { useCanGrade, useToken } from "../auth";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -172,6 +177,25 @@ export default function StudentDetail() {
     }
   }, [token, slug]);
 
+  // Gradings in flight deployment-wide — this student's may have been started
+  // by someone else, or by this user in another tab before a refresh wiped the
+  // in-page job state. The backend holds one grade lock per student, so any of
+  // them blocks every Grade/Regrade button on this page.
+  const {
+    jobs: activeGradeJobs,
+    forStudent: activeGradingFor,
+    refresh: refreshActiveGradings,
+  } = useActiveGradings(token, canGrade);
+  const activeGrading = activeGradingFor(slug);
+
+  // A run finished (possibly started elsewhere) → re-read the report it just
+  // rewrote, and the history index if the panel is already open.
+  const onGradingFinished = useCallback(() => {
+    void refresh();
+    if (versions !== null) void loadVersions();
+  }, [refresh, loadVersions, versions]);
+  useOnGradingFinished(activeGradeJobs, onGradingFinished);
+
   const toggleVersions = () => {
     const next = !versionsOpen;
     setVersionsOpen(next);
@@ -194,19 +218,24 @@ export default function StudentDetail() {
   const name = student?.display_name ?? report?.student ?? slug;
 
   // The backend holds one grade lock per student, so any in-flight job (full,
-  // batch, or single-task) disables every Regrade button.
-  const anyBusy = Object.values(jobs).some(
-    (j) =>
-      j.status === "queued" ||
-      j.status === "running" ||
-      j.status === "batch_processing",
-  );
+  // batch, or single-task) disables every Grade/Regrade button — including one
+  // started from another session, which is what `activeGrading` covers.
+  const anyBusy =
+    activeGrading !== undefined ||
+    Object.values(jobs).some(
+      (j) =>
+        j.status === "queued" ||
+        j.status === "running" ||
+        j.status === "batch_processing",
+    );
 
   const runGrading = useCallback(
-    async (jobKey: string, tasks?: string) => {
+    async (jobKey: string, tasks?: string, regrade?: boolean) => {
       setError(null);
       try {
-        const { id } = await api.startGrading(token, name, tasks);
+        const { id } = await api.startGrading(token, name, tasks, { regrade });
+        // Reflect it in the in-progress banner without waiting out the poll.
+        refreshActiveGradings();
         // "Grade all" (no tasks) runs as an async batch — poll longer and stop
         // quietly if it outlasts the page (the report shows on next refresh);
         // a single-task Regrade stays instant on the default poll.
@@ -218,6 +247,9 @@ export default function StudentDetail() {
             ? { intervalMs: 8000, timeoutMs: 2 * 60 * 60 * 1000, onTimeout: "stop" }
             : undefined,
         );
+        // Terminal: clear the in-progress banner now rather than leaving it up
+        // for the rest of the poll interval.
+        refreshActiveGradings();
         if (job.status === "succeeded") {
           // Drop any in-progress text edit: the regraded report replaces it.
           setEditing(null);
@@ -227,11 +259,13 @@ export default function StudentDetail() {
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [token, name, refresh],
+    [token, name, refresh, refreshActiveGradings],
   );
 
-  const regradeTask = useCallback(
-    (taskSlug: string) => runGrading(taskSlug, taskSlug),
+  // `regrade` is intent only — it decides whether the grading history labels
+  // the run "Regrade: …" or "Grade: …", and changes nothing about the run.
+  const gradeTask = useCallback(
+    (taskSlug: string, regrade: boolean) => runGrading(taskSlug, taskSlug, regrade),
     [runGrading],
   );
 
@@ -376,6 +410,11 @@ export default function StudentDetail() {
       </button>
     ) : null;
 
+  // Explains a greyed-out Grade/Regrade button (the backend would 409 anyway).
+  const busyTitle = anyBusy
+    ? "A grading for this student is already running — wait for it to finish."
+    : undefined;
+
   const taskEditor = (t: TaskResult) =>
     editing?.kind === "task" && editing.slug === t.slug ? (
       <TaskEvaluationEditor
@@ -390,6 +429,18 @@ export default function StudentDetail() {
   return (
     <main className="page">
       {error && <div className="error-banner">{error}</div>}
+      {canGrade && activeGrading && (
+        <div className="warn-banner">
+          <span className="spinner" /> A grading for <strong>{name}</strong> is
+          running right now
+          {activeGrading.requested_by && <> — started by {activeGrading.requested_by}</>}
+          {elapsedSince(activeGrading.created_at) && (
+            <>, {elapsedSince(activeGrading.created_at)} ago</>
+          )}
+          . Grade and Regrade are disabled until it finishes; this page updates
+          itself when it does.
+        </div>
+      )}
       {canGrade && needsSyncCount > 0 && (
         <div className="warn-banner">
           ⚠ {needsSyncCount} exercise{needsSyncCount === 1 ? " was" : "s were"} skipped
@@ -470,6 +521,7 @@ export default function StudentDetail() {
                     className="btn small primary"
                     onClick={() => setGradeConfirm({ kind: "all" })}
                     disabled={anyBusy}
+                    title={busyTitle}
                   >
                     <IconGrade />
                     Grade all exercises
@@ -497,6 +549,7 @@ export default function StudentDetail() {
                             setGradeConfirm({ kind: "task", slug: t.slug, regrade: true })
                           }
                           disabled={anyBusy}
+                          title={busyTitle}
                         >
                           <IconGrade />
                           Regrade
@@ -529,6 +582,7 @@ export default function StudentDetail() {
                             setGradeConfirm({ kind: "task", slug: e.slug, regrade: false })
                           }
                           disabled={anyBusy}
+                          title={busyTitle}
                         >
                           <IconGrade />
                           Grade
@@ -594,7 +648,7 @@ export default function StudentDetail() {
       {report && (
         <Panel
           title="Grading history"
-          hint="Every grading run for this student, newest first. Each run is an immutable snapshot — view a past one to see the report exactly as it was then. The live report above always reflects the latest run plus any edits."
+          hint="Every grading run for this student, newest first — its scope, who ran it, and roughly what it cost in Claude API spend (full runs are billed at the 50% batch rate). Each run is an immutable snapshot — view a past one to see the report exactly as it was then. The live report above always reflects the latest run plus any edits."
         >
           <div className="panel-body">
             <button className="btn small" onClick={toggleVersions}>
@@ -617,6 +671,7 @@ export default function StudentDetail() {
                         <th className="plain">Graded</th>
                         <th className="plain">Points</th>
                         <th className="plain">Scope</th>
+                        <th className="plain">Claude cost</th>
                         <th className="plain">By</th>
                         <th className="plain" />
                       </tr>
@@ -634,11 +689,28 @@ export default function StudentDetail() {
                               : "—"}
                           </td>
                           <td className="cell-muted">
+                            {/* "Regrade" only when the run came from a task
+                                card's Regrade button; a single-exercise run
+                                picked from the Students tab is a Grade. */}
                             {v.single_task_only
-                              ? `regrade: ${v.single_task_only}`
+                              ? `${v.regrade ? "Regrade" : "Grade"}: ${titleFor(
+                                  v.single_task_only,
+                                )}`
                               : v.tasks_scope
                                 ? `${v.tasks_scope.length} exercises`
                                 : "full run"}
+                          </td>
+                          <td
+                            className="cell-muted"
+                            title={
+                              typeof v.usage?.est_cost_usd === "number"
+                                ? "Estimated Claude API spend for this run (full runs are billed at the 50% batch rate)"
+                                : "No cost recorded — an all-deterministic run, or a run from before cost tracking"
+                            }
+                          >
+                            {typeof v.usage?.est_cost_usd === "number"
+                              ? `≈ $${v.usage.est_cost_usd.toFixed(2)}`
+                              : "—"}
                           </td>
                           <td className="cell-muted">{v.requested_by ?? "—"}</td>
                           <td>
@@ -690,7 +762,7 @@ export default function StudentDetail() {
             setGradeConfirm(null);
             if (!target) return;
             if (target.kind === "all") void gradeAll();
-            else void regradeTask(target.slug);
+            else void gradeTask(target.slug, target.regrade);
           }}
           onClose={() => setGradeConfirm(null)}
         >

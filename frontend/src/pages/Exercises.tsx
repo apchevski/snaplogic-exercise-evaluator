@@ -110,8 +110,13 @@ export default function Exercises() {
   const [editing, setEditing] = useState<ExerciseDetail | null>(null);
   const [editLoading, setEditLoading] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
-  // Confirmation dialog targets for archiving (unarchive is immediate).
-  const [archiveTarget, setArchiveTarget] = useState<Exercise[] | null>(null);
+  // Confirmation dialog target for the Archive toolbar icon. Both directions
+  // confirm: archiving pulls an exercise out of grading and student totals,
+  // and unarchiving puts it back into everyone's denominator — neither should
+  // happen on a single stray click.
+  const [archiveTarget, setArchiveTarget] = useState<
+    { targets: Exercise[]; archive: boolean } | null
+  >(null);
   // Confirmation dialog targets for the admin-only permanent Delete.
   const [deleting, setDeleting] = useState<Exercise[] | null>(null);
   // Confirmation dialog target for sync: "all" = Sync All Exercises,
@@ -191,9 +196,8 @@ export default function Exercises() {
   );
 
   // Flip the archived flag on each target, sequentially so a failure names
-  // the exercise it hit. Throws on failure so the archive confirmation dialog
-  // can stay open and surface the error; the inline unarchive path catches it
-  // into the page banner instead.
+  // the exercise it hit. Throws on failure so the confirmation dialog can stay
+  // open and surface the error.
   const setArchivedMany = useCallback(
     async (targets: Exercise[], archived: boolean) => {
       setArchiving(true);
@@ -306,7 +310,14 @@ export default function Exercises() {
     );
     const cmp = COMPARE[sort.key] ?? COMPARE.exercise;
     const sign = sort.dir === "asc" ? 1 : -1;
-    return [...filtered].sort((a, b) => cmp(a, b) * sign);
+    // Archived exercises always sink to the bottom, whatever column is
+    // sorted and in which direction — they're out of the active set, so
+    // they should never push a live exercise down the list.
+    return [...filtered].sort(
+      (a, b) =>
+        Number(Boolean(a.archived)) - Number(Boolean(b.archived)) ||
+        cmp(a, b) * sign,
+    );
   }, [exercises, search, sort, isStudent]);
 
   const { page, setPage, pageItems, pageCount } = usePagination(visible, perPage);
@@ -364,17 +375,11 @@ export default function Exercises() {
       return next;
     });
 
-  // The Archive button confirms first (archiving hides an exercise from
-  // grading and student totals); Unarchive is harmless, so it runs inline.
+  // Both directions go through the confirmation dialog — the selection is
+  // uniform by then, so `allArchived` decides which way the icon acts.
   const onArchiveClick = () => {
-    if (allArchived) {
-      setError(null);
-      void setArchivedMany(selectedExercises, false).catch((e) =>
-        setError(e instanceof Error ? e.message : String(e)),
-      );
-    } else if (noneArchived) {
-      setArchiveTarget(selectedExercises);
-    }
+    if (allArchived) setArchiveTarget({ targets: selectedExercises, archive: false });
+    else if (noneArchived) setArchiveTarget({ targets: selectedExercises, archive: true });
   };
 
   return (
@@ -625,7 +630,18 @@ export default function Exercises() {
                       {!isStudent && (
                         <>
                           <td className={sc("status")}>
-                            {jobs[ex.slug] ? (
+                            {ex.archived ? (
+                              // Archived exercises are excluded from syncing
+                              // entirely, so their stored status is moot — the
+                              // row's greyed styling carries the state and the
+                              // cell stays a bare dash (tooltip explains it).
+                              <span
+                                className="cell-muted"
+                                title="Archived — not synced, graded, or counted toward student totals"
+                              >
+                                —
+                              </span>
+                            ) : jobs[ex.slug] ? (
                               // A sync in flight (or failed) replaces the stored
                               // status: a spinner while it runs, a red circled ✕
                               // with the error on hover if it failed. Successful
@@ -660,7 +676,6 @@ export default function Exercises() {
                                 {ex.sync_status.replace(/_/g, " ")}
                               </span>
                             )}{" "}
-                            {ex.archived && <span className="sync-status archived">archived</span>}{" "}
                             {ex.missing_from_image && (
                               <span className="sync-status config_error">missing from image</span>
                             )}
@@ -774,44 +789,75 @@ export default function Exercises() {
           )}
         </ConfirmModal>
       )}
-      {archiveTarget && archiveTarget.length > 0 && isAdmin && (
+      {archiveTarget && archiveTarget.targets.length > 0 && isAdmin && (
         <ConfirmModal
-          title={archiveTarget.length === 1 ? "Archive Exercise" : "Archive Exercises"}
+          title={
+            archiveTarget.archive
+              ? archiveTarget.targets.length === 1
+                ? "Archive Exercise"
+                : "Archive Exercises"
+              : archiveTarget.targets.length === 1
+                ? "Unarchive Exercise"
+                : "Unarchive Exercises"
+          }
           confirmLabel={
-            archiveTarget.length === 1
-              ? "Archive"
-              : `Archive ${archiveTarget.length} exercises`
+            archiveTarget.targets.length === 1
+              ? archiveTarget.archive
+                ? "Archive"
+                : "Unarchive"
+              : `${archiveTarget.archive ? "Archive" : "Unarchive"} ${
+                  archiveTarget.targets.length
+                } exercises`
           }
           confirmClassName="btn primary"
-          busyLabel="Archiving…"
+          busyLabel={archiveTarget.archive ? "Archiving…" : "Unarchiving…"}
           onConfirm={() =>
-            setArchivedMany(archiveTarget, true).then(() => setArchiveTarget(null))
+            setArchivedMany(archiveTarget.targets, archiveTarget.archive).then(() =>
+              setArchiveTarget(null),
+            )
           }
           onClose={() => setArchiveTarget(null)}
         >
-          {archiveTarget.length === 1 ? (
+          {archiveTarget.targets.length === 1 ? (
             <p>
-              Archive{" "}
-              <strong>{archiveTarget[0].title ?? archiveTarget[0].slug}</strong>?
-              While archived, it won&rsquo;t be graded or counted toward student
-              totals.
+              {archiveTarget.archive ? "Archive" : "Unarchive"}{" "}
+              <strong>
+                {archiveTarget.targets[0].title ?? archiveTarget.targets[0].slug}
+              </strong>
+              ?{" "}
+              {archiveTarget.archive
+                ? "While archived, it won’t be graded or counted toward student totals."
+                : "It goes back into syncing and grading, and counts toward every student’s total again."}
             </p>
           ) : (
             <>
               <p>
-                Archive these <strong>{archiveTarget.length} exercises</strong>?
-                While archived, they won&rsquo;t be graded or counted toward
-                student totals.
+                {archiveTarget.archive ? "Archive" : "Unarchive"} these{" "}
+                <strong>{archiveTarget.targets.length} exercises</strong>?{" "}
+                {archiveTarget.archive
+                  ? "While archived, they won’t be graded or counted toward student totals."
+                  : "They go back into syncing and grading, and count toward every student’s total again."}
               </p>
               <ul className="bulk-list">
-                {archiveTarget.map((ex) => (
+                {archiveTarget.targets.map((ex) => (
                   <li key={ex.slug}>{ex.title ?? ex.slug}</li>
                 ))}
               </ul>
             </>
           )}
           <p className="hint">
-            Nothing is deleted — you can bring {archiveTarget.length === 1 ? "it" : "them"} back anytime.
+            {archiveTarget.archive ? (
+              <>
+                Nothing is deleted — you can bring{" "}
+                {archiveTarget.targets.length === 1 ? "it" : "them"} back anytime.
+              </>
+            ) : (
+              <>
+                Sync{" "}
+                {archiveTarget.targets.length === 1 ? "it" : "them"} afterwards
+                so grading has current artifacts to compare against.
+              </>
+            )}
           </p>
         </ConfirmModal>
       )}

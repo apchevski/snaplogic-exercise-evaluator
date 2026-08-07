@@ -241,6 +241,48 @@ stays on the synchronous `run_grade` path (instant). The API routes on scope
 Infra delta: the worker Lambda gains `sqs:SendMessage` on its own queue, a
 scoped `s3:DeleteObject` on `jobs/*`, and a `QUEUE_URL` env var.
 
+## Job visibility: two listings, two scoping rules (August 2026)
+
+`GET /v1/jobs` and `GET /v1/jobs/active` read the same JOB rows off gsi1 and
+scope them **oppositely on purpose**:
+
+- **`/v1/jobs` (Activity Logs)** is an audit trail. Admins see every user's
+  jobs; a **mentor sees only their own** (filtered on `requested_by`, compared
+  case-folded; a caller in both groups counts as admin). Students: 403.
+- **`/v1/jobs/active`** is the duplicate-grading guard, and is **never scoped
+  to the caller** — a mentor must see the admin's in-flight run, or the guard
+  it powers is worthless. It returns every job in `queued` / `running` /
+  `batch_processing`.
+
+The real enforcement is unchanged: the per-target `LOCK#grade#<slug>` row makes
+a second POST 409. The active listing exists so the SPA can *show* that (the
+"Gradings in Progress" panel, the per-row `Grading…` marker, disabled
+Grade/Regrade buttons) instead of letting someone click into an error — and so
+that state survives a browser refresh, which the old session-only React state
+did not. `frontend/src/activeJobs.ts` owns the polling hook; pages also use it
+to re-read their data when a run they didn't start finishes.
+
+**Polling cost, accepted:** the active listing queries all JOB rows (bounded by
+the 90-day `JOB_TTL_SECONDS`) on every poll — a DynamoDB filter wouldn't reduce
+RCU, since filters apply after the read. Mitigations are a 10 s interval and
+skipping polls while the tab is hidden. At this scale (single-digit staff, a
+handful of jobs a day) that's pennies. If job volume ever grows, the fix is a
+sparse GSI keyed on an attribute written only while a job is in flight — not a
+shorter interval.
+
+## Grading history labels: intent, not inference (August 2026)
+
+The REPORT row's `single_task_only` says a run covered one exercise; it cannot
+say *why*. The history's Scope column used to render every such run as
+`regrade: <slug>`, which mislabelled a single exercise picked from the Students
+tab's Grade dialog. `POST /v1/gradings` now takes an optional `regrade` boolean
+carrying the **caller's intent** — true only from a task card's Regrade button
+— which `_finalize_grade_rows` writes onto the REPORT row (only when true, so
+old rows and plain Grades read identically). It is deliberately not derived
+server-side from "does this task already have a result": whether the user
+clicked Grade or Regrade is a fact about the click, not about the data, and
+inferring it would relabel the same action differently depending on history.
+
 ## Overall summary refreshes on every run (July 2026)
 
 Every grading run — full, subset, or single-task Regrade — ends with the
