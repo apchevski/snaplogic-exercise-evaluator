@@ -130,6 +130,20 @@ export interface StudentMeta {
   // Stamped on the card whenever a mentor/admin edits the stored report.
   report_edited_by?: string | null;
   report_edited_at?: string | null;
+  // Stamped on the card whenever an admin edits the registration itself
+  // (name / email / project space / project) via the Edit Student dialog.
+  updated_by?: string | null;
+  updated_at?: string | null;
+}
+
+/** Body of PUT /v1/students/{slug} — partial, only the keys sent are applied.
+ * `project: null` restores the display-name default; `email: null` removes the
+ * student's login. The slug is never editable: it keys the report history. */
+export interface UpdateStudentPayload {
+  student?: string;
+  space?: string;
+  project?: string | null;
+  email?: string | null;
 }
 
 /** Non-secret SnapLogic settings from GET /v1/config (prefills the Add

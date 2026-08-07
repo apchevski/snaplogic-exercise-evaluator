@@ -18,6 +18,7 @@ import type {
   ReportVersion,
   StudentMeta,
   UpdateExercisePayload,
+  UpdateStudentPayload,
   UpdateUserSettingsPayload,
   UserSettings,
 } from "./types";
@@ -248,19 +249,35 @@ export const api = {
       ...(email ? { email } : {}),
     }),
 
+  // Admin only. Partial update of a registered student — only the keys sent
+  // are applied. The slug never changes (it keys the report history and the
+  // stored reports), so a renamed student keeps their grades. `project: null`
+  // restores the display-name default; `email: null` removes the student's
+  // login, a different address replaces it.
+  updateStudent: (token: string, slug: string, payload: UpdateStudentPayload) =>
+    request<{ student: StudentMeta }>(
+      token,
+      "PUT",
+      `/v1/students/${encodeURIComponent(slug)}`,
+      payload,
+    ),
+
   // No tasks = full grading; a string or a subset of slugs only (re)grades
   // those exercises. Every run also refreshes the AI Overall summary.
   // `regrade` records intent only (the task card's Regrade button was clicked)
   // so the grading history can label the run — it changes nothing about how
-  // the run executes.
+  // the run executes. `slug` addresses the student card directly: a renamed
+  // student keeps their original slug, so deriving it from the name would
+  // grade into a new, empty card. Always pass it when the caller has it.
   startGrading: (
     token: string,
     student: string,
     tasks?: string | string[],
-    opts?: { regrade?: boolean },
+    opts?: { regrade?: boolean; slug?: string },
   ) =>
     request<{ id: string }>(token, "POST", "/v1/gradings", {
       student,
+      ...(opts?.slug ? { slug: opts.slug } : {}),
       ...gradingScope(tasks),
       ...(opts?.regrade ? { regrade: true } : {}),
     }),

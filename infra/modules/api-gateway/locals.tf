@@ -6,6 +6,7 @@ locals {
     "GET /v1/students",
     "POST /v1/students",
     "GET /v1/students/{slug}",
+    "PUT /v1/students/{slug}",
     "GET /v1/students/{slug}/reports",
     "GET /v1/students/{slug}/reports/{version}",
     "PATCH /v1/students/{slug}/report",

@@ -72,6 +72,18 @@ grading settings live on the **Settings** page behind the top-right user menu):
   additionally creates a read-only web login for the student: Cognito emails
   them a temporary password, they change it on first sign-in, and from then
   on they can watch their grades (see the `student` role below).
+- **Edit a student** (admin only): tick exactly one student row and click the
+  **Edit** (pencil) icon in the toolbar. The dialog takes the same four fields
+  as *Add a student* — name, email, project space, project — prefilled with
+  what's stored. Saving re-verifies that the SnapLogic project exists wherever
+  you've pointed it (same clear "no project named …" error on a typo) and
+  changes nothing about the student's grades: **a rename keeps their existing
+  grades, report history and detail page**, because the student's internal id
+  is fixed at registration. Editing the **email** manages their login — adding
+  one invites them, a different address replaces the login (new temporary
+  password by email), and clearing it takes the login away. Editing is blocked
+  (with a clear message) while a grading for that student is running, since
+  that run would overwrite the edit when it finishes.
 - **Student sign-in** (read-only): a user in the `student` Cognito group
   lands on the **Students** table — the same roster staff see, but styled as
   a leaderboard: rank badge, name, points, and verdict counts only (the
@@ -216,9 +228,14 @@ Browser (VPN/office IPs only)
         │        grading; 400 unless the SnapLogic project exists; the stored
         │        space/project dictate later grading runs; an email creates a
         │        read-only Cognito login for the student      (mentor or admin)
-        ├─ POST /v1/gradings {student, task?|tasks?}          (mentor or admin)
+        ├─ POST /v1/gradings {student, slug?, task?|tasks?}   (mentor or admin)
         │        (no task/tasks = full run → async 50%-off Batch API;
-        │         subset/single = instant synchronous)
+        │         subset/single = instant synchronous; `slug` addresses the
+        │         card directly, which is what finds a renamed student)
+        ├─ PUT /v1/students/{slug} {student?, space?, project?, email?}
+        │        edit a registration; the slug (and so every grade) is kept,
+        │        the SnapLogic project is re-verified, the login is added/
+        │        replaced/removed; 409 mid-grading          (admin only)
         ├─ PATCH /v1/students/{slug}/report — edit evaluation (mentor or admin)
         │        (overall summary, or a task's summary/deductions/bonus/points;
         │        deductions recompute points unless a manual override pins them;

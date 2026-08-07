@@ -233,7 +233,7 @@ export default function StudentDetail() {
     async (jobKey: string, tasks?: string, regrade?: boolean) => {
       setError(null);
       try {
-        const { id } = await api.startGrading(token, name, tasks, { regrade });
+        const { id } = await api.startGrading(token, name, tasks, { regrade, slug });
         // Reflect it in the in-progress banner without waiting out the poll.
         refreshActiveGradings();
         // "Grade all" (no tasks) runs as an async batch — poll longer and stop
@@ -259,7 +259,7 @@ export default function StudentDetail() {
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [token, name, refresh, refreshActiveGradings],
+    [token, name, slug, refresh, refreshActiveGradings],
   );
 
   // `regrade` is intent only — it decides whether the grading history labels
