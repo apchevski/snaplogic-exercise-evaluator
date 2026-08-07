@@ -154,10 +154,17 @@ export const api = {
       `/v1/students/${encodeURIComponent(slug)}/reports/${encodeURIComponent(version)}`,
     ),
 
-  // Recent grade/sync jobs across the whole deployment (admin/mentor),
-  // newest first. Powers the Activity page.
+  // Recent grade/sync jobs, newest first. Powers the Activity Logs page.
+  // Admins get every user's jobs; mentors get only their own (backend-scoped).
   listJobs: (token: string) =>
     request<{ jobs: Job[] }>(token, "GET", "/v1/jobs"),
+
+  // Jobs still queued/running/batch-processing anywhere in the deployment
+  // (admin/mentor, never scoped to the caller). Lets the UI show what is
+  // grading right now and disable a second grading for the same student —
+  // regardless of who started it or which browser session it came from.
+  listActiveJobs: (token: string) =>
+    request<{ jobs: Job[] }>(token, "GET", "/v1/jobs/active"),
 
   // Per-exercise aggregates across every student's current report
   // (admin/mentor). Powers the Analytics panel.
@@ -243,10 +250,19 @@ export const api = {
 
   // No tasks = full grading; a string or a subset of slugs only (re)grades
   // those exercises. Every run also refreshes the AI Overall summary.
-  startGrading: (token: string, student: string, tasks?: string | string[]) =>
+  // `regrade` records intent only (the task card's Regrade button was clicked)
+  // so the grading history can label the run — it changes nothing about how
+  // the run executes.
+  startGrading: (
+    token: string,
+    student: string,
+    tasks?: string | string[],
+    opts?: { regrade?: boolean },
+  ) =>
     request<{ id: string }>(token, "POST", "/v1/gradings", {
       student,
       ...gradingScope(tasks),
+      ...(opts?.regrade ? { regrade: true } : {}),
     }),
 
   getGrading: (token: string, id: string) =>

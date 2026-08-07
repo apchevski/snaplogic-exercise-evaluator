@@ -10,7 +10,7 @@ from aws_lambda_powertools.event_handler.exceptions import (
 )
 from boto3.dynamodb.conditions import Key
 
-from .auth import ROLE_ADMIN, ROLE_MENTOR, _email, _require_role
+from .auth import ROLE_ADMIN, ROLE_MENTOR, _email, _groups, _require_role
 from .common import dynamo_table, from_dynamo, public_item, query_all, slugify
 from .content import _known_exercise_slugs, _reject_archived
 from .jobs import _create_job, _get_job
@@ -21,26 +21,62 @@ from .routes_students import _default_student_space, _opt_str
 #: this cap is about payload size, not retention.
 _JOB_LIST_LIMIT = 200
 
+#: Job statuses that mean the worker still owns the target — the per-target
+#: lock is held, so a second job for it would 409. Mirrors StatusPill's
+#: "busy" set in the SPA.
+_ACTIVE_JOB_STATUSES = ("queued", "running", "batch_processing")
 
-@app.get("/v1/jobs")
-def list_jobs() -> dict[str, Any]:
-    """Recent grade/sync jobs, newest first — powers the Activity page.
 
-    Reads the sparse gsi1 (entity='job'), sorts by created_at descending in
-    Python (the GSI range key is the job id, not a timestamp), and trims to
-    the most recent few hundred. Admin/mentor only — students never see the
-    job history.
+def _all_jobs_newest_first() -> list[dict[str, Any]]:
+    """Every JOB row off the sparse gsi1 (entity='job'), newest first.
+
+    Sorting happens in Python because the GSI range key is the job id, not a
+    timestamp.
     """
-    _require_role(ROLE_ADMIN, ROLE_MENTOR)
-    items = query_all(
-        IndexName="gsi1", KeyConditionExpression=Key("entity").eq("job")
-    )
-    jobs = sorted(
+    items = query_all(IndexName="gsi1", KeyConditionExpression=Key("entity").eq("job"))
+    return sorted(
         (public_item(i) for i in items),
         key=lambda j: str(j.get("created_at") or ""),
         reverse=True,
     )
+
+
+@app.get("/v1/jobs")
+def list_jobs() -> dict[str, Any]:
+    """Recent grade/sync jobs, newest first — powers the Activity Logs page.
+
+    Scoped by role: an **admin** sees every user's jobs (the deployment-wide
+    audit trail), a **mentor** sees only the jobs they started themselves.
+    Students never see the job history at all (403). Trimmed to the most
+    recent few hundred rows.
+    """
+    claims = _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    jobs = _all_jobs_newest_first()
+    if ROLE_ADMIN not in _groups(claims):
+        mine = _email(claims).strip().lower()
+        jobs = [j for j in jobs if str(j.get("requested_by") or "").strip().lower() == mine]
     return {"jobs": jobs[:_JOB_LIST_LIMIT]}
+
+
+@app.get("/v1/jobs/active")
+def list_active_jobs() -> dict[str, Any]:
+    """Jobs still in flight anywhere in the deployment, newest first.
+
+    Deliberately **not** scoped to the caller the way the Activity Logs listing
+    is: this is what stops two people (or two browser tabs) from starting a
+    second grading for a student who is already being graded. A mentor has to
+    see the admin's in-flight job for that guard to work — the backend's
+    per-target lock is the real enforcement (409), this just lets the UI
+    disable the button and show what is running instead of failing on click.
+    """
+    _require_role(ROLE_ADMIN, ROLE_MENTOR)
+    return {
+        "jobs": [
+            j
+            for j in _all_jobs_newest_first()
+            if str(j.get("status") or "") in _ACTIVE_JOB_STATUSES
+        ]
+    }
 
 
 @app.get("/v1/gradings/<job_id>")
@@ -65,6 +101,13 @@ def post_grading() -> Response:
     report, appending them if the student was never graded on them before.
     Every run — full or scoped — also refreshes the AI Overall summary from
     the merged report, so the summary never lags the latest verdicts.
+
+    Optional 'regrade' (bool) records the *caller's intent*, not a behavior
+    switch: true only when the click came from a task card's **Regrade**
+    button. It rides through to the REPORT row so the grading-history Scope
+    column can say "Regrade: …" versus "Grade: …" — a single-task run started
+    from the Students tab's exercise picker is a Grade, even if that exercise
+    happens to have an older result.
 
     The project space and project name assigned at registration (the
     STUDENT card) dictate where the run looks for the student's pipelines;
@@ -124,6 +167,9 @@ def post_grading() -> Response:
         "task": task,
         "tasks": tasks,
         "mode": "batch" if is_full_run else "sync",
+        # Only meaningful for a single-task run; None keeps it off the row
+        # entirely (_create_job drops None values).
+        "regrade": True if (task and bool(body.get("regrade"))) else None,
     }
     job = _create_job("grade", student_slug, payload, _email(claims))
     return Response(

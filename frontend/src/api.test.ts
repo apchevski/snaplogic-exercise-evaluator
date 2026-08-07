@@ -111,6 +111,48 @@ describe("api.updateStudentReport", () => {
   });
 });
 
+describe("api.startGrading", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("omits the scope keys for a full run and never sends regrade unasked", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ id: "j1" }), { status: 202 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.startGrading("tok", "Jane Doe");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/gradings",
+      expect.objectContaining({ body: JSON.stringify({ student: "Jane Doe" }) }),
+    );
+  });
+
+  it("marks a single-task run as a regrade only when asked", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ id: "j1" }), { status: 202 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.startGrading("tok", "Jane Doe", "task_01", { regrade: true });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/v1/gradings",
+      expect.objectContaining({
+        body: JSON.stringify({ student: "Jane Doe", task: "task_01", regrade: true }),
+      }),
+    );
+
+    // The same exercise graded from the Students tab is a Grade, not a regrade.
+    await api.startGrading("tok", "Jane Doe", "task_01", { regrade: false });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/v1/gradings",
+      expect.objectContaining({
+        body: JSON.stringify({ student: "Jane Doe", task: "task_01" }),
+      }),
+    );
+  });
+});
+
 describe("api.getReportEdits", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -261,6 +303,20 @@ describe("api: activity, report versions, analytics", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/v1/students/jane-doe/reports/2026-07-01T10%3A00%3A00Z",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("listActiveJobs GETs the in-flight route", async () => {
+    const payload = { jobs: [job("batch_processing")] };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await api.listActiveJobs("tok");
+
+    expect(out).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/jobs/active",
       expect.objectContaining({ method: "GET" }),
     );
   });

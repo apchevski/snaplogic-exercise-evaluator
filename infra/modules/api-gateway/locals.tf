@@ -18,6 +18,7 @@ locals {
     "GET /v1/exercises/{slug}/resources/{filename}",
     "GET /v1/analytics/exercises",
     "GET /v1/jobs",
+    "GET /v1/jobs/active",
     "GET /v1/gradings/{id}",
     "GET /v1/syncs/{id}",
     "POST /v1/gradings",

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "../api";
-import { useToken } from "../auth";
+import { useIsAdmin, useToken } from "../auth";
 import {
   PagerFooter,
   Panel,
@@ -59,12 +59,16 @@ const DEFAULT_DIR: Record<string, "asc" | "desc"> = {
   by: "asc",
 };
 
-/** Recent grade/sync jobs across the whole deployment (admin/mentor). Unlike
- * the Dashboard's "jobs from this session" panel, this reads the persisted
- * JOB rows, so failures that happened while nobody was watching still show
- * up — with who started them and what they cost. */
+/** Recent grade/sync jobs read from the persisted JOB rows, so failures that
+ * happened while nobody was watching still show up — with who started them and
+ * what they cost.
+ *
+ * Scoped by role, and enforced server-side: an admin sees every user's jobs
+ * (the deployment-wide audit trail), a mentor sees only their own. Students
+ * have no Activity tab at all (403). */
 export default function Activity() {
   const token = useToken();
+  const isAdmin = useIsAdmin();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "created", dir: "desc" });
@@ -116,13 +120,21 @@ export default function Activity() {
       {error && <div className="error-banner">{error}</div>}
       <Panel
         title="Activity Logs"
-        hint="Every grade and sync job the platform has run recently (newest first), including failures that happened in the background. Shows who started each job and its estimated Claude cost. Jobs are pruned automatically after 90 days."
+        hint={
+          isAdmin
+            ? "Every grade and sync job the platform has run recently (newest first) — from every admin and mentor — including failures that happened in the background. Shows who started each job and its estimated Claude cost. Jobs are pruned automatically after 90 days."
+            : "The grade and sync jobs you started recently (newest first), including failures that happened in the background, with each job's estimated Claude cost. Administrators see everyone's. Jobs are pruned automatically after 90 days."
+        }
         toolbar={
           <>
             <SearchBox
               value={search}
               onChange={setSearch}
-              placeholder="Search by student, exercise, user, or status"
+              placeholder={
+                isAdmin
+                  ? "Search by student, exercise, user, or status"
+                  : "Search by student, exercise, or status"
+              }
             />
             <span className="toolbar-spacer" />
             <label className="field">
@@ -179,7 +191,9 @@ export default function Activity() {
                 <tr>
                   <td colSpan={6} className="empty-cell">
                     <h3>No jobs yet</h3>
-                    Grade or sync something and it will show up here.
+                    {isAdmin
+                      ? "Grade or sync something and it will show up here."
+                      : "Grade or sync something and it will show up here — this list shows only the jobs you started."}
                   </td>
                 </tr>
               )}

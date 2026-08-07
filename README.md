@@ -143,7 +143,8 @@ grading settings live on the **Settings** page behind the top-right user menu):
   the same folder name later replaces the tombstone.
 - **Exercises** (mentor or admin): the exercise list's **Sync Status** column
   shows a green circled check when an exercise is synced and ready, a muted
-  dash when it has never been synced, and a diagnostic pill for the
+  dash when it has never been synced (or is archived — archived exercises sort
+  to the bottom of the list), and a diagnostic pill for the
   in-between/failure states; click a task name to expand its full description
   (rendered from the exercise's `description.md`). A **copy** icon at the
   right edge of each Exercise cell copies the task name to the clipboard —
@@ -161,13 +162,32 @@ grading settings live on the **Settings** page behind the top-right user menu):
 - **Export roster** (mentor or admin): a download icon in the Students toolbar
   exports the roster — as currently searched and sorted — to a CSV (rank, name,
   project, points, verdict counts, last graded).
-- **Activity** (mentor or admin): an **Activity Logs** tab lists every recent
-  grade/sync job across the deployment — who started it, its status (including
-  background failures), and a per-job result/cost summary. A refresh icon in the
-  toolbar reloads the list.
+- **Activity** (mentor or admin): an **Activity Logs** tab lists recent
+  grade/sync jobs — who started each one, its status (including background
+  failures), and a per-job result/cost summary. Scoped by role and enforced
+  server-side: an **admin** sees every admin's and mentor's jobs (the
+  deployment-wide audit trail); a **mentor** sees only the jobs they started
+  themselves. Students have no Activity tab (403).
+- **Gradings in progress** (mentor or admin): a **Gradings in Progress** panel
+  at the top of the Students page shows every grading running right now —
+  whoever started it, from whatever browser — with how long it has been going.
+  It is read from the server, so it survives a browser refresh and is the same
+  in every session. While a student has a run in flight their row shows a
+  **Grading…** marker and the **Grade** button is disabled for them, on the
+  student's detail page **Grade**/**Regrade** are disabled with a banner
+  naming who started the run, and the pages refresh themselves when it
+  finishes. (The backend already held one grade lock per student — a duplicate
+  request 409s — so this makes that visible instead of letting you click into
+  an error.) There is no honest estimate of time *remaining*: a full run is
+  judged by Anthropic's batch API on their schedule, so elapsed time is shown.
 - **Grading history** (everyone, own grades only for students): each student's
-  detail page has a **Grading history** panel listing every grading run; click
-  **View** to open a read-only snapshot of that report exactly as it was then.
+  detail page has a **Grading history** panel listing every grading run — its
+  scope, who ran it, and the estimated **Claude cost** of that run (full runs
+  are billed at the 50% batch rate; runs from before cost tracking, and
+  all-deterministic runs, show a dash). Click **View** to open a read-only
+  snapshot of that report exactly as it was then. The Scope column
+  distinguishes a **Regrade** (the task card's Regrade button) from a
+  **Grade** (a single exercise picked from the Students tab).
 
 Exercise *authoring* stays in git (description.md, notes.md, rules); the
 `/prep` Claude Code skill still works locally as a dev fallback:
@@ -251,7 +271,9 @@ authentication** (scan the QR, enter a code, done; next sign-in then asks
 for a code). **Turn off** asks for confirmation first — disabling removes
 the enrolled authenticator immediately, and re-enabling means starting over
 with a new QR code. The Settings page also lets
-users change their password and set a display name — the **Account** and
+users change their password (a wrong current password says exactly that,
+rather than Cognito's misleading "Incorrect username or password") and set a
+display name — the **Account** and
 **Grading** panels sit side by side for staff, and each panel has a single
 **Save** button in its bottom-right corner that applies every changed field
 at once (MFA enrollment applies immediately and keeps its own buttons). The
@@ -269,7 +291,9 @@ DynamoDB row and applied per job via the `requested_by` email:
 - **SnapLogic credentials** (admins only): a personal username + password
   used by the gradings, syncs, and registration project checks that admin
   starts, replacing the shared `SNAPLOGIC_ADMIN_*` login. Only takes effect
-  as a complete pair.
+  as a complete pair. A stored password shows as dots in the field (the
+  value itself is never returned by the API), and **Clear** — which drops
+  both fields back to the shared credentials — asks for confirmation first.
 - **Anthropic API key** (admin or mentor): gradings the user starts are
   billed to their own key instead of the shared `ANTHROPIC_API_KEY`.
 - **AI judge model** (admin or mentor): the Claude model used for gradings
@@ -718,11 +742,15 @@ clicking the **Sync** icon in the toolbar.
 
 **Archive** (admin: tick one or more rows, then click the **Archive** icon in
 the toolbar) soft-deletes exercises: they stop being
-synced, graded and counted toward student totals, and show greyed-out with
-an `archived` badge. Nothing is removed from S3 — **Unarchive** restores them
-fully. The icon archives or unarchives depending on the selection (mixing
-archived and active rows disables it). **Delete** (admin, same toolbar) is
-the permanent alternative — see *Delete an exercise* above.
+synced, graded and counted toward student totals. Archived rows render
+greyed-out, sort to the bottom of the list whatever column is sorted, and show
+a plain dash in **Sync Status** (their stored status is moot once they're out
+of syncing). Nothing is removed from S3 — **Unarchive** restores them fully.
+The icon archives or unarchives depending on the selection (mixing archived and
+active rows disables it), and **both directions ask for confirmation** —
+unarchiving puts the exercise back into every student's denominator.
+**Delete** (admin, same toolbar) is the permanent alternative — see *Delete an
+exercise* above.
 
 ### Fallback: authoring in git
 

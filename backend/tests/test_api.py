@@ -591,6 +591,68 @@ def test_post_grading_with_task_passes_it_to_the_queue(aws, evaluator_dirs):
     assert payload["student"] == "Task Ed"
 
 
+def test_post_grading_carries_the_regrade_intent_flag(aws, evaluator_dirs):
+    """`regrade` records which button was clicked, nothing more.
+
+    It only rides along for a single-task run, and only when the caller asked
+    for it — a plain Grade (or a full run) leaves it off the row entirely, so
+    the grading history can say "Grade: …" instead of "Regrade: …".
+    """
+    (evaluator_dirs["exercises"] / "api_regrade_flag").mkdir(exist_ok=True)
+
+    def queued_payload() -> dict:
+        messages = aws["sqs"].receive_message(QueueUrl=os.environ["QUEUE_URL"])["Messages"]
+        payload = json.loads(messages[0]["Body"])
+        aws["sqs"].delete_message(
+            QueueUrl=os.environ["QUEUE_URL"], ReceiptHandle=messages[0]["ReceiptHandle"]
+        )
+        return payload
+
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/gradings",
+            body={
+                "student": "Regrade Kid",
+                "task": "api_regrade_flag",
+                "regrade": True,
+            },
+        )
+    )
+    assert resp["statusCode"] == 202
+    assert queued_payload()["regrade"] is True
+    # The JOB row drops the None-valued keys; a set flag is stored.
+    row = dynamo_table().get_item(
+        Key={"pk": f"JOB#{_body(resp)['id']}", "sk": "META"}
+    )["Item"]
+    assert row["regrade"] is True
+
+    # Same exercise, no flag → a Grade. (Different student: the first one's
+    # grade lock is still held.)
+    resp = _call(
+        api_event(
+            "POST",
+            "/v1/gradings",
+            body={"student": "Plain Kid", "task": "api_regrade_flag"},
+        )
+    )
+    assert resp["statusCode"] == 202
+    assert queued_payload().get("regrade") is None
+    row = dynamo_table().get_item(
+        Key={"pk": f"JOB#{_body(resp)['id']}", "sk": "META"}
+    )["Item"]
+    assert "regrade" not in row
+
+    # A full run can never be a "regrade of one exercise", flag or not.
+    resp = _call(
+        api_event(
+            "POST", "/v1/gradings", body={"student": "Full Kid", "regrade": True}
+        )
+    )
+    assert resp["statusCode"] == 202
+    assert queued_payload().get("regrade") is None
+
+
 def test_post_grading_with_tasks_subset_dedupes_and_queues(aws, evaluator_dirs):
     for slug in ("api_sub_a", "api_sub_b"):
         (evaluator_dirs["exercises"] / slug).mkdir(exist_ok=True)
@@ -2019,31 +2081,99 @@ def test_delete_exercise_leaves_unrelated_reports_alone(aws, evaluator_dirs):
 # ---------- new: activity, report versions, analytics ----------
 
 
-def test_list_jobs_newest_first_admin_only(aws):
+def _seed_job(
+    jid: str,
+    ts: str,
+    jtype: str = "grade",
+    *,
+    status: str = "succeeded",
+    target: str = "someone",
+    requested_by: str = "admin@example.com",
+) -> None:
+    dynamo_table().put_item(
+        Item={
+            "pk": f"JOB#{jid}",
+            "sk": "META",
+            "entity": "job",
+            "slug": jid,
+            "job_id": jid,
+            "job_type": jtype,
+            "status": status,
+            "target": target,
+            "requested_by": requested_by,
+            "created_at": ts,
+        }
+    )
+
+
+def test_list_jobs_newest_first_admin_sees_everyones(aws):
     for jid, ts, jtype in [
         ("j1", "2026-07-10T00:00:00Z", "grade"),
         ("j2", "2026-07-12T00:00:00Z", "sync"),
         ("j3", "2026-07-11T00:00:00Z", "grade"),
     ]:
-        dynamo_table().put_item(
-            Item={
-                "pk": f"JOB#{jid}",
-                "sk": "META",
-                "entity": "job",
-                "slug": jid,
-                "job_id": jid,
-                "job_type": jtype,
-                "status": "succeeded",
-                "target": "someone",
-                "created_at": ts,
-            }
-        )
-    resp = _call(api_event("GET", "/v1/jobs", groups=("mentor",)))
+        _seed_job(jid, ts, jtype, requested_by="someone.else@example.com")
+    resp = _call(api_event("GET", "/v1/jobs", groups=("admin",), email="boss@example.com"))
     assert resp["statusCode"] == 200
     jobs = _body(resp)["jobs"]
     assert [j["job_id"] for j in jobs] == ["j2", "j3", "j1"]  # newest first
     # students get 403
     assert _call(api_event("GET", "/v1/jobs", groups=("student",)))["statusCode"] == 403
+
+
+def test_list_jobs_scopes_a_mentor_to_their_own(aws):
+    _seed_job("mine1", "2026-07-12T00:00:00Z", requested_by="Mentor@Example.com")
+    _seed_job("mine2", "2026-07-10T00:00:00Z", requested_by="mentor@example.com")
+    _seed_job("theirs", "2026-07-11T00:00:00Z", requested_by="other@example.com")
+    _seed_job("nobody", "2026-07-09T00:00:00Z", requested_by="")
+
+    resp = _call(
+        api_event("GET", "/v1/jobs", groups=("mentor",), email="mentor@example.com")
+    )
+    assert resp["statusCode"] == 200
+    # Own jobs only, newest first; the email match is case-insensitive.
+    assert [j["job_id"] for j in _body(resp)["jobs"]] == ["mine1", "mine2"]
+
+    # An admin who is also in the mentor group is still unscoped.
+    both = _call(
+        api_event(
+            "GET", "/v1/jobs", groups=("admin", "mentor"), email="mentor@example.com"
+        )
+    )
+    assert len(_body(both)["jobs"]) == 4
+
+
+def test_list_active_jobs_is_never_scoped_to_the_caller(aws):
+    _seed_job("done", "2026-07-12T00:00:00Z", status="succeeded", target="jane-doe")
+    _seed_job("dead", "2026-07-12T00:00:00Z", status="failed", target="jane-doe")
+    _seed_job(
+        "queued1", "2026-07-13T00:00:00Z", status="queued", target="jane-doe",
+        requested_by="admin@example.com",
+    )
+    _seed_job(
+        "running1", "2026-07-14T00:00:00Z", status="running", target="john-roe",
+        requested_by="someone.else@example.com",
+    )
+    _seed_job(
+        "batch1", "2026-07-15T00:00:00Z", status="batch_processing", target="amy-poe",
+        requested_by="someone.else@example.com",
+    )
+
+    # A mentor must see OTHER people's in-flight jobs — that is the whole point
+    # (it's what stops a second grading for a student already being graded).
+    resp = _call(
+        api_event("GET", "/v1/jobs/active", groups=("mentor",), email="mentor@example.com")
+    )
+    assert resp["statusCode"] == 200
+    jobs = _body(resp)["jobs"]
+    assert [j["job_id"] for j in jobs] == ["batch1", "running1", "queued1"]
+    assert {j["target"] for j in jobs} == {"amy-poe", "john-roe", "jane-doe"}
+
+    # Students never see the job list at all.
+    assert (
+        _call(api_event("GET", "/v1/jobs/active", groups=("student",)))["statusCode"]
+        == 403
+    )
 
 
 def test_get_report_version_reads_that_versions_s3_copy(aws):

@@ -273,6 +273,11 @@ def _finalize_grade_rows(
     }
     if scope is not None and len(scope) > 1:
         report_row["tasks_scope"] = scope
+    # Caller intent, set only by a task card's Regrade button — it decides
+    # whether the grading-history Scope column reads "Regrade: …" or
+    # "Grade: …". Absent (not False) on every other run.
+    if job.get("regrade"):
+        report_row["regrade"] = True
     dynamo_table().put_item(Item=to_dynamo(report_row))
     student_row = {
         "pk": f"STUDENT#{student_slug}",

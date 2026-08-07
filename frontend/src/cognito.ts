@@ -71,16 +71,34 @@ export async function updateDisplayName(accessToken: string, name: string): Prom
   });
 }
 
+/** Change the signed-in user's password.
+ *
+ * Cognito answers a wrong `PreviousPassword` with the deliberately vague
+ * sign-in error "Incorrect username or password." — misleading here, where the
+ * username was never in question. Narrow it to the field that actually failed.
+ * The same exception code also covers a dead/invalid access token, which says
+ * something else entirely, so match on the message before rewriting it. */
 export async function changePassword(
   accessToken: string,
   previous: string,
   proposed: string,
 ): Promise<void> {
-  await call("ChangePassword", {
-    AccessToken: accessToken,
-    PreviousPassword: previous,
-    ProposedPassword: proposed,
-  });
+  try {
+    await call("ChangePassword", {
+      AccessToken: accessToken,
+      PreviousPassword: previous,
+      ProposedPassword: proposed,
+    });
+  } catch (e) {
+    if (
+      e instanceof CognitoError &&
+      e.code === "NotAuthorizedException" &&
+      /incorrect\s+username\s+or\s+password/i.test(e.message)
+    ) {
+      throw new CognitoError(e.code, "Incorrect current password.");
+    }
+    throw e;
+  }
 }
 
 /** Step 1 of TOTP enrollment: get a fresh shared secret (base32, ready to hand

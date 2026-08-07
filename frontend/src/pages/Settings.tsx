@@ -490,6 +490,9 @@ function GradingSettingsForm({
   const [model, setModel] = useState(settings.judge_model ?? settings.default_model);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  // Clearing the SnapLogic login silently moves every job this user starts
+  // onto the shared deployment credentials — confirm before doing it.
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   const usernameDirty = isAdmin && username.trim() !== (settings.snaplogic_username ?? "");
   const passwordDirty = isAdmin && password !== "";
@@ -529,15 +532,27 @@ function GradingSettingsForm({
     }
   };
 
+  // Runs inside the confirmation dialog, so it deliberately does NOT go
+  // through `push`: a throw keeps the dialog open with the real error, and a
+  // success closes it.
   const clearSnapLogic = async () => {
-    if (
-      await push(
-        { snaplogic_username: null, snaplogic_password: null },
-        "SnapLogic credentials cleared — jobs you start use the shared credentials again.",
-      )
-    ) {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await api.updateSettings(token, {
+        snaplogic_username: null,
+        snaplogic_password: null,
+      });
+      onSaved(r.settings);
       setUsername("");
       setPassword("");
+      setConfirmingClear(false);
+      setNote({
+        ok: true,
+        text: "SnapLogic credentials cleared — jobs you start use the shared credentials again.",
+      });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -583,7 +598,7 @@ function GradingSettingsForm({
               autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={settings.snaplogic_password_set ? "•••••••• (saved)" : ""}
+              placeholder={settings.snaplogic_password_set ? "••••••••" : ""}
             />
           </div>
           {hasStoredCreds && (
@@ -591,12 +606,31 @@ function GradingSettingsForm({
               <button
                 type="button"
                 className="btn"
-                onClick={() => void clearSnapLogic()}
+                onClick={() => setConfirmingClear(true)}
                 disabled={busy}
               >
                 Clear
               </button>
             </div>
+          )}
+          {confirmingClear && (
+            <ConfirmModal
+              title="Clear SnapLogic Credentials"
+              confirmLabel="Clear credentials"
+              busyLabel="Clearing…"
+              onConfirm={clearSnapLogic}
+              onClose={() => setConfirmingClear(false)}
+            >
+              <p>
+                Remove your stored SnapLogic username and password? Gradings,
+                syncs, and student registrations you start will run under the
+                shared deployment credentials again.
+              </p>
+              <p className="hint">
+                The password isn&rsquo;t recoverable — you&rsquo;d have to type
+                it in again to restore your personal login.
+              </p>
+            </ConfirmModal>
           )}
         </section>
       )}
