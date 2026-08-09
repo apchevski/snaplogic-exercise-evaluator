@@ -327,6 +327,294 @@ def test_delete_student_removes_login(aws, monkeypatch):
     assert cognito.list_users(UserPoolId=pool_id)["Users"] == []
 
 
+# ---------- editing a registered student (PUT /v1/students/{slug}) ----------
+
+
+def _register(name, **extra):
+    resp = _call(api_event("POST", "/v1/students", body={"student": name, **extra}))
+    assert resp["statusCode"] == 201, resp
+    return _body(resp)["student"]
+
+
+def test_update_student_renames_without_changing_slug(aws):
+    _register("Jhon Doe")
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/jhon-doe",
+            groups=("admin",),
+            email="boss@x.io",
+            body={"student": "John Doe"},
+        )
+    )
+    assert resp["statusCode"] == 200
+    student = _body(resp)["student"]
+    # The slug keys the report history and the stored reports — it must survive
+    # the rename, or the student's grades would be orphaned.
+    assert student["slug"] == "jhon-doe"
+    assert student["display_name"] == "John Doe"
+    assert student["updated_by"] == "boss@x.io"
+    listed = _body(_call(api_event("GET", "/v1/students")))["students"]
+    assert [(s["slug"], s["display_name"]) for s in listed] == [
+        ("jhon-doe", "John Doe")
+    ]
+
+
+def test_update_student_keeps_a_graded_card_intact(aws):
+    """A graded card carries Decimal points/counts — they must survive the
+    round-trip through the edit (and not blow up re-serializing)."""
+    _seed_student_card(
+        "graded-kid",
+        "Graded Kid",
+        points_earned=17,
+        points_possible=20,
+        counts={"pass": 2, "fail": 0, "missing": 0},
+        graded_at="2026-08-01T10:00:00Z",
+        report_json_key="students/graded-kid/v1/report.json",
+    )
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/graded-kid",
+            groups=("admin",),
+            body={"student": "Graded Kidd"},
+        )
+    )
+    assert resp["statusCode"] == 200
+    student = _body(resp)["student"]
+    assert student["display_name"] == "Graded Kidd"
+    assert student["points_earned"] == 17
+    assert student["counts"] == {"pass": 2, "fail": 0, "missing": 0}
+    # The report the card points at is untouched — the slug never moved.
+    assert student["report_json_key"] == "students/graded-kid/v1/report.json"
+
+
+def test_update_student_edits_space_and_project(aws):
+    _register("Move Kid", space="Old_Space", project="Old_Project")
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/move-kid",
+            groups=("admin",),
+            body={"space": "New_Space", "project": "New_Project"},
+        )
+    )
+    assert resp["statusCode"] == 200
+    student = _body(resp)["student"]
+    assert student["space"] == "New_Space"
+    assert student["project"] == "New_Project"
+    # An empty project goes back to "named after the student".
+    resp = _call(
+        api_event(
+            "PUT", "/v1/students/move-kid", groups=("admin",), body={"project": ""}
+        )
+    )
+    assert _body(resp)["student"]["project"] is None
+
+
+def test_update_student_reverifies_the_snaplogic_project(aws, monkeypatch):
+    import httpx
+
+    from evaluator.snaplogic_client import SnapLogicClient
+
+    monkeypatch.setattr(
+        SnapLogicClient, "list_assets", lambda self, org, ps, project: []
+    )
+    _snaplogic_env(monkeypatch)
+    _register("Typo Kid")
+    seen = {}
+
+    def missing(self, org, ps, project):
+        seen["path"] = (org, ps, project)
+        req = httpx.Request("GET", "https://example.snaplogic.test/x")
+        raise httpx.HTTPStatusError(
+            "404", request=req, response=httpx.Response(404, request=req)
+        )
+
+    monkeypatch.setattr(SnapLogicClient, "list_assets", missing)
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/typo-kid",
+            groups=("admin",),
+            body={"student": "Typo Kidd"},
+        )
+    )
+    assert resp["statusCode"] == 400
+    assert "No project named 'Typo Kidd'" in _body(resp)["message"]
+    # The probe used the edited name, and nothing was saved.
+    assert seen["path"] == ("TestOrg", "IWC_Support", "Typo Kidd")
+    listed = _body(_call(api_event("GET", "/v1/students")))["students"]
+    assert listed[0]["display_name"] == "Typo Kid"
+
+
+def test_update_student_email_only_edit_skips_the_project_check(aws, monkeypatch):
+    from evaluator.snaplogic_client import SnapLogicClient
+
+    monkeypatch.setattr(
+        SnapLogicClient, "list_assets", lambda self, org, ps, project: []
+    )
+    _snaplogic_env(monkeypatch)
+    _user_pool(monkeypatch)
+    _register("Steady Kid")
+    calls = []
+
+    def boom(self, org, ps, project):
+        calls.append(project)
+        raise AssertionError("email-only edits must not probe SnapLogic")
+
+    monkeypatch.setattr(SnapLogicClient, "list_assets", boom)
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/steady-kid",
+            groups=("admin",),
+            body={"email": "steady@example.com"},
+        )
+    )
+    assert resp["statusCode"] == 200
+    assert calls == []
+
+
+def test_update_student_adds_replaces_and_removes_the_login(aws, monkeypatch):
+    cognito, pool_id = _user_pool(monkeypatch)
+    _register("Login Edit")
+
+    def usernames():
+        return sorted(
+            u["Username"] for u in cognito.list_users(UserPoolId=pool_id)["Users"]
+        )
+
+    # Adding an email invites the student into the read-only group.
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/login-edit",
+            groups=("admin",),
+            body={"email": "First.Kid@Example.com"},
+        )
+    )
+    assert resp["statusCode"] == 200
+    assert _body(resp)["student"]["email"] == "first.kid@example.com"
+    assert usernames() == ["first.kid@example.com"]
+    groups = cognito.admin_list_groups_for_user(
+        Username="first.kid@example.com", UserPoolId=pool_id
+    )["Groups"]
+    assert [g["GroupName"] for g in groups] == ["student"]
+
+    # A different address replaces the login — the old one can no longer sign in.
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/login-edit",
+            groups=("admin",),
+            body={"email": "second.kid@example.com"},
+        )
+    )
+    assert resp["statusCode"] == 200
+    assert usernames() == ["second.kid@example.com"]
+
+    # Clearing it takes the login away and drops the attribute off the card
+    # (email keys the sparse gsi2 — an empty string there would be a bad key).
+    resp = _call(
+        api_event(
+            "PUT", "/v1/students/login-edit", groups=("admin",), body={"email": ""}
+        )
+    )
+    assert resp["statusCode"] == 200
+    assert "email" not in _body(resp)["student"]
+    assert usernames() == []
+    card = dynamo_table().get_item(
+        Key={"pk": "STUDENT#login-edit", "sk": "META"}
+    )["Item"]
+    assert "email" not in card
+
+
+def test_update_student_invalid_email_400_changes_nothing(aws, monkeypatch):
+    _user_pool(monkeypatch)
+    _register("Valid Kid", email="valid@example.com")
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/valid-kid",
+            groups=("admin",),
+            body={"email": "not-an-email"},
+        )
+    )
+    assert resp["statusCode"] == 400
+    listed = _body(_call(api_event("GET", "/v1/students")))["students"]
+    assert listed[0]["email"] == "valid@example.com"
+
+
+def test_update_student_taken_login_409_rolls_the_card_back(aws, monkeypatch):
+    cognito, pool_id = _user_pool(monkeypatch)
+    cognito.admin_create_user(
+        UserPoolId=pool_id,
+        Username="taken@example.com",
+        UserAttributes=[{"Name": "email", "Value": "taken@example.com"}],
+    )
+    _register("Rollback Kid")
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/rollback-kid",
+            groups=("admin",),
+            body={"student": "Renamed Kid", "email": "taken@example.com"},
+        )
+    )
+    assert resp["statusCode"] == 409
+    # The card write is undone too — the request fails as a unit.
+    listed = _body(_call(api_event("GET", "/v1/students")))["students"]
+    assert listed[0]["display_name"] == "Rollback Kid"
+    assert "email" not in listed[0]
+
+
+def test_update_student_requires_admin_and_an_existing_card(aws):
+    _register("Mentor Blocked")
+    resp = _call(
+        api_event(
+            "PUT",
+            "/v1/students/mentor-blocked",
+            groups=("mentor",),
+            body={"student": "Nope"},
+        )
+    )
+    assert resp["statusCode"] == 403
+    missing = _call(
+        api_event(
+            "PUT", "/v1/students/ghost", groups=("admin",), body={"student": "Ghost"}
+        )
+    )
+    assert missing["statusCode"] == 404
+
+
+def test_update_student_rejects_an_empty_name(aws):
+    _register("Named Kid")
+    resp = _call(
+        api_event(
+            "PUT", "/v1/students/named-kid", groups=("admin",), body={"student": "  "}
+        )
+    )
+    assert resp["statusCode"] == 400
+
+
+def test_update_student_409_while_a_grading_is_in_flight(aws):
+    _register("Busy Kid")
+    assert (
+        _call(api_event("POST", "/v1/gradings", body={"student": "Busy Kid"}))[
+            "statusCode"
+        ]
+        == 202
+    )
+    resp = _call(
+        api_event(
+            "PUT", "/v1/students/busy-kid", groups=("admin",), body={"student": "Calm Kid"}
+        )
+    )
+    # The worker rewrites the card when it finishes and would undo the edit.
+    assert resp["statusCode"] == 409
+
+
 def test_student_role_is_read_only(aws, evaluator_dirs):
     # The reads the student dashboard needs all answer.
     for path in ("/v1/students", "/v1/exercises"):
@@ -342,6 +630,7 @@ def test_student_role_is_read_only(aws, evaluator_dirs):
         ("POST", "/v1/syncs", {}),
         ("POST", "/v1/exercises", {}),
         ("PATCH", "/v1/students/x/report", {"overall_summary": "hi"}),
+        ("PUT", "/v1/students/x", {"student": "Y"}),
         ("DELETE", "/v1/students/x", None),
         ("DELETE", "/v1/exercises/x", None),
     ]
@@ -545,6 +834,33 @@ def test_post_grading_body_space_overrides_card(aws):
     messages = aws["sqs"].receive_message(QueueUrl=os.environ["QUEUE_URL"])["Messages"]
     payload = json.loads(messages[0]["Body"])
     assert payload["space"] == "One_Off_Space"
+
+
+def test_post_grading_addresses_a_renamed_student_by_slug(aws):
+    """A rename keeps the slug, so 'slug' — not the name — finds the card."""
+    dynamo_table().put_item(
+        Item={
+            "pk": "STUDENT#jhon-doe",
+            "sk": "META",
+            "entity": "student",
+            "slug": "jhon-doe",
+            "display_name": "John Doe",
+            "space": "Space_R",
+        }
+    )
+    resp = _call(
+        api_event(
+            "POST", "/v1/gradings", body={"student": "John Doe", "slug": "jhon-doe"}
+        )
+    )
+    assert resp["statusCode"] == 202
+    assert _body(resp)["target"] == "jhon-doe"
+    messages = aws["sqs"].receive_message(QueueUrl=os.environ["QUEUE_URL"])["Messages"]
+    payload = json.loads(messages[0]["Body"])
+    assert payload["student_slug"] == "jhon-doe"
+    # The card's stored name wins, so the run looks in the right project.
+    assert payload["student"] == "John Doe"
+    assert payload["space"] == "Space_R"
 
 
 def test_post_grading_then_duplicate_409(aws):

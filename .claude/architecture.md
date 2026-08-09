@@ -126,9 +126,22 @@ plan → judge → report loop the skill used to drive interactively.
   (backfilling legacy cards on their next grading).
   `SNAPLOGIC_STUDENT_PROJECT_SPACE` is only the default that prefills the
   dialog (exposed via `GET /v1/config`, which returns non-secret settings
-  only). There is deliberately no student-edit endpoint yet — a wrong
-  space/project at registration is caught by the SnapLogic
-  project-existence check; changing it later needs a new registration.
+  only).
+- **Editing a student keeps the slug (August 2026).** `PUT /v1/students/{slug}`
+  (admin only, Edit icon on the Students toolbar) partially updates the card's
+  name / email / space / project, re-running the same SnapLogic
+  project-existence check whenever the location moves and the same Cognito
+  login lifecycle as registration (add / replace / remove, card written first
+  and rolled back if Cognito refuses). It **never migrates the slug**: that
+  would mean copying every `REPORT#` row, rewriting `report_json_key`, and
+  moving all of `students/<slug>/` in S3 — so instead the slug stays the
+  student's identity (like an exercise slug outliving its title) and a rename
+  is a relabel that keeps their grades. The consequence is that the slug can no
+  longer be re-derived from the display name, so `POST /v1/gradings` takes an
+  optional `slug` and the SPA always sends it; the card's stored display name
+  then wins over the body's. The route 409s while a grading for that student is
+  in flight — the worker rewrites the card on completion and would undo the
+  edit.
 - **Auth**: Cognito (admin-created users; groups `admin`/`mentor`/`student`)
   + API Gateway JWT authorizer; the Lambda re-checks source IP and enforces
   the role matrix (mentors get 403 on /v1/syncs; `student` is read-only —

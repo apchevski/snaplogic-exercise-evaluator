@@ -111,6 +111,38 @@ describe("api.updateStudentReport", () => {
   });
 });
 
+describe("api.updateStudent", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("PUTs the partial body to the student's slug", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ student: {} }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Nulls are meaningful: they clear the project override and the login.
+    await api.updateStudent("tok", "jhon-doe", {
+      student: "John Doe",
+      space: "IWC_Support",
+      project: null,
+      email: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/students/jhon-doe",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          student: "John Doe",
+          space: "IWC_Support",
+          project: null,
+          email: null,
+        }),
+      }),
+    );
+  });
+});
+
 describe("api.startGrading", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -148,6 +180,22 @@ describe("api.startGrading", () => {
       "/v1/gradings",
       expect.objectContaining({
         body: JSON.stringify({ student: "Jane Doe", task: "task_01" }),
+      }),
+    );
+  });
+
+  it("sends the slug when the caller has it, so a renamed student still resolves", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ id: "j1" }), { status: 202 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.startGrading("tok", "John Doe", undefined, { slug: "jhon-doe" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/v1/gradings",
+      expect.objectContaining({
+        body: JSON.stringify({ student: "John Doe", slug: "jhon-doe" }),
       }),
     );
   });

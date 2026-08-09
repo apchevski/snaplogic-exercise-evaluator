@@ -1,10 +1,16 @@
 import { useState } from "react";
 
+import type { StudentMeta } from "../types";
+
 interface Props {
-  /** Default student project space (from GET /v1/config); prefills the field. */
+  /** Default student project space (from GET /v1/config); prefills the field
+   * when registering. Ignored in edit mode — the card's own space wins. */
   defaultSpace: string;
-  /** Registers the student; throws (rejects) on failure so the dialog can
-   * stay open and show the error. */
+  /** The student being edited; omit to register a new one. */
+  initial?: StudentMeta | null;
+  /** Registers or saves the student; throws (rejects) on failure so the dialog
+   * can stay open and show the error. In edit mode `name` is the new display
+   * name, and empty `project`/`email` mean "clear it". */
   onSubmit: (
     name: string,
     space?: string,
@@ -14,15 +20,21 @@ interface Props {
   onClose: () => void;
 }
 
-/** Registration dialog: student name plus the SnapLogic project space and
- * project the grader should look in. What's saved here dictates where every
- * later grading run searches for this student's pipelines. An optional email
- * additionally creates a read-only web login for the student. */
-export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [space, setSpace] = useState(defaultSpace);
-  const [project, setProject] = useState("");
+/** Student dialog, both modes: the student name plus the SnapLogic project
+ * space and project the grader should look in. What's saved here dictates
+ * where every later grading run searches for this student's pipelines. An
+ * optional email additionally gives the student a read-only web login.
+ *
+ * Editing takes the same fields as registering. The student's slug — the
+ * identity behind their grades, report history and detail-page URL — is not
+ * one of them: it's fixed at registration, so a rename relabels the student
+ * and keeps everything they've been graded on. */
+export function StudentModal({ defaultSpace, initial, onSubmit, onClose }: Props) {
+  const isEdit = !!initial;
+  const [name, setName] = useState(initial?.display_name ?? "");
+  const [email, setEmail] = useState(initial?.email ?? "");
+  const [space, setSpace] = useState(initial?.space ?? defaultSpace);
+  const [project, setProject] = useState(initial?.project ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,7 +71,11 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
         }}
       >
         <header>
-          <h2>Add Student</h2>
+          <h2>
+            {isEdit
+              ? `Edit Student — ${initial?.display_name ?? name}`
+              : "Add Student"}
+          </h2>
           <button
             type="button"
             className="modal-close"
@@ -82,6 +98,12 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
               placeholder="e.g. Jane Doe"
               autoFocus
             />
+            {isEdit && (
+              <p className="hint">
+                Renaming keeps everything this student has been graded on —
+                their grades, history and page all stay put.
+              </p>
+            )}
           </div>
           <div className="modal-field">
             <label>Student email</label>
@@ -92,9 +114,20 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
               placeholder="e.g. jane.doe@example.com"
             />
             <p className="hint">
-              Add an email to give this student their own login. They&rsquo;ll
-              get a temporary password by email; once they sign in they can view
-              their grades, but can&rsquo;t change anything.
+              {isEdit ? (
+                <>
+                  Add an email to give this student their own login, or clear
+                  it to take the login away. A different address replaces the
+                  old login, and the student gets a new temporary password by
+                  email.
+                </>
+              ) : (
+                <>
+                  Add an email to give this student their own login. They&rsquo;ll
+                  get a temporary password by email; once they sign in they can
+                  view their grades, but can&rsquo;t change anything.
+                </>
+              )}
             </p>
           </div>
           <div className="modal-field">
@@ -126,9 +159,19 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
             </p>
           </div>
           <p className="hint">
-            Adding a student doesn&rsquo;t grade anything yet. We just check that
-            their SnapLogic project exists and add them to the dashboard, ready
-            to grade whenever you like.
+            {isEdit ? (
+              <>
+                Saving doesn&rsquo;t regrade anything. We just check that the
+                SnapLogic project still exists where you&rsquo;ve pointed it and
+                update the student — the next grading run looks there.
+              </>
+            ) : (
+              <>
+                Adding a student doesn&rsquo;t grade anything yet. We just check
+                that their SnapLogic project exists and add them to the
+                dashboard, ready to grade whenever you like.
+              </>
+            )}
           </p>
         </div>
         <footer>
@@ -140,7 +183,13 @@ export function AddStudentModal({ defaultSpace, onSubmit, onClose }: Props) {
             className="btn primary"
             disabled={!name.trim() || !space.trim() || busy}
           >
-            {busy ? "Adding…" : "Add Student"}
+            {isEdit
+              ? busy
+                ? "Saving…"
+                : "Save changes"
+              : busy
+                ? "Adding…"
+                : "Add Student"}
           </button>
         </footer>
       </form>

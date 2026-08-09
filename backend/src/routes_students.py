@@ -29,6 +29,7 @@ from .common import (
     cognito_client,
     data_bucket,
     dynamo_table,
+    from_dynamo,
     load_secrets_into_env,
     lock_key,
     public_item,
@@ -374,6 +375,106 @@ def post_student() -> Response:
         content_type="application/json",
         body=json.dumps({"student": public_item(row)}),
     )
+
+
+@app.put("/v1/students/<slug>")
+def put_student(slug: str) -> dict[str, Any]:
+    """Edit a registered student's details (admin only).
+
+    Partial update — only the keys present in the body are applied:
+      student   display name shown everywhere (the SnapLogic project name
+                falls back to it when 'project' is unset)
+      space     SnapLogic project space the student's work lives in
+      project   project name; null/"" restores the display-name default
+      email     read-only web login; null/"" removes it, a different address
+                replaces it (the old login is deleted, a new one invited)
+
+    The card's **slug never changes**: it keys the report history rows, the
+    stored report objects under students/<slug>/ and every grade-job row, so a
+    rename relabels the student rather than migrating their data. Grading
+    therefore addresses students by slug (POST /v1/gradings takes one) instead
+    of re-deriving it from the name.
+
+    Any change to name / space / project re-verifies that the SnapLogic project
+    exists at the new location, exactly like registration — a typo gets a clear
+    400 instead of a card every later grading run would fail on. 409 while a
+    grading for this student is queued or running: the worker rewrites the card
+    when it finishes and would undo the edit.
+    """
+    claims = _require_role(ROLE_ADMIN)
+    body = app.current_event.json_body or {}
+    table = dynamo_table()
+    card = table.get_item(Key={"pk": f"STUDENT#{slug}", "sk": "META"}).get("Item")
+    if not card:
+        raise NotFoundError(f"No student {slug!r}.")
+    _reject_active_job("grade", slug)
+
+    # from_dynamo first: a graded card carries Decimals (points, counts) that
+    # to_dynamo can't re-serialize. `card` itself stays as read, so the
+    # rollback below puts the row back exactly as DynamoDB had it.
+    merged: dict[str, Any] = from_dynamo(card)
+    display_name = str(card.get("display_name") or "")
+    if "student" in body:
+        display_name = str(body.get("student") or "").strip()
+        if not display_name:
+            raise BadRequestError("'student' must not be empty.")
+        merged["display_name"] = display_name
+    # An empty space falls back to the configured default, the same resolution
+    # registration does — the card always carries the value grading will use.
+    if "space" in body:
+        merged["space"] = _opt_str(body, "space") or _default_student_space()
+    if "project" in body:
+        merged["project"] = _opt_str(body, "project")
+
+    old_email = str(card.get("email") or "").strip().lower()
+    new_email = old_email
+    if "email" in body:
+        new_email = (_opt_str(body, "email") or "").lower()
+        if new_email and not _EMAIL_RE.match(new_email):
+            raise BadRequestError(f"{new_email!r} does not look like an email address.")
+    email_changed = new_email != old_email
+
+    # Only probe SnapLogic when the location actually moved — an email-only
+    # edit shouldn't pay for (or be blocked by) a project check.
+    if any(k in body for k in ("student", "space", "project")):
+        _verify_student_project(
+            str(merged.get("project") or "").strip() or display_name,
+            str(merged.get("space") or "").strip() or None,
+            _email(claims),
+        )
+
+    if new_email:
+        merged["email"] = new_email
+    else:
+        # `email` keys the sparse gsi2 — clearing it must drop the attribute
+        # entirely, not store an empty string.
+        merged.pop("email", None)
+    merged["updated_by"] = _email(claims)
+    merged["updated_at"] = utc_now_iso()
+
+    # Card first, then the login — and roll the card back if Cognito refuses,
+    # so the request fails as a unit and can simply be retried (same order and
+    # guarantee as registration).
+    table.put_item(Item=to_dynamo(merged))
+    if email_changed:
+        try:
+            if new_email:
+                _create_student_login(display_name, new_email)
+        except Exception:
+            table.put_item(Item=card)
+            raise
+        if old_email:
+            try:
+                _delete_student_login(old_email)
+            except Exception:
+                # A login the card no longer names could still sign in and
+                # read grades, so failing here means the edit didn't happen:
+                # undo the new login and the card, and let the caller retry.
+                if new_email:
+                    _delete_student_login(new_email)
+                table.put_item(Item=card)
+                raise
+    return {"student": public_item(merged)}
 
 
 

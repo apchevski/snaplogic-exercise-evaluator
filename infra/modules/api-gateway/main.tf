@@ -119,7 +119,8 @@ data "aws_iam_policy_document" "api" {
   }
   # POST /v1/students with an email invites the student into the pool's
   # read-only `student` group (Cognito emails the temporary password);
-  # DELETE /v1/students/{slug} removes that login again ("no tracks left").
+  # PUT /v1/students/{slug} adds, replaces or removes that login when the
+  # email is edited; DELETE /v1/students/{slug} removes it ("no tracks left").
   statement {
     sid = "CognitoStudentLogins"
     actions = [
@@ -130,7 +131,8 @@ data "aws_iam_policy_document" "api" {
     resources = [var.user_pool_arn]
   }
   # POST /v1/students checks the student's SnapLogic project exists before
-  # registering; the SnapLogic credentials live in the app secret.
+  # registering (PUT re-checks it when the name/space/project is edited); the
+  # SnapLogic credentials live in the app secret.
   statement {
     sid       = "Secret"
     actions   = ["secretsmanager:GetSecretValue"]

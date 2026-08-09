@@ -299,7 +299,18 @@ def _finalize_grade_rows(
     # Registration fields survive the card refresh (see POST /v1/students).
     # "email" marks the student's web login — losing it on a regrade would
     # orphan the Cognito user when the student is later deleted.
-    for carry in ("registered_by", "registered_at", "email"):
+    # "updated_by"/"updated_at" record who last edited the registration (PUT
+    # /v1/students/{slug}); a grading run doesn't undo that edit — it grades
+    # the space/project the edit chose — so it must not erase who made it.
+    # (Report-edit provenance is deliberately NOT carried: a run rewrites the
+    # AI text it stamped, so "edited by X" genuinely stops being true.)
+    for carry in (
+        "registered_by",
+        "registered_at",
+        "email",
+        "updated_by",
+        "updated_at",
+    ):
         if meta.get(carry):
             student_row[carry] = meta[carry]
     dynamo_table().put_item(Item=to_dynamo(student_row))

@@ -343,6 +343,9 @@ def test_grade_preserves_registration_fields_on_student_card(aws, monkeypatch):
             "project": "Project X",
             "registered_by": "mentor@x.io",
             "registered_at": "2026-07-01T00:00:00+00:00",
+            # …and edited later (PUT /v1/students/{slug}).
+            "updated_by": "boss@x.io",
+            "updated_at": "2026-08-05T00:00:00+00:00",
         }
     )
 
@@ -360,6 +363,10 @@ def test_grade_preserves_registration_fields_on_student_card(aws, monkeypatch):
     assert meta["points_earned"] == 52
     assert meta["registered_by"] == "mentor@x.io"
     assert meta["registered_at"] == "2026-07-01T00:00:00+00:00"
+    # A grading run doesn't undo a registration edit — it grades the
+    # space/project that edit chose — so it must not erase who made it.
+    assert meta["updated_by"] == "boss@x.io"
+    assert meta["updated_at"] == "2026-08-05T00:00:00+00:00"
     # The job carried no space/project, so the registered ones survive.
     assert meta["space"] == "Space X"
     assert meta["project"] == "Project X"

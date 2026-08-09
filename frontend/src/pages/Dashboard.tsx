@@ -9,11 +9,17 @@ import {
 } from "../activeJobs";
 import { api, pollJob } from "../api";
 import { useCanGrade, useIsAdmin, useToken } from "../auth";
-import { AddStudentModal } from "../components/AddStudentModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { GradeScopeModal } from "../components/GradeScopeModal";
-import { IconDownload, IconGrade, IconPlus, IconTrash } from "../components/icons";
+import {
+  IconDownload,
+  IconEdit,
+  IconGrade,
+  IconPlus,
+  IconTrash,
+} from "../components/icons";
 import { StatusPill } from "../components/StatusPill";
+import { StudentModal } from "../components/StudentModal";
 import {
   PagerFooter,
   Panel,
@@ -150,6 +156,8 @@ export default function Dashboard() {
   const [sort, setSort] = useState<SortState>({ key: "points", dir: "desc" });
   const [perPage, setPerPage] = useState(25);
   const [adding, setAdding] = useState(false);
+  // The student the admin-only Edit dialog is open on.
+  const [editing, setEditing] = useState<StudentMeta | null>(null);
   const [defaultSpace, setDefaultSpace] = useState("");
   // Grade-scope picker: which student a grading is being configured for.
   const [scopeFor, setScopeFor] = useState<{ name: string; slug: string } | null>(null);
@@ -220,7 +228,9 @@ export default function Dashboard() {
       const key = slugHint ?? studentName;
       setError(null);
       try {
-        const { id } = await api.startGrading(token, studentName, tasks ?? undefined);
+        const { id } = await api.startGrading(token, studentName, tasks ?? undefined, {
+          slug: slugHint,
+        });
         // Show it in the "Gradings in Progress" panel immediately instead of
         // waiting out the poll interval.
         refreshActiveGradings();
@@ -273,6 +283,30 @@ export default function Dashboard() {
   const registerOnly = useCallback(
     async (studentName: string, space?: string, project?: string, email?: string) => {
       await api.registerStudent(token, studentName, space, project, email);
+      void refresh();
+    },
+    [token, refresh],
+  );
+
+  // Save the Edit dialog (admin only). Every field is sent so clearing one
+  // clears it server-side: null resets the project to the display-name
+  // default and drops the student's login. The slug stays as registered, so
+  // a renamed student keeps their grades and history. Errors propagate to the
+  // dialog, which stays open and shows them.
+  const saveStudent = useCallback(
+    async (
+      target: StudentMeta,
+      studentName: string,
+      space?: string,
+      project?: string,
+      email?: string,
+    ) => {
+      await api.updateStudent(token, target.slug, {
+        student: studentName,
+        space,
+        project: project ?? null,
+        email: email ?? null,
+      });
       void refresh();
     },
     [token, refresh],
@@ -459,7 +493,7 @@ export default function Dashboard() {
         title="Student Grades of All Projects"
         hint={
           canGrade
-            ? "Every graded student project. Click a column header to sort, or a student's name for their detailed evaluation. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade and Remove toolbar icons — hover an icon for its name. Grading one student opens the exercise picker; grading several runs all exercises for each. The download icon exports the roster (as shown) to CSV."
+            ? "Every graded student project. Click a column header to sort, or a student's name for their detailed evaluation. Tick one or more rows (the checkbox in the header selects the whole page) to enable the Grade, Edit and Remove toolbar icons — hover an icon for its name. Grading one student opens the exercise picker; grading several runs all exercises for each. Edit works on one student at a time and changes their name, email, project space or project — never their grades. The download icon exports the roster (as shown) to CSV."
             : "Every graded student project. Click a column header to sort. Click your own name to open your detailed evaluation — other students' detail pages stay private."
         }
         toolbar={
@@ -500,6 +534,27 @@ export default function Dashboard() {
                 >
                   <IconGrade size={18} />
                 </button>
+                {isAdmin && (
+                  <button
+                    className="tool-btn"
+                    onClick={() =>
+                      selectedStudents.length === 1 && setEditing(selectedStudents[0])
+                    }
+                    disabled={selectedStudents.length !== 1 || selectedBusy}
+                    title={
+                      selectedStudents.length === 0
+                        ? "Edit — select a student first"
+                        : selectedStudents.length > 1
+                          ? "Edit — only one student can be edited at a time"
+                          : selectedBusy
+                            ? `Edit — a grading is already running for ${selectedStudents[0].display_name}. Wait for it to finish.`
+                            : "Edit the selected student"
+                    }
+                    aria-label="Edit selected student"
+                  >
+                    <IconEdit size={18} />
+                  </button>
+                )}
                 {isAdmin && (
                   <button
                     className="tool-btn danger"
@@ -744,10 +799,21 @@ export default function Dashboard() {
       </Panel>
 
       {adding && (
-        <AddStudentModal
+        <StudentModal
           defaultSpace={defaultSpace}
           onSubmit={registerOnly}
           onClose={() => setAdding(false)}
+        />
+      )}
+
+      {editing && isAdmin && (
+        <StudentModal
+          defaultSpace={defaultSpace}
+          initial={editing}
+          onSubmit={(name, space, project, email) =>
+            saveStudent(editing, name, space, project, email)
+          }
+          onClose={() => setEditing(null)}
         />
       )}
 

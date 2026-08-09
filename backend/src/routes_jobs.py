@@ -113,19 +113,26 @@ def post_grading() -> Response:
     STUDENT card) dictate where the run looks for the student's pipelines;
     body 'space' overrides the card for one run, and the env default fills
     the gap for cards registered before spaces were stored.
+
+    Optional 'slug' addresses the STUDENT card directly. It matters after a
+    rename (PUT /v1/students/{slug} keeps the slug and changes the name), where
+    re-deriving the slug from the name would miss the card and grade into a new
+    one. When it resolves, the card's stored display name wins over the body's
+    — the card is the source of truth for where the student's work lives.
     """
     claims = _require_role(ROLE_ADMIN, ROLE_MENTOR)
     body = app.current_event.json_body or {}
     student = str(body.get("student") or "").strip()
     if not student:
         raise BadRequestError("Body must include a non-empty 'student'.")
-    student_slug = slugify(student)
+    student_slug = _opt_str(body, "slug") or slugify(student)
     card = from_dynamo(
         dynamo_table()
         .get_item(Key={"pk": f"STUDENT#{student_slug}", "sk": "META"})
         .get("Item")
         or {}
     )
+    student = str(card.get("display_name") or "").strip() or student
     task = (str(body.get("task")).strip() or None) if body.get("task") else None
     tasks: list[str] | None = None
     if body.get("tasks") is not None:
