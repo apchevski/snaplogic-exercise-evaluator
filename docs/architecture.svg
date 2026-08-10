@@ -1,0 +1,185 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" width="1280" height="760" font-family="-apple-system, 'Segoe UI', system-ui, sans-serif" role="img" aria-label="Architecture diagram: the browser reaches CloudFront and API Gateway behind an IP allowlist and a Cognito login check; the API Lambda queues grade and sync jobs on SQS; the worker Lambda runs free deterministic checks, calls the SnapLogic REST API read-only and the Claude API in batches, and reads and writes DynamoDB, S3, and Secrets Manager over a shared state plane.">
+  <title>SnapLogic Exercise Evaluator — cloud architecture</title>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#43598F"/>
+    </marker>
+    <marker id="arrAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#B45D12"/>
+    </marker>
+  </defs>
+
+  <!-- opaque ground: keeps the diagram legible on both light and dark README themes -->
+  <rect x="0" y="0" width="1280" height="760" fill="#F2F5F9"/>
+
+  <!-- ================= zones ================= -->
+  <g font-size="10" font-weight="700" letter-spacing="1.2" fill="#5A6B85">
+    <rect x="16"   y="40" width="184" height="416" rx="6" fill="#EAF0F7" stroke="#D4DEEA"/>
+    <text x="30" y="58">CLIENT</text>
+    <rect x="248"  y="40" width="208" height="416" rx="6" fill="#EAF0F7" stroke="#D4DEEA"/>
+    <text x="262" y="58">EDGE &amp; AUTH</text>
+    <rect x="504"  y="40" width="208" height="416" rx="6" fill="#EAF0F7" stroke="#D4DEEA"/>
+    <text x="518" y="58">API PLANE</text>
+    <rect x="760"  y="40" width="208" height="416" rx="6" fill="#EAF0F7" stroke="#D4DEEA"/>
+    <text x="774" y="58">GRADING PLANE</text>
+    <rect x="1024" y="40" width="240" height="416" rx="6" fill="#FDF8F1" stroke="#EADFCB"/>
+    <text x="1038" y="58" fill="#96702F">EXTERNAL SERVICES</text>
+    <rect x="504"  y="528" width="760" height="172" rx="6" fill="#EAF0F7" stroke="#D4DEEA"/>
+    <text x="518" y="546">STATE &amp; SECRETS</text>
+  </g>
+
+  <!-- ================= arrows ================= -->
+  <g stroke="#43598F" stroke-width="2" fill="none">
+    <!-- browser → cloudfront → SPA bucket -->
+    <path d="M184 132 H244" marker-end="url(#arr)"/>
+    <path d="M352 182 V210" marker-end="url(#arr)"/>
+    <!-- browser → cognito (sign-in) -->
+    <path d="M76 234 V368 H260" marker-end="url(#arr)"/>
+    <!-- browser → API Gateway, over the top: the SPA calls /v1 directly -->
+    <path d="M108 106 V82 H608 V102" marker-end="url(#arr)"/>
+    <!-- API Gateway → API Lambda → SQS → worker -->
+    <path d="M608 182 V222" marker-end="url(#arr)"/>
+    <path d="M696 268 H728 V126 H772" marker-end="url(#arr)"/>
+    <path d="M816 166 V272" marker-end="url(#arr)"/>
+    <!-- worker → external services -->
+    <path d="M952 306 H988 V148 H1020" marker-end="url(#arr)"/>
+    <!-- state plane: one shared bus, both Lambdas on it -->
+    <path d="M600 492 H1140"/>
+    <path d="M600 492 V316" marker-start="url(#arr)" marker-end="url(#arr)"/>
+    <path d="M864 492 V388" marker-start="url(#arr)" marker-end="url(#arr)"/>
+    <path d="M632 492 V568" marker-end="url(#arr)"/>
+    <path d="M888 492 V568" marker-end="url(#arr)"/>
+  </g>
+  <g stroke="#43598F" stroke-width="2" fill="none" stroke-dasharray="5 4">
+    <!-- cognito verifies the JWT for the gateway -->
+    <path d="M440 344 H476 V138 H516" marker-end="url(#arr)"/>
+    <!-- the app provisions student logins -->
+    <path d="M552 312 V440 H352 V410" marker-end="url(#arr)"/>
+    <!-- one failed receive → DLQ; paid jobs never auto-retry -->
+    <path d="M898 166 V194" marker-end="url(#arr)"/>
+    <!-- full run is two-phase: submit, then a delayed collect message -->
+    <path d="M790 276 V170" marker-end="url(#arr)"/>
+    <!-- secrets read at runtime by both Lambdas -->
+    <path d="M1140 572 V498" marker-end="url(#arr)"/>
+    <!-- presigned file transfers bypass the API entirely -->
+    <path d="M44 234 V740 H888 V682" marker-end="url(#arr)"/>
+  </g>
+  <!-- the only paid AI call -->
+  <path d="M952 344 H1020" stroke="#B45D12" stroke-width="2.5" fill="none" marker-end="url(#arrAmber)"/>
+
+  <!-- ================= arrow labels ================= -->
+  <g font-size="10.5" fill="#5A6B85">
+    <text x="206" y="124">SPA</text>
+    <text x="360" y="204">OAC</text>
+    <text x="96" y="358">sign-in · Hosted UI</text>
+    <text x="380" y="98" text-anchor="middle" font-size="11" font-weight="600" fill="#2563C4">REST /v1 · Bearer JWT</text>
+    <text x="616" y="210">invoke</text>
+    <text x="492" y="240" transform="rotate(-90 492 240)" text-anchor="middle">checks the token</text>
+    <text x="410" y="430" text-anchor="middle">student logins</text>
+    <text x="746" y="200" transform="rotate(-90 746 200)" text-anchor="middle">job msg</text>
+    <text x="778" y="220" transform="rotate(-90 778 220)" text-anchor="middle">re-enqueue +60 s</text>
+    <text x="1006" y="230" transform="rotate(-90 1006 230)" text-anchor="middle">GET-only</text>
+    <text x="994" y="332" text-anchor="middle" fill="#B45D12" font-weight="600">judge</text>
+    <text x="1000" y="478" text-anchor="middle">both Lambdas · read + write</text>
+    <text x="624" y="520" text-anchor="end">cards · jobs · locks</text>
+    <text x="896" y="520">reports · exercises · inputs</text>
+    <text x="1148" y="520">creds at runtime</text>
+    <text x="440" y="730" text-anchor="middle">presigned uploads / downloads — bypass the API</text>
+  </g>
+
+  <!-- ================= boxes ================= -->
+  <g>
+    <!-- Browser -->
+    <rect x="32" y="106" width="152" height="128" rx="6" fill="#FFF" stroke="#17263F" stroke-width="1.5"/>
+    <text x="108" y="132" text-anchor="middle" font-size="13.5" font-weight="650" fill="#17263F">Browser</text>
+    <text x="108" y="150" text-anchor="middle" font-size="10.5" fill="#5A6B85">VPN / office IPs only</text>
+    <g font-size="10" font-weight="600">
+      <rect x="48" y="164" width="50" height="20" rx="10" fill="#EDF1F7" stroke="#C7D2E0"/>
+      <text x="73" y="178" text-anchor="middle" fill="#26334A">admin</text>
+      <rect x="104" y="164" width="56" height="20" rx="10" fill="#EDF1F7" stroke="#C7D2E0"/>
+      <text x="132" y="178" text-anchor="middle" fill="#26334A">mentor</text>
+      <rect x="48" y="192" width="56" height="20" rx="10" fill="#EDF1F7" stroke="#C7D2E0"/>
+      <text x="76" y="206" text-anchor="middle" fill="#26334A">student</text>
+    </g>
+
+    <!-- CloudFront -->
+    <rect x="264" y="106" width="176" height="76" rx="6" fill="#FFF" stroke="#17263F" stroke-width="1.5"/>
+    <text x="352" y="132" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">CloudFront</text>
+    <text x="352" y="152" text-anchor="middle" font-size="10.5" fill="#5A6B85">blocks unknown IPs</text>
+    <text x="352" y="170" text-anchor="middle" font-size="10.5" fill="#5A6B85">serves the dashboard</text>
+
+    <!-- SPA bucket -->
+    <rect x="264" y="214" width="176" height="64" rx="6" fill="#FFF" stroke="#17263F" stroke-width="1.5"/>
+    <text x="352" y="240" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">S3 · SPA bucket</text>
+    <text x="352" y="260" text-anchor="middle" font-size="10.5" fill="#5A6B85">the dashboard files</text>
+
+    <!-- Cognito -->
+    <rect x="264" y="318" width="176" height="88" rx="6" fill="#FFF" stroke="#17263F" stroke-width="1.5"/>
+    <text x="352" y="346" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">Cognito user pool</text>
+    <text x="352" y="366" text-anchor="middle" font-size="10.5" fill="#5A6B85">login page · invite only</text>
+    <text x="352" y="384" text-anchor="middle" font-size="10.5" fill="#5A6B85">admin, mentor, student</text>
+
+    <!-- API Gateway -->
+    <rect x="520" y="106" width="176" height="76" rx="6" fill="#FFF" stroke="#17263F" stroke-width="1.5"/>
+    <text x="608" y="132" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">API Gateway</text>
+    <text x="608" y="152" text-anchor="middle" font-size="10.5" fill="#5A6B85">rejects bad tokens</text>
+    <text x="608" y="170" text-anchor="middle" font-size="10.5" fill="#5A6B85">on every request</text>
+
+    <!-- API Lambda -->
+    <rect x="520" y="226" width="176" height="86" rx="6" fill="#FFF" stroke="#2563C4" stroke-width="2"/>
+    <text x="608" y="254" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">API Lambda</text>
+    <text x="608" y="274" text-anchor="middle" font-size="10.5" fill="#5A6B85">handles every endpoint</text>
+    <text x="608" y="292" text-anchor="middle" font-size="10.5" fill="#5A6B85">re-checks role and IP</text>
+
+    <!-- SQS -->
+    <rect x="776" y="106" width="176" height="60" rx="6" fill="#FFF" stroke="#17263F" stroke-width="1.5"/>
+    <text x="864" y="130" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">SQS job queue</text>
+    <text x="864" y="148" text-anchor="middle" font-size="10.5" fill="#5A6B85">grade + sync jobs</text>
+
+    <!-- DLQ -->
+    <rect x="844" y="198" width="108" height="52" rx="6" fill="#F4F6F9" stroke="#C4CBD6" stroke-width="1.5"/>
+    <text x="898" y="216" text-anchor="middle" font-size="11.5" font-weight="650" fill="#667180">DLQ</text>
+    <text x="898" y="231" text-anchor="middle" font-size="9.5" fill="#667180">failed jobs land here</text>
+    <text x="898" y="243" text-anchor="middle" font-size="9.5" fill="#667180">never retried</text>
+
+    <!-- Worker -->
+    <rect x="776" y="276" width="176" height="106" rx="6" fill="#FFF" stroke="#2563C4" stroke-width="2"/>
+    <text x="864" y="304" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">Worker Lambda</text>
+    <text x="864" y="324" text-anchor="middle" font-size="10.5" fill="#5A6B85">free checks, then Claude</text>
+    <text x="864" y="342" text-anchor="middle" font-size="10.5" fill="#5A6B85">one student at a time</text>
+    <text x="864" y="360" text-anchor="middle" font-size="10.5" fill="#5A6B85">15 minutes per run</text>
+
+    <!-- SnapLogic -->
+    <rect x="1040" y="106" width="208" height="86" rx="6" fill="#FFF" stroke="#96702F" stroke-width="1.5"/>
+    <text x="1144" y="134" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">SnapLogic REST API</text>
+    <text x="1144" y="154" text-anchor="middle" font-size="10.5" fill="#5A6B85">read only — never writes</text>
+    <text x="1144" y="172" text-anchor="middle" font-size="10.5" fill="#5A6B85">pipelines, files, tasks</text>
+
+    <!-- Claude -->
+    <rect x="1040" y="276" width="208" height="106" rx="6" fill="#FBF3E9" stroke="#B45D12" stroke-width="2"/>
+    <text x="1144" y="304" text-anchor="middle" font-size="13" font-weight="650" fill="#B45D12">Claude API — Sonnet 5</text>
+    <text x="1144" y="324" text-anchor="middle" font-size="10.5" fill="#8A6636">batched — half price</text>
+    <text x="1144" y="342" text-anchor="middle" font-size="10.5" fill="#8A6636">grading rules are cached</text>
+    <text x="1144" y="360" text-anchor="middle" font-size="10.5" fill="#8A6636">users can pick model + key</text>
+
+    <!-- DynamoDB -->
+    <rect x="520" y="572" width="224" height="106" rx="6" fill="#FFF" stroke="#17263F" stroke-width="1.5"/>
+    <text x="632" y="600" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">DynamoDB · one table</text>
+    <text x="632" y="620" text-anchor="middle" font-size="10.5" fill="#5A6B85">students, reports, jobs, locks</text>
+    <text x="632" y="638" text-anchor="middle" font-size="10.5" fill="#5A6B85">exercises · user settings</text>
+    <text x="632" y="656" text-anchor="middle" font-size="10.5" fill="#5A6B85">backed up · delete-protected</text>
+
+    <!-- S3 data -->
+    <rect x="776" y="572" width="224" height="106" rx="6" fill="#FFF" stroke="#17263F" stroke-width="1.5"/>
+    <text x="888" y="600" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">S3 · data bucket</text>
+    <text x="888" y="620" text-anchor="middle" font-size="10.5" fill="#5A6B85">reports, exercises, inputs</text>
+    <text x="888" y="638" text-anchor="middle" font-size="10.5" fill="#5A6B85">every version kept</text>
+    <text x="888" y="656" text-anchor="middle" font-size="10.5" fill="#5A6B85">reports never change</text>
+
+    <!-- Secrets -->
+    <rect x="1032" y="572" width="216" height="86" rx="6" fill="#FFF" stroke="#17263F" stroke-width="1.5"/>
+    <text x="1140" y="600" text-anchor="middle" font-size="13" font-weight="650" fill="#17263F">Secrets Manager</text>
+    <text x="1140" y="620" text-anchor="middle" font-size="10.5" fill="#5A6B85">SnapLogic login</text>
+    <text x="1140" y="638" text-anchor="middle" font-size="10.5" fill="#5A6B85">shared Claude key</text>
+  </g>
+</svg>
