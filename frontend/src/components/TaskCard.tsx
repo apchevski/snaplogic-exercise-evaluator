@@ -1,4 +1,5 @@
-// Port of renderTask() from the static dashboard (evaluator/ui.py).
+// Originally ported from renderTask() in the static dashboard generator
+// (evaluator/ui.py), which was removed once this SPA replaced it.
 import type { ReactNode } from "react";
 
 import { taskProvenance } from "../types";

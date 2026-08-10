@@ -26,8 +26,9 @@ services:
     env_file:
       - .env
     # Default CMD from Dockerfile: backend.src.api.handler
-    # No EVALUATOR_* overrides: the api only reads the image's baked-in
-    # exercises, and the code defaults already resolve there.
+    # No EVALUATOR_* overrides: the code defaults resolve to the image's
+    # exercises/ dir. Note the image carries only general_evaluation_rules.md —
+    # authored exercise content comes from S3 (see backend/src/content.py).
 
   worker:
     image: snaplogic-exercise-evaluator:latest

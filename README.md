@@ -94,14 +94,12 @@ flowchart LR
 │   ├── 📁 bootstrap/ *(creates the Terraform state bucket)*  
 │   ├── 📁 environments/production/  
 │   └── 📁 modules/ *(one per AWS service)*  
-├── 📁 exercises/ *(seed content — S3 is the source of truth)*  
-│   ├── general_evaluation_rules.md *(universal rules, each with a point value)*  
-│   └── 📁 task_01_generate_csv_report/ *(description.md, notes.md, task.json, resources/)*  
+├── 📁 exercises/  
+│   └── general_evaluation_rules.md *(universal rules, each with a point value —  
+│       the only exercise file in git; the rest are authored in the UI and live in S3)*  
 ├── 📁 schemas/ *(structured-output schemas for the judge)*  
 ├── 📁 .github/workflows/ *(deploy-backend, deploy-frontend, deploy-infra)*  
-├── 📁 .claude/ *(operating rules, conventions, design notes)*  
-├── Dockerfile *(one image, two entry points: api and worker)*  
-└── SOLUTION_OVERVIEW.md *(full map of the system)*
+└── Dockerfile *(one image, two entry points: api and worker)*
 
 ## What I Used
 
@@ -289,9 +287,9 @@ Reports are versioned in S3 rather than overwritten, so every grading run a
 student has ever had stays viewable. Combined with the edit audit log, that means
 you can always answer "who changed this score, and when".
 
-[SOLUTION_OVERVIEW.md](SOLUTION_OVERVIEW.md) is the full map of the system, and
-[.claude/](.claude/) holds the design rationale and the conventions I follow while
-working on it.
+Design rationale and the conventions I follow while working on this live in
+`.claude/`, which is kept out of git — it is local development tooling and is
+excluded from the deployed image.
 
 ---
 

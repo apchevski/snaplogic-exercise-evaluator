@@ -293,7 +293,7 @@ def list_tasks() -> list[str]:
 def list_exercise_folders() -> list[str]:
     """Return every child folder under exercises/, regardless of task.json.
 
-    Used by /grade and sync to discover folders that exist on disk but
+    Used by grading and sync to discover folders that exist on disk but
     haven't been registered yet (no task.json). list_tasks() filters
     those out; this one doesn't.
     """
