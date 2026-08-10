@@ -12,9 +12,11 @@
 #   - cli service:    entrypoint overridden to python; runs sync/run commands
 #
 # Contents: evaluator/ (hard gates + runners) + backend/ (API + worker handlers)
-# + schemas/ (structured outputs) + exercises/ (authored content: descriptions,
-# notes, task.json). Generated artifacts (solution.json, expected/, grades/)
-# are gitignored and fetched at runtime from S3 (cloud) or bind mounts (local).
+# + schemas/ (structured outputs) + exercises/general_evaluation_rules.md (the
+# judge's universal rulebook). Everything else exercise-related — authored
+# content (description.md, notes.md, resources/) and generated artifacts
+# (task.json, solution.json, expected/, grades/) — is fetched at runtime from
+# S3 (cloud) or bind mounts (local).
 #
 # The image sets NO EVALUATOR_* vars: evaluator.config's package-relative
 # defaults resolve to the baked-in copies (correct for read-only consumers
@@ -34,13 +36,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY requirements.txt ${LAMBDA_TASK_ROOT}/requirements.txt
 RUN pip install -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
-# Copy source + authored exercise content. Generated artifacts (solution.json,
-# solution.cache.json, expected/) are excluded by .dockerignore and fetched
-# at runtime (S3 in cloud, bind mounts locally).
+# Copy source + the judge's rulebook. Exercise folders are NOT copied: their
+# authored content is created in the web UI and canonical in S3, and the
+# worker overlays the whole exercises/ S3 prefix onto this tree before every
+# job (S3Store.materialize_exercises). general_evaluation_rules.md is the one
+# exception — nothing uploads it to S3 and no UI edits it, so git → image is
+# its only delivery path.
 COPY evaluator/ ${LAMBDA_TASK_ROOT}/evaluator/
 COPY backend/ ${LAMBDA_TASK_ROOT}/backend/
 COPY schemas/ ${LAMBDA_TASK_ROOT}/schemas/
-COPY exercises/ ${LAMBDA_TASK_ROOT}/exercises/
+COPY exercises/general_evaluation_rules.md ${LAMBDA_TASK_ROOT}/exercises/
 
 # Default entry point: the API Lambda handler.
 # Worker Lambda overrides this via Terraform's image_config.

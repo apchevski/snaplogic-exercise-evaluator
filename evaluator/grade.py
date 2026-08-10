@@ -1,6 +1,8 @@
-"""Grading orchestrator for the `/grade` skill.
+"""Deterministic grading orchestrator.
 
-Two subcommands, both designed so the `/grade` skill prompt can stay small:
+Three subcommands. `evaluator.runner` drives `plan` and `report` in-process
+for both the cloud worker and the local `python -m evaluator run` twin;
+they remain separately invocable for debugging a single stage:
 
     python -m evaluator.grade plan <student> [--space <project_space>]
         Resolves the student's project, iterates registered exercises, runs the
@@ -20,7 +22,7 @@ Two subcommands, both designed so the `/grade` skill prompt can stay small:
         Re-reads the rendered `## Overall` paragraph from report.md and writes
         it into `overall_summary` in report.json.
 
-This module never calls an LLM. Judgment still lives in the `/grade` skill.
+This module never calls an LLM. Judgment lives in `evaluator.ai_judge`.
 """
 from __future__ import annotations
 
@@ -166,7 +168,7 @@ def cmd_plan(
     for folder in unregistered:
         reason = (
             f"No task.json in exercises/{folder}/. "
-            f"Run `/prep` to bootstrap it."
+            "Prep it from the Exercises page to bootstrap one."
         )
         entries.append({"slug": folder, "status": "needs_sync", "reason": reason})
         print(f"[{folder}] NEEDS SYNC — no task.json")
@@ -403,7 +405,7 @@ def _render_entry_section(entry: dict[str, Any]) -> tuple[str, str, int | None]:
             f"## {slug} — ⏳ NEEDS SYNC\n\n"
             f"**Points**: {_format_points(None)}\n\n"
             f"**Reason**: {entry.get('reason', 'Solution cache not ready.')}\n\n"
-            f"Run `/prep` to bootstrap or refresh, then re-run `/grade`.",
+            "Prep this exercise from the Exercises page, then grade again.",
             "needs_sync",
             None,
         )
@@ -892,8 +894,9 @@ def cmd_report(
 def cmd_sync_overall(student: str) -> int:
     """Read ## Overall from report.md and write it to overall_summary in report.json.
 
-    Called by the /grade skill after Claude has filled in the Overall
-    paragraph (full mode only). Idempotent; safe to re-run.
+    Retained for manual repair of a report whose JSON drifted from its
+    markdown; `evaluator.runner` now fills Overall in-process for full and
+    task-scoped runs alike. Idempotent; safe to re-run.
     """
     report_dir = _student_report_dir(student)
     md_path = report_dir / "report.md"
@@ -941,7 +944,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="evaluator.grade",
-        description="Orchestrate /grade: plan tasks, then render the report.",
+        description="Orchestrate grading: plan tasks, then render the report.",
     )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 

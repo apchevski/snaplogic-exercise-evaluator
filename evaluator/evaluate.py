@@ -6,7 +6,7 @@ Flow (file_writer):
      If anything is missing or the sidecar signature does not match the
      remote pipeline's timestamp, raise SolutionNotReadyError — the
      caller (grade or CLI) surfaces this as `needs_sync`. Refreshing the
-     cache is sync's job, not /grade's.
+     cache is sync's job, not grading's.
   2. Fetch the student pipeline definition from SnapLogic.
   3. Hard gate: pipeline names must match (procedural — fail = 0 pts, no AI).
   4. Hard gate: the student's output file(s) exist in SLDB. If the 404
@@ -43,7 +43,8 @@ with 0 points and exit 1. "Deliverable not submitted" cases
 artifact and exit 4 — treated the same as "no matching pipeline" (not
 graded, excluded from totals).
 
-This module never calls an LLM. Judgment lives in `.claude/skills/grade/`.
+This module never calls an LLM. Judgment lives in `evaluator.ai_judge`,
+which the worker invokes on the bundles this module writes.
 """
 from __future__ import annotations
 
@@ -92,6 +93,16 @@ READY_MARKER = "READY_FOR_AI_REVIEW"
 # hard-gate failures (pipeline name wrong, Triggered Task missing, no
 # output file uploaded) are procedural — 0 points, no AI.
 _OUTPUT_MISMATCH_GATES = frozenset({"output_match", "triggered_task_responses_match"})
+
+
+class GeneralRulesMissingError(Exception):
+    """The judge's universal rulebook is absent or empty.
+
+    Fatal on purpose. Every deduction must cite a rule with an explicit
+    point value, so an empty rulebook is not a degraded run — the judge
+    would find nothing to cite against and hand every student full marks
+    while the grading pipeline reported success.
+    """
 
 
 def run_evaluation(
@@ -573,7 +584,7 @@ def _write_ai_context(
         "task_slug": task.slug,
         "task_type": task.task_type,
         "exercise_description": _read_text(task.description_path),
-        "general_rules": _read_text(EXERCISES_DIR / "general_evaluation_rules.md"),
+        "general_rules": _read_general_rules(),
         "task_notes": _read_text(task.task_notes_path),
         "solution_flow": flow_order_summary(solution_definition),
         "student_flow": flow_order_summary(student_definition),
@@ -596,12 +607,34 @@ def _read_text(p: Path) -> str:
     return p.read_text(encoding="utf-8")
 
 
+def _read_general_rules() -> str:
+    """Read the universal rulebook, refusing to grade without it.
+
+    Ships in the Docker image from git (``exercises/general_evaluation_rules.md``)
+    and may be overridden by the same key under the ``exercises/`` S3 prefix,
+    which the worker overlays before every job. Unlike description.md /
+    notes.md there is no UI editor and no uploader for it, so a missing file
+    means a packaging regression rather than an unauthored exercise.
+    """
+    path = EXERCISES_DIR / "general_evaluation_rules.md"
+    rules = _read_text(path)
+    if not rules.strip():
+        raise GeneralRulesMissingError(
+            f"General evaluation rules are missing or empty at {path}. "
+            "Grading cannot proceed: every deduction must cite a rule with an "
+            "explicit point value, so continuing would award full marks to "
+            "every student. Check that the Docker image still copies "
+            "exercises/general_evaluation_rules.md."
+        )
+    return rules
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="evaluator",
         description=(
             "Deterministic evaluator: runs hard gates and emits an AI "
-            "context bundle for the /grade skill to judge. Never calls an LLM."
+            "context bundle for evaluator.ai_judge to judge. Never calls an LLM."
         ),
     )
     parser.add_argument(

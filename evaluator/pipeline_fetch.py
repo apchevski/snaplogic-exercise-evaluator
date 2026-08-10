@@ -503,7 +503,7 @@ def _do_refresh_triggered(
         out_path = expected_dir / f"{req.name}.json"
         # The triggered-task feed always serves JSON for these exercises,
         # but we write bytes verbatim so we never reformat / re-encode
-        # the response. Comparisons in /grade use structural JSON diff.
+        # the response. Grading comparisons use structural JSON diff.
         out_path.write_bytes(body)
 
     return (

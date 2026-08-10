@@ -38,7 +38,7 @@ survey/sync re-reads the heading, looks up the pipeline live, fetches
 the definition, and compares against task.json. If anything drifted —
 pipeline renamed, writer filename renamed, snap structure changed,
 cache stale, expected outputs missing — sync detects it and updates
-local files to match SnapLogic. /grade trusts the resulting
+local files to match SnapLogic. Grading trusts the resulting
 local files as ground truth.
 """
 from __future__ import annotations
@@ -390,7 +390,7 @@ def _classify_file_writer(
         output_filenames=registered,
         proposed_writer_filenames=writers,
         task_type=TASK_TYPE_FILE_WRITER,
-        reason="Solution cache fresh and reconciled with SnapLogic; ready for /grade.",
+        reason="Solution cache fresh and reconciled with SnapLogic; ready for grading.",
     )
 
 
