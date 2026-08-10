@@ -1,6 +1,7 @@
 # .dockerignore for the unified Dockerfile (Lambda image).
-# Keeps committed task.json in the image — cloud sync needs the
-# hand-authored triggered_task registrations as its starting point.
+# The image carries source + exercises/general_evaluation_rules.md only.
+# All other exercise content (authored and generated alike) is canonical in
+# S3 and overlaid at run time by S3Store.materialize_exercises.
 
 .env
 .env.local
@@ -26,10 +27,12 @@ env/
 # Generated/mutable data — produced at run time (S3-materialized on Lambda).
 .tmp/
 grades/
-ui/
-exercises/*/solution.json
-exercises/*/solution.cache.json
-exercises/*/expected/
+# Everything under exercises/ except the rulebook the Dockerfile copies by
+# name. Do NOT write `exercises/*/` — Docker runs filepath.Clean on each
+# pattern, which strips the trailing slash and would exclude the rulebook
+# too, breaking the COPY.
+exercises/*
+!exercises/general_evaluation_rules.md
 
 # Not part of the runtime image.
 backend/tests/
@@ -38,7 +41,6 @@ infra/
 docker-compose.yml
 Dockerfile
 .dockerignore
-requirements-dev.txt
 .vscode/
 .idea/
 *.swp
