@@ -11,39 +11,18 @@ never fit. The deterministic part answers "did it work", and the model answers
 
 Everything runs in AWS. There is nothing to install to use it.
 
-```mermaid
-flowchart LR
-    U["Mentor · Admin · Student<br/>(VPN or office IP)"]
+![Architecture: the browser reaches CloudFront and API Gateway behind an IP allowlist; the API Lambda queues jobs on SQS; the worker Lambda runs the hard gates, calls SnapLogic read-only and the Claude API, and writes reports to DynamoDB and S3.](docs/architecture.svg)
 
-    subgraph AWS["AWS"]
-        direction LR
-        CF["CloudFront<br/>IP allowlist"]
-        SPA[("S3<br/>React SPA")]
-        AGW["API Gateway<br/>/v1"]
-        COG["Cognito<br/>admin · mentor · student"]
-        API["API Lambda"]
-        SQS["SQS"]
-        WRK["Worker Lambda<br/>container image"]
-        DDB[("DynamoDB<br/>students · jobs · reports")]
-        DATA[("S3<br/>exercises · reports")]
-        SEC["Secrets Manager"]
-    end
+Solid lines are the request and data path, dashed lines are secondary paths
+(dead-letter, the delayed collect message, credential reads, presigned
+transfers), and the amber line is the only paid AI call. The horizontal line
+across the state plane is a shared bus: both Lambdas read and write DynamoDB and
+S3 and read Secrets Manager. Every box is Terraform-managed under `infra/`.
 
-    SL["SnapLogic REST API<br/>GET only"]
-    CLAUDE["Claude API<br/>Sonnet 5"]
-
-    U --> CF --> SPA
-    U --> AGW
-    AGW -.JWT.-> COG
-    AGW --> API
-    API --> DDB
-    API --> SQS --> WRK
-    WRK --> DDB
-    WRK --> DATA
-    WRK -.credentials.-> SEC
-    WRK --> SL
-    WRK --> CLAUDE
-```
+A full grading run is two-phase, which is why the worker has an arrow back to
+the queue: it submits every exercise as one Message Batches request, re-enqueues
+a `collect` message on a 60-second delay, and finalizes the report once the batch
+has ended. Single-task regrades take the synchronous path instead.
 
 ## Table of Contents
 
@@ -59,7 +38,7 @@ flowchart LR
 ## Prerequisites
 
 **Accounts & Services**:
-- AWS Account (everything is deployed here — around $0.50–0.70/month at this scale)
+- AWS Account (everything is deployed here, around $0.50-0.70/month at this scale)
 - Anthropic API Key (pays for the AI judging)
 - SnapLogic Org with an admin login that can read both the solution and the student project spaces
 - GitHub Repository (CI/CD authenticates through OIDC, so there are no stored keys)
@@ -69,11 +48,11 @@ flowchart LR
 - Terraform CLI
 - Docker (the Lambdas are container images, and the first one has to be pushed by hand)
 
-**Values you need on hand** — these go into Secrets Manager and Terraform variables:
+**Values you need on hand** (these go into Secrets Manager and Terraform variables):
 - `SNAPLOGIC_BASE_URL`, admin username and password
-- `SNAPLOGIC_ORG_NAME` — the top-level org, first segment of every lookup
-- `SNAPLOGIC_SOLUTION_PROJECT_SPACE` and `SNAPLOGIC_SOLUTION_PROJECT` — where the solution pipelines live
-- `SNAPLOGIC_STUDENT_PROJECT_SPACE` — the default space for students
+- `SNAPLOGIC_ORG_NAME`: the top-level org, first segment of every lookup
+- `SNAPLOGIC_SOLUTION_PROJECT_SPACE` and `SNAPLOGIC_SOLUTION_PROJECT`: where the solution pipelines live
+- `SNAPLOGIC_STUDENT_PROJECT_SPACE`: the default space for students
 - The office or VPN IP ranges allowed to reach the dashboard
 
 *⚠️ The dashboard is IP-restricted at CloudFront. If you deploy without a correct allowlist you will lock yourself out of your own site.*
@@ -88,15 +67,15 @@ flowchart LR
 │   └── store.py *(S3 and local artifact I/O)*  
 ├── 📁 backend/  
 │   ├── 📁 src/ *(API Lambda routes + the SQS worker)*  
-│   └── 📁 tests/ *(pytest — AWS and Claude are stubbed, so it costs nothing)*  
+│   └── 📁 tests/ *(pytest, with AWS and Claude stubbed, so it costs nothing)*  
 ├── 📁 frontend/ *(React SPA: login, roster, student detail, exercises)*  
 ├── 📁 infra/  
 │   ├── 📁 bootstrap/ *(creates the Terraform state bucket)*  
 │   ├── 📁 environments/production/  
 │   └── 📁 modules/ *(one per AWS service)*  
 ├── 📁 exercises/  
-│   └── general_evaluation_rules.md *(universal rules, each with a point value —  
-│       the only exercise file in git; the rest are authored in the UI and live in S3)*  
+│   └── general_evaluation_rules.md *(universal rules, each with a point value.  
+│       The only exercise file in git; the rest are authored in the UI and live in S3)*  
 ├── 📁 schemas/ *(structured-output schemas for the judge)*  
 ├── 📁 .github/workflows/ *(deploy-backend, deploy-frontend, deploy-infra)*  
 └── Dockerfile *(one image, two entry points: api and worker)*
@@ -141,10 +120,15 @@ SnapLogic Dashboard so it feels familiar to the people using it. Auth goes
 through the Cognito Hosted UI with PKCE.
 
 ### AI
+<img src="https://static.freepnglogo.com/images/all_img/claude-ai-logo-d862.svg" alt="Terraform" width="160" height="40"/>
 
-Claude Sonnet 5 does the judging, called with structured outputs so the response
-is a scored evaluation rather than prose to parse. The rules are prompt-cached,
-and full grading runs go through the Message Batches API at half price.
+Claude does the judging (Sonnet 5 by default), with Sonnet 4.6, Opus 4.8, and
+Haiku 4.5 selectable per user on the Settings page, or set for the whole
+deployment through `JUDGE_MODEL`.   
+Whichever model runs, it is called with
+structured outputs so the response is a scored evaluation rather than prose to
+parse. The rules are prompt-cached, and full grading runs go through the Message
+Batches API at half price.
 
 ### CI/CD
 <p align="left">
@@ -153,7 +137,7 @@ and full grading runs go through the Message Batches API at half price.
     <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/githubactions/githubactions-original.svg" alt="GitHub Actions" width="40" height="40"/>
 </p>
 
-Three GitHub Actions workflows — backend, frontend, and infrastructure. Each one
+Three GitHub Actions workflows: backend, frontend, and infrastructure. Each one
 tests on every pull request and deploys on merge to `main`. Infrastructure
 applies pause for manual approval of the exact plan that was reviewed.
 
@@ -186,7 +170,7 @@ same points for everyone. Anything it notices that no rule covers goes under
 A student's total is always `(number of exercises) × 10`, so skipped exercises
 show up in the total.
 
-💡 Mentors and admins can edit an evaluation from the UI — the summary, the
+💡 Mentors and admins can edit an evaluation from the UI: the summary, the
 individual deductions, or the score itself. A typed score overrides the formula,
 is labelled *manually adjusted*, and is written to an audit log. Verdicts stay
 put, since they come from the deterministic checks.
@@ -195,23 +179,23 @@ put, since they come from the deterministic checks.
 
 Three roles, enforced by the API rather than by hiding buttons:
 
-- **Admin** — everything: grade, sync, author exercises, manage students.
-- **Mentor** — grade and view.
-- **Student** — read-only. Sees the roster as a leaderboard, their own detailed
+- **Admin** does everything: grade, sync, author exercises, manage students.
+- **Mentor** can grade and view.
+- **Student** is read-only. Sees the roster as a leaderboard, their own detailed
   grades, and the exercise catalog. Other students' reports are hidden in the UI
   and rejected by the server.
 
 Both tables use checkboxes and an icon toolbar. The main actions:
 
-1. **Grade** — tick a student, click Grade, and pick which exercises to run.
-2. **Regrade** — every task card can re-run just that one exercise and merge the
+1. **Grade**: tick a student, click Grade, and pick which exercises to run.
+2. **Regrade**: every task card can re-run just that one exercise and merge the
    result back into the student's report.
-3. **Add or edit a student** — name, optional email, and where their SnapLogic
+3. **Add or edit a student**: name, optional email, and where their SnapLogic
    project lives. The API verifies the project exists before saving, an email
    creates a read-only login for them, and renaming a student keeps their grades.
-4. **Sync** — refreshes an exercise's cached solution and expected output from
+4. **Sync**: refreshes an exercise's cached solution and expected output from
    SnapLogic. Free, no AI involved.
-5. **Activity Logs** — recent grade and sync jobs with status and cost. Admins
+5. **Activity Logs**: recent grade and sync jobs with status and cost. Admins
    see everyone's, mentors see their own.
 
 ⚠️ Grading *all* exercises goes through the Batch API: half the cost, but
@@ -228,22 +212,22 @@ Anything you don't set falls back to the shared deployment values.
 
 ## Managing Exercises
 
-S3 is the source of truth. Admins create and edit exercises in the UI — name,
+S3 is the source of truth. Admins create and edit exercises in the UI (name,
 description, optional AI guidance, task type, and any input files students need
-to download — then sync to pull in the solution and expected output.
+to download), then sync to pull in the solution and expected output.
 
 Task types:
-- **File writer, single output** — nothing to configure, sync works it out from
+- **File writer, single output**: nothing to configure, sync works it out from
   the writer snap.
-- **File writer, multiple outputs** — list the filenames.
-- **Triggered task** — the Triggered Task name plus one row per request scenario.
+- **File writer, multiple outputs**: list the filenames.
+- **Triggered task**: the Triggered Task name plus one row per request scenario.
 
 **Archive** takes an exercise out of syncing, grading, and student totals, and is
 reversible. **Delete** is permanent and also scrubs the exercise out of every
 student's current report.
 
 ⚠️ The `exercises/` folders in this repo are only a seed. Whatever is there
-graduates into S3 on its next sync, and from then on the S3 copy wins — editing
+graduates into S3 on its next sync, and from then on the S3 copy wins, so editing
 those files in git no longer changes anything.
 
 ## Deployment
@@ -288,7 +272,7 @@ student has ever had stays viewable. Combined with the edit audit log, that mean
 you can always answer "who changed this score, and when".
 
 Design rationale and the conventions I follow while working on this live in
-`.claude/`, which is kept out of git — it is local development tooling and is
+`.claude/`, which is kept out of git. It is local development tooling and is
 excluded from the deployed image.
 
 ---
